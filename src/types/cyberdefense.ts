@@ -1,6 +1,7 @@
 export type TabId = 
   | 'overview'
   | 'task-manager'
+  | 'bits'
   | 'timeline'
   | 'console'
   | 'deep-excision'

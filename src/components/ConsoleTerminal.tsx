@@ -85,6 +85,7 @@ export const ConsoleTerminal: React.FC<ConsoleTerminalProps> = ({
 
   const quickCommands = [
     { label: 'Deep Scan Kernel', cmd: 'scan --deep' },
+    { label: 'Traquer & Purger BITS (T1197)', cmd: 'bits' },
     { label: 'Audit Exclusions Defender', cmd: 'defendersync' },
     { label: 'Audit Vulnérabilités (Get-HotFix)', cmd: 'vulnscan' },
     { label: 'Parser EventLog (WinEvent)', cmd: 'eventlog' },

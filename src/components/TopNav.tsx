@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, Terminal, Download, Cpu, Activity, Network, Lock, FileCode, Archive, Clock } from 'lucide-react';
+import { Shield, Terminal, Download, Cpu, Activity, Network, Lock, FileCode, Archive, Clock, Radio } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
 interface TopNavProps {
@@ -60,6 +60,16 @@ export const TopNav: React.FC<TopNavProps> = ({
         >
           <Cpu className="w-3.5 h-3.5" />
           <span>Gestionnaire des Tâches</span>
+        </button>
+
+        <button
+          onClick={() => onSelectTab('bits')}
+          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+            activeTab === 'bits' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Radio className="w-3.5 h-3.5" />
+          <span>BITS Task Manager</span>
         </button>
 
         <button

@@ -30,6 +30,7 @@ import {
   DownloadCloud
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { BITSTaskManager } from './BITSTaskManager';
 
 interface TaskManagerLiveProps {
   onRunInConsole: (command: string) => void;
@@ -74,7 +75,7 @@ interface HardwareSpecsData {
 }
 
 export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'processes' | 'performance' | 'hardware'>('processes');
+  const [activeSubTab, setActiveSubTab] = useState<'processes' | 'performance' | 'hardware' | 'bits'>('processes');
   const [isLiveActive, setIsLiveActive] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [sortField, setSortField] = useState<'cpu' | 'ramMb' | 'name' | 'pid'>('cpu');
@@ -606,6 +607,18 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
         >
           <Server className="w-4 h-4" />
           <span>Spécifications Machine</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('bits')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            activeSubTab === 'bits'
+              ? 'bg-cyan-950 text-cyan-300 border border-cyan-800/80 font-bold'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Radio className="w-4 h-4 text-cyan-400" />
+          <span>Tâches BITS (Transferts C2)</span>
         </button>
       </div>
 
@@ -1377,6 +1390,13 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* SubTab: BITS Task Manager */}
+      {activeSubTab === 'bits' && (
+        <div className="pt-2">
+          <BITSTaskManager onRunInConsole={onRunInConsole} />
         </div>
       )}
     </div>

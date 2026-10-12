@@ -14,6 +14,7 @@ import { ScriptWorkshop } from './components/ScriptWorkshop';
 import { OverviewDashboard } from './components/OverviewDashboard';
 import { LogAnalyzer } from './components/LogAnalyzer';
 import { TaskManagerLive } from './components/TaskManagerLive';
+import { BITSTaskManager } from './components/BITSTaskManager';
 import { ThreatTimeline } from './components/ThreatTimeline';
 import { TabId, ConsoleLogMessage, ThreatItem } from './types/cyberdefense';
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
@@ -509,6 +510,10 @@ ${logs.map(l => `[${l.timestamp}] [${l.level}] ${l.tag ? `[${l.tag}] ` : ''}${l.
           <TaskManagerLive onRunInConsole={handleExecuteCommand} />
         )}
 
+        {activeTab === 'bits' && (
+          <BITSTaskManager onRunInConsole={handleExecuteCommand} />
+        )}
+
         {activeTab === 'console' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -567,6 +572,9 @@ ${logs.map(l => `[${l.timestamp}] [${l.level}] ${l.tag ? `[${l.tag}] ` : ''}${l.
           <div className="flex items-center gap-4 text-slate-400">
             <button onClick={handleDownloadZip} className="text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">
               Télécharger le ZIP
+            </button>
+            <button onClick={() => setActiveTab('bits')} className="hover:text-cyan-300 text-slate-300 font-medium transition-colors">
+              BITS Task Manager
             </button>
             <button onClick={() => setActiveTab('timeline')} className="hover:text-cyan-300 text-slate-300 font-medium transition-colors">
               Chronologie des Menaces

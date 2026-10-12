@@ -618,6 +618,21 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
             </div>
 
             <div
+              onClick={() => onNavigateTab('bits')}
+              className="p-3.5 bg-slate-950 border border-slate-800 hover:border-cyan-800 rounded-xl cursor-pointer transition-colors group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-xs text-cyan-300 group-hover:text-cyan-200">
+                  BITS Task Manager (T1197)
+                </span>
+                <ArrowRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-cyan-300 transition-transform group-hover:translate-x-1" />
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Traque et purge des transferts furtifs et de la persistance Background Intelligent Transfer Service.
+              </p>
+            </div>
+
+            <div
               onClick={() => onNavigateTab('deep-excision')}
               className="p-3.5 bg-slate-950 border border-slate-800 hover:border-cyan-800 rounded-xl cursor-pointer transition-colors group"
             >
