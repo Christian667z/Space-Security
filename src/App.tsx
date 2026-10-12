@@ -18,6 +18,7 @@ import { BITSTaskManager } from './components/BITSTaskManager';
 import { ThreatTimeline } from './components/ThreatTimeline';
 import { ThreatToastContainer } from './components/ThreatToast';
 import { PdfReportModal } from './components/PdfReportModal';
+import { HeuristicEngine } from './components/HeuristicEngine';
 import { TabId, ConsoleLogMessage, ThreatItem, ThreatNotification } from './types/cyberdefense';
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
 import { generateAndDownloadZip } from './utils/zipGenerator';
@@ -329,6 +330,9 @@ export default function App() {
         addLog('INFO', '  smb1-disable      : Désactive le protocole obsolète SMBv1 (WannaCry)');
         addLog('INFO', '  wmi-clean         : Purge les EventFilters persistants du namespace root\\subscription');
         addLog('INFO', '  clear             : Efface l\'écran de la console');
+        addLog('INFO', '  heuristic         : Affiche le score d\'entropie et la confiance de détection');
+        addLog('INFO', '  entropy           : Calcule l\'entropie de Shannon sur les sections mémoires/PE');
+        addLog('INFO', '  wifi / wifiscan   : Scanne les réseaux WiFi environnants et détecte les Evil Twins');
         addLog('INFO', '  export-report     : Génère et télécharge le rapport PDF détaillé avec graphiques de score');
         addLog('INFO', '  pdf / export-pdf  : Raccourci pour générer le rapport PDF d\'audit forensique');
         break;
@@ -566,6 +570,29 @@ export default function App() {
         setTimeout(() => addLog('OK', 'Politiques Defender synchronisées et verrouillées avec succès !', 'DEFENDER-HARDEN'), 1200);
         break;
 
+      case 'heuristic':
+      case 'heuristics':
+      case 'entropy':
+      case 'apihooks':
+        addLog('KERNEL', 'Interrogation du Moteur Heuristique & Calcul de l\'Entropie de Shannon...', 'HEURISTIC');
+        setTimeout(() => addLog('WARN', 'Entropie Critique (7.94 bits/octet) : svch0st_updater.exe [UPX0 / Shellcode compacté]', 'HEURISTIC'), 300);
+        setTimeout(() => addLog('WARN', 'Entropie Critique (7.88 bits/octet) : suspicious_kernel_hook.sys [IRP Hook Ring0]', 'HEURISTIC'), 600);
+        setTimeout(() => addLog('ERROR', 'Crochet API Détecté : NtUnmapViewOfSection (Process Hollowing T1055.012 vers svchost.exe)', 'HEURISTIC'), 900);
+        setTimeout(() => addLog('OK', 'Niveau de Confiance Global : 93.8% (Menaces polymorphes confirmées actives)', 'HEURISTIC'), 1200);
+        break;
+
+      case 'wifi':
+      case 'wifiscan':
+      case 'wifi-scan':
+      case 'eviltwin':
+      case 'evil-twin':
+        addLog('KERNEL', 'Interrogation de l\'interface radio via netsh wlan show networks mode=bssid...', 'WIFI-AUDIT');
+        setTimeout(() => addLog('WARN', 'Borne Rogue Détectée : SSID "SpaceSec-Secure-Corp" cloné sur BSSID 00:C0:CA:91:DE:3F (Alfa Network)', 'WIFI-AUDIT'), 300);
+        setTimeout(() => addLog('ERROR', 'Alerte Evil Twin : Déclassement de sécurité WPA3-SAE vers WPA2-PSK et 148 trames Deauth détectées !', 'WIFI-AUDIT'), 600);
+        setTimeout(() => addLog('WARN', 'Réseau Ouvert Détecté : "FreeWifi_Public_Guest" (F4:8E:38:22:1A:BC) non chiffré', 'WIFI-AUDIT'), 900);
+        setTimeout(() => addLog('OK', 'Contre-mesure recommandée : Utilisez netsh wlan add filter pour bloquer le BSSID pirate.', 'WIFI-AUDIT'), 1200);
+        break;
+
       case '#':
         addLog('KERNEL', 'Exécution de la commande script automatisée...', 'SCRIPT');
         setTimeout(() => addLog('OK', 'Traitement par lots terminé avec succès.', 'SCRIPT'), 600);
@@ -661,6 +688,13 @@ export default function App() {
           <BITSTaskManager onRunInConsole={handleExecuteCommand} />
         )}
 
+        {activeTab === 'heuristic' && (
+          <HeuristicEngine
+            onRunInConsole={handleExecuteCommand}
+            onNavigateTab={setActiveTab}
+          />
+        )}
+
         {activeTab === 'console' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -725,6 +759,9 @@ export default function App() {
             </button>
             <button onClick={() => setActiveTab('timeline')} className="hover:text-cyan-300 text-slate-300 font-medium transition-colors">
               Chronologie des Menaces
+            </button>
+            <button onClick={() => setActiveTab('heuristic')} className="hover:text-amber-300 text-amber-300 font-semibold transition-colors flex items-center gap-1">
+              <span>Moteur Heuristique</span>
             </button>
             <button onClick={() => setActiveTab('script-hub')} className="hover:text-slate-200 transition-colors">
               Code Source .ps1

@@ -21,6 +21,7 @@ import {
   ArrowRight,
   ExternalLink,
   FileText,
+  Binary,
 } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
@@ -155,6 +156,15 @@ export const TopNav: React.FC<TopNavProps> = ({
           icon: Clock,
           tag: 'TIMELINE',
           tagClass: 'text-indigo-400 bg-indigo-950/70 border-indigo-800/50',
+        },
+        {
+          id: 'heuristic',
+          title: 'Moteur Heuristique',
+          category: 'Entropie & API Hooks',
+          shortDesc: 'Scoring temps réel de l\'entropie de Shannon et interception des crochets API suspects.',
+          icon: Binary,
+          tag: 'HEURISTIQUE',
+          tagClass: 'text-amber-400 bg-amber-950/70 border-amber-800/50',
         },
         {
           id: 'console',
@@ -340,7 +350,7 @@ export const TopNav: React.FC<TopNavProps> = ({
                   Modules & Outils
                 </span>
                 <span className="hidden sm:inline-block px-1.5 py-0.2 font-mono text-[10px] rounded bg-slate-800 text-slate-300 border border-slate-700">
-                  10
+                  11
                 </span>
                 <ChevronDown
                   className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${

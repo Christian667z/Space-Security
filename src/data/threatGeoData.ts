@@ -210,8 +210,21 @@ export const DETECTED_MALICIOUS_ORIGINS: ThreatGeoLocation[] = [
   }
 ];
 
-// Target Protected System Location (Paris, France SOC / Endpoint)
-export const PROTECTED_SYSTEM_LOCATION = {
+export interface TargetHostLocation {
+  name: string;
+  ip: string;
+  city: string;
+  country: string;
+  countryCode: string;
+  latitude: number;
+  longitude: number;
+  isp?: string;
+  regionName?: string;
+  isRealDetected?: boolean;
+}
+
+// Target Protected System Location (Initial fallback before live IP geo resolution)
+export const PROTECTED_SYSTEM_LOCATION: TargetHostLocation = {
   name: 'Station Sécurisée SpaceSec (Endpoint)',
   ip: '192.168.1.42',
   city: 'Paris',
@@ -219,4 +232,6 @@ export const PROTECTED_SYSTEM_LOCATION = {
   countryCode: 'FR',
   latitude: 48.8566,
   longitude: 2.3522,
+  isp: 'Station Locale / SOC',
+  isRealDetected: false,
 };

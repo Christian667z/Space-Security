@@ -21,6 +21,7 @@ import {
   X,
   Info,
   FileText,
+  Binary,
 } from 'lucide-react';
 import { TabId, ThreatItem } from '../types/cyberdefense';
 import { ThreatHeatmap } from './ThreatHeatmap';
@@ -129,6 +130,14 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
             >
               <Clock className="w-3.5 h-3.5 text-cyan-400" />
               <span>Chronologie Visuelle des Menaces</span>
+            </button>
+
+            <button
+              onClick={() => onNavigateTab('heuristic')}
+              className="flex items-center gap-2 px-4 py-2 bg-amber-950/90 hover:bg-amber-900 border border-amber-700/80 text-amber-300 font-bold rounded-lg text-xs transition-colors shadow-sm"
+            >
+              <Binary className="w-3.5 h-3.5 text-amber-400" />
+              <span>Moteur Heuristique & Entropie</span>
             </button>
 
             <button
@@ -695,6 +704,22 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 Rejeu chronologique pas-à-pas du scan initial jusqu'à la remédiation et l'excision noyau.
+              </p>
+            </div>
+
+            <div
+              onClick={() => onNavigateTab('heuristic')}
+              className="p-3.5 bg-amber-950/30 border border-amber-800/70 hover:border-amber-500 rounded-xl cursor-pointer transition-colors group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-xs text-amber-300 group-hover:text-amber-200 flex items-center gap-1.5">
+                  <Binary className="w-3.5 h-3.5 text-amber-400" />
+                  Moteur Heuristique (Entropie & API Hooks)
+                </span>
+                <ArrowRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-amber-300 transition-transform group-hover:translate-x-1" />
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Scoring en temps réel de l'entropie de Shannon, crochets d'appels API NT suspects et confiance bayésienne.
               </p>
             </div>
 

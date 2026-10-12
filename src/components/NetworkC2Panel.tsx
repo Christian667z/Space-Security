@@ -3,6 +3,7 @@ import { Network, ShieldAlert, Globe, Server, AlertTriangle, ShieldCheck, Refres
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { NetworkConnectionItem } from '../types/cyberdefense';
 import { PortScanner } from './PortScanner';
+import { WiFiScanner } from './WiFiScanner';
 
 interface NetworkC2PanelProps {
   onRunInConsole: (command: string) => void;
@@ -535,6 +536,9 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole }
 
       {/* PortScanner Module: Local Open Ports & Listening Malicious Services */}
       <PortScanner onRunInConsole={onRunInConsole} />
+
+      {/* WiFi Scanner Module: Surrounding Wireless Networks, Unsecured APs & Evil Twin Detection */}
+      <WiFiScanner onRunInConsole={onRunInConsole} />
 
       {/* Lower Row: Named Pipes & HOSTS / Proxy Audit */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

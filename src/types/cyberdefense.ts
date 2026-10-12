@@ -3,12 +3,83 @@ export type TabId =
   | 'task-manager'
   | 'bits'
   | 'timeline'
+  | 'heuristic'
   | 'console'
   | 'deep-excision'
   | 'forensics'
   | 'network'
   | 'hardening'
   | 'script-hub';
+
+export interface EntropyMetric {
+  id: string;
+  target: string;
+  section: string;
+  process: string;
+  pid: number;
+  entropy: number; // 0.00 to 8.00 (Shannon entropy)
+  baseline: number;
+  deviation: number;
+  sizeBytes: number;
+  status: 'NORMAL' | 'ELEVATED' | 'CRITICAL_PACKED';
+  isObfuscated: boolean;
+  classification: string;
+}
+
+export interface SuspiciousApiCall {
+  id: string;
+  timestamp: string;
+  apiName: string;
+  callerProcess: string;
+  pid: number;
+  targetProcess?: string;
+  targetPid?: number;
+  category: 'INJECTION' | 'CREDENTIAL' | 'EVASION' | 'PERSISTENCE' | 'DISCOVERY';
+  riskScore: number; // 1-100
+  callCount: number;
+  ratePerSec: number;
+  mitreTechnique: string;
+  hookStatus: 'INTERCEPTED' | 'BLOCKED' | 'FLAGGED';
+  details: string;
+}
+
+export interface ThreatConfidenceItem {
+  id: string;
+  threatName: string;
+  targetPath: string;
+  confidence: number; // 0 - 100%
+  entropyScore: number; // 0 - 100
+  apiScore: number; // 0 - 100
+  behaviorScore: number; // 0 - 100
+  mitreAlignment: number; // 0 - 100
+  verdict: 'CONFIRMED_MALICIOUS' | 'HIGH_SUSPICION' | 'ELEVATED_RISK' | 'BENIGN';
+  primaryTechnique: string;
+  recommendedAction: string;
+  remediationCmd: string;
+}
+
+export interface WiFiNetworkItem {
+  id: string;
+  ssid: string;
+  bssid: string;
+  channel: number;
+  frequency: '2.4 GHz' | '5 GHz' | '6 GHz';
+  signalDbm: number;
+  signalPercent: number;
+  security: 'WPA3-SAE' | 'WPA2-Enterprise' | 'WPA2-PSK (AES)' | 'WEP' | 'OPEN_UNSECURED';
+  vendor: string;
+  isEvilTwin: boolean;
+  evilTwinReason?: string;
+  isUnsecured: boolean;
+  deauthFramesDetected: number;
+  status: 'LEGITIMATE' | 'SUSPECT_EVIL_TWIN' | 'UNSECURED_WARNING' | 'BLOCKED';
+  firstSeen: string;
+  recommendedAction: string;
+  mitreTechnique: string;
+  legitimateTwinBssid?: string;
+}
+
+
 
 export type TimelinePhase = 'SCAN' | 'DETECTION' | 'CONTAINMENT' | 'EXCISION' | 'HARDENING';
 
