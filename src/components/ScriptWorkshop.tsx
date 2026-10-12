@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { FileCode, Download, Copy, Check, Terminal, Shield, CheckCircle2, AlertTriangle, Cpu, Archive } from 'lucide-react';
+import { FileCode, Download, Copy, Check, Terminal, Shield, CheckCircle2, AlertTriangle, Cpu, Archive, Code } from 'lucide-react';
 import { BOOSTED_POWERSHELL_SCRIPT, ELEVATED_BATCH_LAUNCHER, EMERGENCY_SAFEBOOT_LAUNCHER } from '../data/powershellScript';
+import { CSHARP_EXTIRPATOR_CODE } from '../data/csharpExtirpator';
 import { generateAndDownloadZip } from '../utils/zipGenerator';
 
 interface ScriptWorkshopProps {
@@ -8,7 +9,7 @@ interface ScriptWorkshopProps {
 }
 
 export const ScriptWorkshop: React.FC<ScriptWorkshopProps> = ({ onDownloadZip }) => {
-  const [activeFile, setActiveFile] = useState<'ps1' | 'bat' | 'safeboot'>('ps1');
+  const [activeFile, setActiveFile] = useState<'ps1' | 'cs' | 'bat' | 'safeboot'>('ps1');
   const [copied, setCopied] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
 
@@ -27,12 +28,16 @@ export const ScriptWorkshop: React.FC<ScriptWorkshopProps> = ({ onDownloadZip })
 
   const currentContent = activeFile === 'ps1'
     ? BOOSTED_POWERSHELL_SCRIPT
+    : activeFile === 'cs'
+    ? CSHARP_EXTIRPATOR_CODE
     : activeFile === 'bat'
     ? ELEVATED_BATCH_LAUNCHER
     : EMERGENCY_SAFEBOOT_LAUNCHER;
 
   const currentFilename = activeFile === 'ps1'
     ? 'SpaceSecurity_ULTRA_v3_Kernel.ps1'
+    : activeFile === 'cs'
+    ? 'KernelFileExtirpator.cs'
     : activeFile === 'bat'
     ? 'RunAs_SpaceSecurity_Admin.bat'
     : 'Emergency_SafeBoot_Clean.bat';
@@ -165,6 +170,16 @@ export const ScriptWorkshop: React.FC<ScriptWorkshopProps> = ({ onDownloadZip })
               }`}
             >
               SpaceSecurity_ULTRA_v3_Kernel.ps1
+            </button>
+            <button
+              onClick={() => setActiveFile('cs')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors ${
+                activeFile === 'cs'
+                  ? 'bg-cyan-950 text-cyan-300 border border-cyan-800/80 font-bold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              KernelFileExtirpator.cs (C#)
             </button>
             <button
               onClick={() => setActiveFile('bat')}

@@ -1,5 +1,26 @@
-import React from 'react';
-import { Shield, ShieldAlert, Cpu, Network, Lock, Terminal, AlertTriangle, ArrowRight, CheckCircle2, Play, Download, Archive } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import {
+  Shield,
+  ShieldAlert,
+  Cpu,
+  Network,
+  Lock,
+  Terminal,
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  Play,
+  Download,
+  Archive,
+  Clock,
+  Zap,
+  Filter,
+  Search,
+  Flame,
+  ArrowUpDown,
+  X,
+  Info
+} from 'lucide-react';
 import { TabId, ThreatItem } from '../types/cyberdefense';
 import { ThreatHeatmap } from './ThreatHeatmap';
 
@@ -16,6 +37,48 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
   threats,
   onDownloadZip,
 }) => {
+  const [severityFilter, setSeverityFilter] = useState<'ALL' | 'CRITICAL' | 'HIGH' | 'MEDIUM'>('ALL');
+  const [searchThreatQuery, setSearchThreatQuery] = useState<string>('');
+  const [sortBySeverity, setSortBySeverity] = useState<boolean>(true);
+
+  // Counts by severity
+  const criticalCount = threats.filter(t => t.severity === 'CRITICAL').length;
+  const highCount = threats.filter(t => t.severity === 'HIGH').length;
+  const mediumCount = threats.filter(t => t.severity === 'MEDIUM').length;
+
+  const severityWeight: Record<string, number> = {
+    CRITICAL: 3,
+    HIGH: 2,
+    MEDIUM: 1,
+    LOW: 0,
+  };
+
+  // Filtered and sorted threat list
+  const displayedThreats = useMemo(() => {
+    return threats
+      .filter(threat => {
+        if (severityFilter !== 'ALL' && threat.severity !== severityFilter) {
+          return false;
+        }
+        if (searchThreatQuery.trim()) {
+          const q = searchThreatQuery.toLowerCase();
+          const matches =
+            threat.name.toLowerCase().includes(q) ||
+            threat.description.toLowerCase().includes(q) ||
+            threat.targetPath.toLowerCase().includes(q) ||
+            threat.mitreTechnique.toLowerCase().includes(q) ||
+            threat.category.toLowerCase().includes(q);
+          if (!matches) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBySeverity) {
+          return (severityWeight[b.severity] || 0) - (severityWeight[a.severity] || 0);
+        }
+        return 0;
+      });
+  }, [threats, severityFilter, searchThreatQuery, sortBySeverity]);
   return (
     <div className="space-y-6">
       {/* Hero Central Header */}
@@ -43,6 +106,14 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
             >
               <Archive className="w-3.5 h-3.5" />
               <span>Télécharger le Pack ZIP (.zip)</span>
+            </button>
+
+            <button
+              onClick={() => onNavigateTab('timeline')}
+              className="flex items-center gap-2 px-4 py-2 bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-700/80 text-cyan-300 font-bold rounded-lg text-xs transition-colors shadow-sm"
+            >
+              <Clock className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Chronologie Visuelle des Menaces</span>
             </button>
 
             <button
@@ -130,66 +201,380 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
       {/* Threat Heatmap: System Areas Visualizer (Kernel, Registry, Startup, Filesystem) */}
       <ThreatHeatmap onRunInConsole={onRunInConsole} />
 
+      {/* Visual Threat Timeline Mini Preview & Gateway */}
+      <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-sm font-bold text-white tracking-tight">
+              Chronologie des Menaces : Séquence Détection & Remédiation
+            </h3>
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800/60">
+              T0 → T+25s
+            </span>
+          </div>
+
+          <button
+            onClick={() => onNavigateTab('timeline')}
+            className="flex items-center gap-1.5 text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition-colors shrink-0 group"
+          >
+            <span>Ouvrir la Chronologie Interactive</span>
+            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+          </button>
+        </div>
+
+        {/* Milestone Steps Visual Strip */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
+          <div 
+            onClick={() => onNavigateTab('timeline')}
+            className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-cyan-800 cursor-pointer transition-colors space-y-1 group"
+          >
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-cyan-400 font-bold">1. SCAN T0</span>
+              <span className="text-emerald-400">OK</span>
+            </div>
+            <div className="text-xs font-semibold text-slate-200 group-hover:text-cyan-300">
+              Élévation Privilèges NT
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono">
+              SeDebug & SeTakeOwnership
+            </div>
+          </div>
+
+          <div 
+            onClick={() => onNavigateTab('timeline')}
+            className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-amber-800 cursor-pointer transition-colors space-y-1 group"
+          >
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-amber-400 font-bold">2. DÉTECTION T+2s</span>
+              <span className="text-amber-400">LOLBin</span>
+            </div>
+            <div className="text-xs font-semibold text-slate-200 group-hover:text-amber-300">
+              Abus certutil.exe
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono">
+              Téléchargement furtif en cache
+            </div>
+          </div>
+
+          <div 
+            onClick={() => onNavigateTab('timeline')}
+            className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-rose-800 cursor-pointer transition-colors space-y-1 group"
+          >
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-rose-400 font-bold">3. ALERTE T+5s</span>
+              <span className="text-rose-400">C2 Beacon</span>
+            </div>
+            <div className="text-xs font-semibold text-slate-200 group-hover:text-rose-300">
+              Balisage Port 4444
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono">
+              185.220.101.4 svch0st
+            </div>
+          </div>
+
+          <div 
+            onClick={() => onNavigateTab('timeline')}
+            className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-purple-800 cursor-pointer transition-colors space-y-1 group"
+          >
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-purple-400 font-bold">4. EXCISION T+18s</span>
+              <span className="text-purple-400">Kernel</span>
+            </div>
+            <div className="text-xs font-semibold text-slate-200 group-hover:text-purple-300">
+              Dépossession TrustedInstaller
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono">
+              PendingFileRenameOperations
+            </div>
+          </div>
+
+          <div 
+            onClick={() => onNavigateTab('timeline')}
+            className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-emerald-800 cursor-pointer transition-colors space-y-1 group"
+          >
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-emerald-400 font-bold">5. SÉCURISÉ T+25s</span>
+              <span className="text-emerald-400">Vérifié</span>
+            </div>
+            <div className="text-xs font-semibold text-slate-200 group-hover:text-emerald-300">
+              Purge WMI & Defender
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono">
+              Désactivation SMBv1 (WannaCry)
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Main Grid: Active Threats + Modular Navigator */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols: Active Threat Watchlist */}
         <div className="lg:col-span-2 p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          {/* Header Row */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
             <div className="flex items-center gap-2">
               <ShieldAlert className="w-4 h-4 text-rose-400" />
               <h3 className="text-base font-semibold text-slate-100">
                 Menaces Détectées en Attente d'Action
               </h3>
+              <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                {displayedThreats.length} / {threats.length}
+              </span>
             </div>
-            <span className="text-xs text-slate-500 font-mono">
-              MITRE ATT&CK Matrix Grounded
-            </span>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSortBySeverity(!sortBySeverity)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono transition-colors ${
+                  sortBySeverity
+                    ? 'bg-cyan-950 text-cyan-300 border border-cyan-800 font-semibold'
+                    : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700'
+                }`}
+                title="Trier par gravité décroissante"
+              >
+                <ArrowUpDown className="w-3 h-3" />
+                <span>{sortBySeverity ? 'Tri : Gravité Max' : 'Ordre Original'}</span>
+              </button>
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {threats.map(threat => (
-              <div
-                key={threat.id}
-                className="p-4 bg-slate-950/80 border border-slate-800 rounded-xl hover:border-slate-700 transition-colors space-y-2.5"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs text-rose-400">
-                      [{threat.severity}]
-                    </span>
-                    <span className="font-semibold text-sm text-slate-100">
-                      {threat.name}
-                    </span>
-                    <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 font-mono">
-                      {threat.category}
-                    </span>
-                  </div>
+          {/* Severity Filter Component Bar */}
+          <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2.5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              {/* Severity Buttons */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs text-slate-400 font-medium flex items-center gap-1 mr-1">
+                  <Filter className="w-3 h-3 text-cyan-400" /> Priorité :
+                </span>
 
-                  <div className="text-[11px] font-mono text-cyan-400">
-                    {threat.mitreTechnique}
-                  </div>
-                </div>
+                <button
+                  onClick={() => setSeverityFilter('ALL')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-all ${
+                    severityFilter === 'ALL'
+                      ? 'bg-cyan-950 text-cyan-300 font-bold border border-cyan-700 shadow-sm shadow-cyan-950'
+                      : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                  }`}
+                >
+                  <span>TOUTES</span>
+                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-slate-800/80 text-slate-300">
+                    {threats.length}
+                  </span>
+                </button>
 
-                <div className="text-xs text-slate-300 leading-relaxed font-sans">
-                  {threat.description}
-                </div>
+                <button
+                  onClick={() => setSeverityFilter('CRITICAL')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-all ${
+                    severityFilter === 'CRITICAL'
+                      ? 'bg-rose-950 text-rose-300 font-bold border border-rose-600 shadow-md shadow-rose-950 ring-1 ring-rose-500/30'
+                      : 'bg-slate-900 text-rose-400/80 hover:text-rose-300 border border-slate-800 hover:border-rose-900/60'
+                  }`}
+                >
+                  <Flame className="w-3 h-3 text-rose-400 animate-pulse" />
+                  <span>CRITIQUE</span>
+                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-rose-900/40 text-rose-300 font-bold">
+                    {criticalCount}
+                  </span>
+                </button>
 
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-900 text-xs">
-                  <div className="text-[11px] font-mono text-slate-400 truncate max-w-md">
-                    Cible : <span className="text-slate-200">{threat.targetPath}</span>
-                  </div>
+                <button
+                  onClick={() => setSeverityFilter('HIGH')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-all ${
+                    severityFilter === 'HIGH'
+                      ? 'bg-orange-950 text-orange-300 font-bold border border-orange-600 shadow-md shadow-orange-950'
+                      : 'bg-slate-900 text-orange-400/80 hover:text-orange-300 border border-slate-800 hover:border-orange-900/60'
+                  }`}
+                >
+                  <AlertTriangle className="w-3 h-3 text-orange-400" />
+                  <span>ÉLEVÉ</span>
+                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-orange-900/40 text-orange-300 font-bold">
+                    {highCount}
+                  </span>
+                </button>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => onRunInConsole(`unlock "${threat.targetPath}"`)}
-                      className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded text-xs transition-colors"
-                    >
-                      Éradiquer au Niveau Kernel
-                    </button>
-                  </div>
-                </div>
+                <button
+                  onClick={() => setSeverityFilter('MEDIUM')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-all ${
+                    severityFilter === 'MEDIUM'
+                      ? 'bg-amber-950 text-amber-300 font-bold border border-amber-600 shadow-md shadow-amber-950'
+                      : 'bg-slate-900 text-amber-400/80 hover:text-amber-300 border border-slate-800 hover:border-amber-900/60'
+                  }`}
+                >
+                  <Info className="w-3 h-3 text-amber-400" />
+                  <span>MOYEN</span>
+                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-amber-900/40 text-amber-300 font-bold">
+                    {mediumCount}
+                  </span>
+                </button>
               </div>
-            ))}
+
+              {/* Quick Search Input */}
+              <div className="relative min-w-[200px]">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Rechercher (binaire, MITRE)..."
+                  value={searchThreatQuery}
+                  onChange={e => setSearchThreatQuery(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-7 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono"
+                />
+                {searchThreatQuery && (
+                  <button
+                    onClick={() => setSearchThreatQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Active Filter Status Bar */}
+            {(severityFilter !== 'ALL' || searchThreatQuery) && (
+              <div className="flex items-center justify-between text-[11px] font-mono pt-1 text-slate-400 border-t border-slate-900">
+                <div className="flex items-center gap-2">
+                  <span>Filtre appliqué :</span>
+                  {severityFilter !== 'ALL' && (
+                    <span className="px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 font-bold">
+                      Gravité: {severityFilter}
+                    </span>
+                  )}
+                  {searchThreatQuery && (
+                    <span className="px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
+                      Recherche: "{searchThreatQuery}"
+                    </span>
+                  )}
+                  <span className="text-slate-500">
+                    ({displayedThreats.length} résultat{displayedThreats.length > 1 ? 's' : ''})
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setSeverityFilter('ALL');
+                    setSearchThreatQuery('');
+                  }}
+                  className="text-cyan-400 hover:text-cyan-300 underline font-medium"
+                >
+                  Réinitialiser les filtres
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Threats List */}
+          <div className="space-y-3">
+            {displayedThreats.length === 0 ? (
+              <div className="p-8 text-center bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-3">
+                <Shield className="w-8 h-8 text-slate-600 mx-auto" />
+                <div className="text-sm font-semibold text-slate-300">
+                  Aucune menace ne correspond aux filtres sélectionnés
+                </div>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  Modifiez votre critère de sévérité ou effacez le terme de recherche pour afficher les autres menaces répertoriées.
+                </p>
+                <button
+                  onClick={() => {
+                    setSeverityFilter('ALL');
+                    setSearchThreatQuery('');
+                  }}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg text-xs font-mono font-semibold transition-colors"
+                >
+                  Afficher Toutes les Menaces
+                </button>
+              </div>
+            ) : (
+              displayedThreats.map(threat => {
+                const isCritical = threat.severity === 'CRITICAL';
+                const isHigh = threat.severity === 'HIGH';
+                const isMedium = threat.severity === 'MEDIUM';
+
+                return (
+                  <div
+                    key={threat.id}
+                    className={`p-4 rounded-xl transition-all space-y-2.5 border ${
+                      isCritical
+                        ? 'bg-slate-950/90 border-rose-900/60 hover:border-rose-700/80 shadow-sm shadow-rose-950/30'
+                        : isHigh
+                        ? 'bg-slate-950/90 border-orange-900/60 hover:border-orange-700/80 shadow-sm shadow-orange-950/30'
+                        : 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {isCritical && (
+                          <span className="inline-flex items-center gap-1 font-bold text-xs text-rose-400 bg-rose-950/80 border border-rose-800/80 px-2 py-0.5 rounded">
+                            <Flame className="w-3 h-3 text-rose-400 animate-pulse" />
+                            [CRITIQUE]
+                          </span>
+                        )}
+                        {isHigh && (
+                          <span className="inline-flex items-center gap-1 font-bold text-xs text-orange-400 bg-orange-950/80 border border-orange-800/80 px-2 py-0.5 rounded">
+                            <AlertTriangle className="w-3 h-3 text-orange-400" />
+                            [ÉLEVÉ]
+                          </span>
+                        )}
+                        {isMedium && (
+                          <span className="inline-flex items-center gap-1 font-bold text-xs text-amber-400 bg-amber-950/80 border border-amber-800/80 px-2 py-0.5 rounded">
+                            [MOYEN]
+                          </span>
+                        )}
+
+                        <span className="font-semibold text-sm text-slate-100">
+                          {threat.name}
+                        </span>
+
+                        <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 font-mono">
+                          {threat.category}
+                        </span>
+
+                        {threat.trustedInstallerLocked && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-950 text-purple-300 border border-purple-800/80 font-mono">
+                            Verrou TrustedInstaller
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="text-[11px] font-mono text-cyan-400 shrink-0">
+                        {threat.mitreTechnique}
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-slate-300 leading-relaxed font-sans">
+                      {threat.description}
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-900 text-xs">
+                      <div className="text-[11px] font-mono text-slate-400 truncate max-w-md">
+                        Cible : <span className="text-slate-200 select-all">{threat.targetPath}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {threat.status === 'SCHEDULED_BOOT_DELETE' ? (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            Destruction planifiée au boot (0 octet)
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => onRunInConsole(`unlock "${threat.targetPath}"`)}
+                            className={`px-3 py-1 text-white font-semibold rounded text-xs transition-colors shadow-sm ${
+                              isCritical
+                                ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-950'
+                                : isHigh
+                                ? 'bg-orange-600 hover:bg-orange-500 shadow-orange-950'
+                                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                            }`}
+                          >
+                            Éradiquer au Niveau Kernel
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -201,6 +586,22 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
           </h3>
 
           <div className="space-y-3">
+            <div
+              onClick={() => onNavigateTab('timeline')}
+              className="p-3.5 bg-cyan-950/40 border border-cyan-800/80 hover:border-cyan-500 rounded-xl cursor-pointer transition-colors group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-xs text-cyan-300 group-hover:text-cyan-200 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                  Chronologie Visuelle des Menaces
+                </span>
+                <ArrowRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-cyan-300 transition-transform group-hover:translate-x-1" />
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Rejeu chronologique pas-à-pas du scan initial jusqu'à la remédiation et l'excision noyau.
+              </p>
+            </div>
+
             <div
               onClick={() => onNavigateTab('task-manager')}
               className="p-3.5 bg-slate-950 border border-slate-800 hover:border-cyan-800 rounded-xl cursor-pointer transition-colors group"

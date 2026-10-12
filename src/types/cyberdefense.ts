@@ -1,12 +1,38 @@
 export type TabId = 
   | 'overview'
   | 'task-manager'
+  | 'timeline'
   | 'console'
   | 'deep-excision'
   | 'forensics'
   | 'network'
   | 'hardening'
   | 'script-hub';
+
+export type TimelinePhase = 'SCAN' | 'DETECTION' | 'CONTAINMENT' | 'EXCISION' | 'HARDENING';
+
+export interface ThreatTimelineEvent {
+  id: string;
+  timeOffsetSec: number;
+  timeDisplay: string;
+  phase: TimelinePhase;
+  phaseLabel: string;
+  title: string;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+  status: 'DETECTED' | 'CONTAINED' | 'REMEDIATED' | 'VERIFIED' | 'IN_PROGRESS';
+  mitreId?: string;
+  mitreTactic?: string;
+  targetArtifact?: string;
+  description: string;
+  evidence: string;
+  remediationActionCmd?: string;
+  remediationButtonLabel?: string;
+  remediationResult?: string;
+  scoreDelta?: number;
+  cumulativeScore?: number;
+  riskReductionPercent?: number;
+  riskCategory?: string;
+}
 
 export interface ThreatItem {
   id: string;

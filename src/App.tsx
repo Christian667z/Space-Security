@@ -14,6 +14,7 @@ import { ScriptWorkshop } from './components/ScriptWorkshop';
 import { OverviewDashboard } from './components/OverviewDashboard';
 import { LogAnalyzer } from './components/LogAnalyzer';
 import { TaskManagerLive } from './components/TaskManagerLive';
+import { ThreatTimeline } from './components/ThreatTimeline';
 import { TabId, ConsoleLogMessage, ThreatItem } from './types/cyberdefense';
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
 import { generateAndDownloadZip } from './utils/zipGenerator';
@@ -103,6 +104,42 @@ export default function App() {
       lockedBySystem: false,
       trustedInstallerLocked: false,
       description: 'Téléchargement d\'un binaire encodé en utilisant un composant légitime de certificats Windows.',
+      status: 'ACTIVE',
+    },
+    {
+      id: 't4',
+      name: 'Piège IFEO Debugger sur Taskmgr & Defender',
+      category: 'Privilege',
+      severity: 'CRITICAL',
+      targetPath: 'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\taskmgr.exe',
+      mitreTechnique: 'T1546.012 - IFEO Debugger Trap',
+      lockedBySystem: false,
+      trustedInstallerLocked: true,
+      description: 'Détournement du Gestionnaire des Tâches via clé Debugger malveillante interdisant l\'inspection de la mémoire.',
+      status: 'ACTIVE',
+    },
+    {
+      id: 't5',
+      name: 'Abonnement Persistant WMI EventConsumer',
+      category: 'Persistence',
+      severity: 'HIGH',
+      targetPath: 'root\\subscription:__EventFilter -> svch0st_revive',
+      mitreTechnique: 'T1546.003 - WMI Event Subscription',
+      lockedBySystem: false,
+      trustedInstallerLocked: false,
+      description: 'Déclenchement automatique d\'une charge utile PowerShell masquée à chaque redémarrage ou intervalle fixe.',
+      status: 'ACTIVE',
+    },
+    {
+      id: 't6',
+      name: 'Flux NTFS Alternatif Caché (Zone.Identifier ADS)',
+      category: 'Memory',
+      severity: 'MEDIUM',
+      targetPath: 'C:\\Users\\Public\\payload.dll:hidden_stream',
+      mitreTechnique: 'T1564.004 - Alternate Data Streams',
+      lockedBySystem: false,
+      trustedInstallerLocked: false,
+      description: 'Binaire DLL dissimulé derrière un flux de données alternatif NTFS pour contourner les contrôles antiviraux superficiels.',
       status: 'ACTIVE',
     },
   ]);
@@ -461,6 +498,13 @@ ${logs.map(l => `[${l.timestamp}] [${l.level}] ${l.tag ? `[${l.tag}] ` : ''}${l.
           />
         )}
 
+        {activeTab === 'timeline' && (
+          <ThreatTimeline
+            onRunInConsole={handleExecuteCommand}
+            onNavigateTab={setActiveTab}
+          />
+        )}
+
         {activeTab === 'task-manager' && (
           <TaskManagerLive onRunInConsole={handleExecuteCommand} />
         )}
@@ -523,6 +567,9 @@ ${logs.map(l => `[${l.timestamp}] [${l.level}] ${l.tag ? `[${l.tag}] ` : ''}${l.
           <div className="flex items-center gap-4 text-slate-400">
             <button onClick={handleDownloadZip} className="text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">
               Télécharger le ZIP
+            </button>
+            <button onClick={() => setActiveTab('timeline')} className="hover:text-cyan-300 text-slate-300 font-medium transition-colors">
+              Chronologie des Menaces
             </button>
             <button onClick={() => setActiveTab('script-hub')} className="hover:text-slate-200 transition-colors">
               Code Source .ps1

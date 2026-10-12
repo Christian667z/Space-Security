@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { BOOSTED_POWERSHELL_SCRIPT, ELEVATED_BATCH_LAUNCHER, EMERGENCY_SAFEBOOT_LAUNCHER } from '../data/powershellScript';
+import { CSHARP_EXTIRPATOR_CODE } from '../data/csharpExtirpator';
 
 export const README_GUIDE_CONTENT = `================================================================================
   SPACESEC CYBERDEFENSE SUITE & KERNEL EXTIRPATOR v3.0 - EDITION ULTRA
@@ -21,12 +22,18 @@ CONTENU DE CE PACK ZIP :
       - Desactivation SMBv1, purge abonnements WMI et creation de Shadow Copies VSS
       - Mode Console Interactive en temps reel integre directement dans PowerShell
 
-2. RunAs_SpaceSecurity_Admin.bat
+2. KernelFileExtirpator.cs (Module C# Natif)
+   -> Code source C# de production autonome avec MoveFileEx P/Invoke,
+      elevation SeDebug/SeTakeOwnership/SeRestore/SeBackup, bypass TrustedInstaller
+      via takeown/icacls/SetNamedSecurityInfo, killer de watchdogs via NtSuspendProcess
+      et Restart Manager API.
+
+3. RunAs_SpaceSecurity_Admin.bat
    -> Lanceur d'auto-elevation en Administrateur.
    -> Contourne automatiquement la restriction d'execution (-ExecutionPolicy Bypass).
    -> Recommande pour lancer la suite sans taper de commande.
 
-3. Emergency_SafeBoot_Clean.bat
+4. Emergency_SafeBoot_Clean.bat
    -> Outil de secours pour configurer un redemarrage chirurgical en Mode Sans Echec
       minimal (via bcdedit) si un malware bloque completement la session normale.
 
@@ -77,6 +84,7 @@ export async function generateAndDownloadZip(): Promise<void> {
 
   // Add files to zip
   zip.file('SpaceSecurity_ULTRA_v3_Kernel.ps1', BOOSTED_POWERSHELL_SCRIPT);
+  zip.file('KernelFileExtirpator.cs', CSHARP_EXTIRPATOR_CODE);
   zip.file('RunAs_SpaceSecurity_Admin.bat', ELEVATED_BATCH_LAUNCHER);
   zip.file('Emergency_SafeBoot_Clean.bat', EMERGENCY_SAFEBOOT_LAUNCHER);
   zip.file('README_MODE_D_EMPLOI.txt', README_GUIDE_CONTENT);

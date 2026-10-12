@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, Terminal, Download, Cpu, Activity, Network, Lock, FileCode, Archive } from 'lucide-react';
+import { Shield, Terminal, Download, Cpu, Activity, Network, Lock, FileCode, Archive, Clock } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
 interface TopNavProps {
@@ -31,7 +31,7 @@ export const TopNav: React.FC<TopNavProps> = ({
       </div>
 
       {/* Zone 2: Concise single-line navigation links */}
-      <nav className="hidden lg:flex items-center gap-6 text-sm font-medium text-slate-300">
+      <nav className="flex items-center gap-4 lg:gap-6 text-sm font-medium text-slate-300 overflow-x-auto py-1 scrollbar-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <button
           onClick={() => onSelectTab('overview')}
           className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
@@ -40,6 +40,16 @@ export const TopNav: React.FC<TopNavProps> = ({
         >
           <Activity className="w-3.5 h-3.5" />
           <span>Vue Centrale</span>
+        </button>
+
+        <button
+          onClick={() => onSelectTab('timeline')}
+          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+            activeTab === 'timeline' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5" />
+          <span>Chronologie Menaces</span>
         </button>
 
         <button
