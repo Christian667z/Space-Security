@@ -32,7 +32,7 @@ export function calculateSecurityScore(threats: ThreatItem[]): SecurityScoreData
   const lowCount = threats.filter(t => t.severity === 'LOW' && t.status === 'ACTIVE').length;
 
   const neutralizedCount = threats.filter(
-    t => t.status === 'NEUTRALIZED' || t.status === 'SCHEDULED_BOOT_DELETE' || t.status === 'QUARANTINED'
+    t => t.status === 'NEUTRALIZED' || t.status === 'SCHEDULED_BOOT_DELETE' || t.status === 'QUARANTINED' || t.status === 'DISMISSED'
   ).length;
 
   // Deductions
@@ -642,6 +642,9 @@ export async function generateAndDownloadPdfReport(
     } else if (threat.status === 'NEUTRALIZED') {
       statusText = 'NEUTRALISÉ';
       statusColor = [16, 185, 129];
+    } else if (threat.status === 'DISMISSED') {
+      statusText = 'IGNORÉ/REJET';
+      statusColor = [100, 116, 139];
     }
 
     doc.setFont('helvetica', 'bold');

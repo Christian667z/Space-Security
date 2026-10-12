@@ -22,6 +22,7 @@ import {
   ExternalLink,
   FileText,
   Binary,
+  Users,
 } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
@@ -31,6 +32,9 @@ interface TopNavProps {
   onDownloadScript: () => void;
   onDownloadZip: () => void;
   onOpenPdfReport: () => void;
+  activeUsersCount?: number;
+  connectionStatus?: 'connected' | 'connecting' | 'disconnected';
+  onOpenCollabModal?: () => void;
 }
 
 interface NavItem {
@@ -59,6 +63,9 @@ export const TopNav: React.FC<TopNavProps> = ({
   onDownloadScript,
   onDownloadZip,
   onOpenPdfReport,
+  activeUsersCount = 1,
+  connectionStatus = 'connected',
+  onOpenCollabModal,
 }) => {
   const [isMegaMenuOpen, setIsMegaMenuOpen] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
@@ -365,11 +372,41 @@ export const TopNav: React.FC<TopNavProps> = ({
           <div className="flex items-center gap-3 shrink-0">
             {/* System Clock Pill */}
             {systemTime && (
-              <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-900/80 border border-slate-800 text-slate-300 text-xs font-mono">
+              <div className="hidden 2xl:flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-900/80 border border-slate-800 text-slate-300 text-xs font-mono">
                 <Clock className="w-3 h-3 text-slate-400" />
                 <span>{systemTime}</span>
               </div>
             )}
+
+            {/* Real-Time Multi-User Collaboration & Synchronization Badge */}
+            <button
+              onClick={onOpenCollabModal}
+              title="Centre d'Opérations Multi-Utilisateurs : Cliquez pour voir les analystes connectés et la synchronisation"
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono transition-all border shadow-sm ${
+                connectionStatus === 'connected'
+                  ? 'bg-emerald-950/40 hover:bg-emerald-950/80 text-emerald-300 border-emerald-800/80 hover:border-emerald-600'
+                  : 'bg-amber-950/40 hover:bg-amber-950/70 text-amber-300 border-amber-800/80 hover:border-amber-600'
+              }`}
+            >
+              <span className="relative flex h-2 w-2">
+                {connectionStatus === 'connected' && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                )}
+                <span
+                  className={`relative inline-flex rounded-full h-2 w-2 ${
+                    connectionStatus === 'connected' ? 'bg-emerald-400' : 'bg-amber-400'
+                  }`}
+                ></span>
+              </span>
+              <span className="font-semibold tracking-wide">
+                {connectionStatus === 'connected'
+                  ? activeUsersCount > 1
+                    ? `${activeUsersCount} Analystes en Direct`
+                    : 'Synchro Live Active'
+                  : 'Synchro En Cours'}
+              </span>
+              <Users className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            </button>
 
             {/* Forensic PDF Report Button */}
             <button

@@ -20,7 +20,12 @@ import {
   FileCode,
   Search,
   Filter,
-  Plus
+  Plus,
+  CheckSquare,
+  Square,
+  MinusSquare,
+  Layers,
+  X,
 } from 'lucide-react';
 
 export interface BITSJobItem {
@@ -50,6 +55,7 @@ export const BITSTaskManager: React.FC<BITSTaskManagerProps> = ({ onRunInConsole
   const [copiedScript, setCopiedScript] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<BITSJobItem | null>(null);
+  const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
   const [isSimulateModalOpen, setIsSimulateModalOpen] = useState(false);
 
   // Initial BITS Jobs database with real-world persistence and exfiltration vectors
@@ -285,6 +291,35 @@ Write-Host "[OK] File d'attente BITS entièrement réinitialisée." -ForegroundC
   const suspiciousCount = jobs.filter(j => j.isSuspicious).length;
   const legitimateCount = jobs.filter(j => !j.isSuspicious).length;
 
+  const toggleSelectJob = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedJobIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedJobIds.size === filteredJobs.length && filteredJobs.length > 0) {
+      setSelectedJobIds(new Set());
+    } else {
+      setSelectedJobIds(new Set(filteredJobs.map(j => j.id)));
+    }
+  };
+
+  const handleBulkCancelSelected = () => {
+    if (selectedJobIds.size === 0) return;
+    const count = selectedJobIds.size;
+    selectedJobIds.forEach(id => {
+      onRunInConsole?.(`bitsadmin /cancel ${id}`);
+    });
+    setJobs(prev => prev.filter(j => !selectedJobIds.has(j.id)));
+    setSelectedJobIds(new Set());
+    setActionSuccessMessage(`${count} tâche(s) BITS sélectionnée(s) annulée(s) et purgée(s).`);
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner */}
@@ -495,12 +530,55 @@ Write-Host "[OK] File d'attente BITS entièrement réinitialisée." -ForegroundC
         </div>
       </div>
 
+      {/* Bulk Action Bar for BITS tasks */}
+      {selectedJobIds.size > 0 && (
+        <div className="p-3 bg-gradient-to-r from-slate-900 to-cyan-950/60 rounded-xl border border-cyan-800 flex items-center justify-between gap-3 animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-cyan-400" />
+            <span className="text-xs font-semibold text-white">
+              <strong className="text-cyan-300 font-mono">{selectedJobIds.size}</strong> tâche(s) BITS sélectionnée(s)
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleBulkCancelSelected}
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-rose-950 flex items-center gap-1.5"
+            >
+              <Ban className="w-3.5 h-3.5" />
+              <span>Annuler la sélection ({selectedJobIds.size})</span>
+            </button>
+            <button
+              onClick={() => setSelectedJobIds(new Set())}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+              title="Désélectionner tout"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Table */}
       <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-900 shadow-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs font-mono">
             <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
               <tr>
+                <th className="py-3 px-3 w-10 text-center">
+                  <button
+                    onClick={handleToggleSelectAll}
+                    className="text-slate-400 hover:text-cyan-300 p-0.5"
+                    title={selectedJobIds.size === filteredJobs.length ? 'Tout désélectionner' : 'Tout sélectionner'}
+                  >
+                    {selectedJobIds.size > 0 && selectedJobIds.size === filteredJobs.length ? (
+                      <CheckSquare className="w-4 h-4 text-cyan-400" />
+                    ) : selectedJobIds.size > 0 ? (
+                      <MinusSquare className="w-4 h-4 text-cyan-400" />
+                    ) : (
+                      <Square className="w-4 h-4" />
+                    )}
+                  </button>
+                </th>
                 <th className="py-3 px-3 font-semibold">Tâche BITS (Nom & GUID)</th>
                 <th className="py-3 px-3 font-semibold">Type & Direction</th>
                 <th className="py-3 px-3 font-semibold">Cible / URL C2 Distante</th>
@@ -513,7 +591,7 @@ Write-Host "[OK] File d'attente BITS entièrement réinitialisée." -ForegroundC
             <tbody className="divide-y divide-slate-800/60 bg-slate-900/60">
               {filteredJobs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500 font-sans">
+                  <td colSpan={8} className="py-8 text-center text-slate-500 font-sans">
                     Aucune tâche BITS ne correspond à la recherche actuelle. File d'attente propre.
                   </td>
                 </tr>
@@ -522,10 +600,26 @@ Write-Host "[OK] File d'attente BITS entièrement réinitialisée." -ForegroundC
                   <tr
                     key={job.id}
                     className={`hover:bg-slate-800/40 transition-colors ${
-                      job.isSuspicious ? 'bg-rose-950/10' : ''
+                      selectedJobIds.has(job.id) ? 'bg-cyan-950/30 ring-1 ring-cyan-500/30' : job.isSuspicious ? 'bg-rose-950/10' : ''
                     } ${selectedJob?.id === job.id ? 'ring-1 ring-cyan-500 bg-cyan-950/20' : ''}`}
                     onClick={() => setSelectedJob(job)}
                   >
+                    {/* Row Checkbox */}
+                    <td className="py-3 px-3 text-center" onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={e => toggleSelectJob(job.id, e)}
+                        className={`p-0.5 rounded transition-colors ${
+                          selectedJobIds.has(job.id) ? 'text-cyan-400' : 'text-slate-600 hover:text-slate-400'
+                        }`}
+                      >
+                        {selectedJobIds.has(job.id) ? (
+                          <CheckSquare className="w-4 h-4 text-cyan-400" />
+                        ) : (
+                          <Square className="w-4 h-4" />
+                        )}
+                      </button>
+                    </td>
+
                     {/* Job Name & GUID */}
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2">

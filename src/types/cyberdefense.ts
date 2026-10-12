@@ -115,8 +115,22 @@ export interface ThreatItem {
   mitreTechnique: string;
   lockedBySystem: boolean;
   trustedInstallerLocked: boolean;
+  status: 'ACTIVE' | 'QUARANTINED' | 'SCHEDULED_BOOT_DELETE' | 'NEUTRALIZED' | 'DISMISSED';
+}
+
+export type BulkThreatActionType =
+  | 'KERNEL_UNLOCK'
+  | 'QUARANTINE'
+  | 'MASS_DISMISS'
+  | 'RESTORE'
+  | 'SHARED_COMMAND';
+
+export interface SharedCommandPreset {
+  id: string;
+  label: string;
   description: string;
-  status: 'ACTIVE' | 'QUARANTINED' | 'SCHEDULED_BOOT_DELETE' | 'NEUTRALIZED';
+  commandTemplate: string;
+  category: 'KERNEL' | 'FORENSICS' | 'PROCESS' | 'REGISTRY';
 }
 
 export interface ProcessItem {
@@ -179,11 +193,31 @@ export interface ThreatNotification {
   title: string;
   description: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-  category: 'C2' | 'Kernel' | 'Trojan' | 'Persistence' | 'Memory' | 'Network' | 'Defender';
+  category: 'C2' | 'Kernel' | 'Trojan' | 'Persistence' | 'Memory' | 'Network' | 'Defender' | 'Collab';
   source: string;
   targetTab?: TabId;
   actionCommand?: string;
   actionLabel?: string;
   isRead?: boolean;
+}
+
+export interface OperatorSession {
+  id: string;
+  name: string;
+  role: string;
+  ip: string;
+  connectedAt: string;
+  isCurrentSession?: boolean;
+  status: 'ONLINE' | 'IDLE';
+}
+
+export interface SharedSyncState {
+  threats: ThreatItem[];
+  logs: ConsoleLogMessage[];
+  blockedIps: string[];
+  blockedWifiBssids: string[];
+  activeUsersCount: number;
+  lastModified: string;
+  activeOperators: OperatorSession[];
 }
 
