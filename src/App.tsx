@@ -16,12 +16,16 @@ import { LogAnalyzer } from './components/LogAnalyzer';
 import { TaskManagerLive } from './components/TaskManagerLive';
 import { BITSTaskManager } from './components/BITSTaskManager';
 import { ThreatTimeline } from './components/ThreatTimeline';
-import { TabId, ConsoleLogMessage, ThreatItem } from './types/cyberdefense';
+import { ThreatToastContainer } from './components/ThreatToast';
+import { PdfReportModal } from './components/PdfReportModal';
+import { TabId, ConsoleLogMessage, ThreatItem, ThreatNotification } from './types/cyberdefense';
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
 import { generateAndDownloadZip } from './utils/zipGenerator';
+import { generateAndDownloadPdfReport } from './utils/pdfReportGenerator';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
 
   const initialLogs: ConsoleLogMessage[] = [
     {
@@ -145,6 +149,129 @@ export default function App() {
     },
   ]);
 
+  const [threatToasts, setThreatToasts] = useState<ThreatNotification[]>([
+    {
+      id: 'toast-init-1',
+      timestamp: '07:35:05',
+      title: 'Balise C2 Détectée (Port 4444)',
+      description: 'Connexion réseau sortante vers 185.220.101.4 initiée par svch0st_updater.exe (PID 5824).',
+      severity: 'CRITICAL',
+      category: 'C2',
+      source: 'C2-HUNTER / Network Monitor',
+      targetTab: 'network',
+      actionCommand: 'kill 5824',
+      actionLabel: 'Abattre PID 5824',
+    },
+    {
+      id: 'toast-init-2',
+      timestamp: '07:35:06',
+      title: 'Driver Rootkit Verrouillé',
+      description: 'Hook noyau sur IRP_MJ_CREATE protégé par TrustedInstaller : suspicious_kernel_hook.sys.',
+      severity: 'HIGH',
+      category: 'Kernel',
+      source: 'KERNEL-LOCK / P/Invoke',
+      targetTab: 'deep-excision',
+      actionCommand: 'unlock C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys',
+      actionLabel: 'Déverrouiller & Supprimer',
+    },
+  ]);
+
+  const [isToastSimulationActive, setIsToastSimulationActive] = useState(true);
+
+  const addThreatToast = (notification: Omit<ThreatNotification, 'id' | 'timestamp'>) => {
+    const now = new Date();
+    const timestamp = now.toTimeString().split(' ')[0];
+    const newToast: ThreatNotification = {
+      ...notification,
+      id: `toast-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      timestamp,
+    };
+    setThreatToasts(prev => [newToast, ...prev]);
+  };
+
+  const handleDismissToast = (id: string) => {
+    setThreatToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  const handleClearAllToasts = () => {
+    setThreatToasts([]);
+  };
+
+  // Automated background threat simulation ticker
+  const simulationPool: Array<Omit<ThreatNotification, 'id' | 'timestamp'>> = [
+    {
+      title: 'Tâche BITS d\'Exfiltration Détectée',
+      description: 'Job BITS persistant "WindowsHealthUpdate" pointant vers un serveur C2 distant (194.26.29.112).',
+      severity: 'HIGH',
+      category: 'Persistence',
+      source: 'BITS Engine / bitsadmin',
+      targetTab: 'bits',
+      actionCommand: 'bitsadmin /cancel WindowsHealthUpdate',
+      actionLabel: 'Annuler la tâche BITS',
+    },
+    {
+      title: 'Injection Mémoire Suspecte (Reflective DLL)',
+      description: 'Thread injecté dans lsass.exe sans fichier adossé sur disque (Zone VAD marquée EXECUTE_READWRITE).',
+      severity: 'CRITICAL',
+      category: 'Memory',
+      source: 'Memory Forensics / NtQueryVirtualMemory',
+      targetTab: 'forensics',
+      actionCommand: 'dump-ram',
+      actionLabel: 'Dumper la RAM',
+    },
+    {
+      title: 'Exclusion Windows Defender Illégitime',
+      description: 'Le dossier public C:\\Users\\Public\\ a été whitelisté frauduleusement via Set-MpPreference.',
+      severity: 'MEDIUM',
+      category: 'Defender',
+      source: 'DefenderSync / MpPreference',
+      targetTab: 'hardening',
+      actionCommand: 'defender-exclusions',
+      actionLabel: 'Auditer les exclusions',
+    },
+    {
+      title: 'Scan Furtif de Ports Sortants Détecté',
+      description: 'Flux TCP SYN consécutifs vers 8 sous-réseaux externes non répertoriés (Analyse heuristique).',
+      severity: 'MEDIUM',
+      category: 'Network',
+      source: 'NetFilter Driver',
+      targetTab: 'network',
+      actionCommand: 'sockets',
+      actionLabel: 'Voir sockets ouverts',
+    },
+    {
+      title: 'Piège IFEO Actif sur taskmgr.exe',
+      description: 'Clé Debugger détournée pour masquer la liste des processus actifs lors du lancement du Gestionnaire.',
+      severity: 'CRITICAL',
+      category: 'Persistence',
+      source: 'Registry Inspector',
+      targetTab: 'overview',
+      actionCommand: 'ifeo',
+      actionLabel: 'Corriger IFEO',
+    },
+  ];
+
+  // Manual trigger button to test anytime
+  const handleTriggerTestThreat = () => {
+    const randomThreat = simulationPool[Math.floor(Math.random() * simulationPool.length)];
+    addThreatToast(randomThreat);
+    addLog('WARN', `[THREAT-ALERT] ${randomThreat.title} - ${randomThreat.description}`, randomThreat.category.toUpperCase());
+  };
+
+  // Periodic threat stream simulation if active
+  React.useEffect(() => {
+    if (!isToastSimulationActive) return;
+
+    const interval = setInterval(() => {
+      // Pick a random simulated event every 35 seconds
+      const randomThreat = simulationPool[Math.floor(Math.random() * simulationPool.length)];
+      addThreatToast(randomThreat);
+      addLog('WARN', `[SENTINEL-LOG] ${randomThreat.title} : ${randomThreat.description}`, randomThreat.category.toUpperCase());
+    }, 38000);
+
+    return () => clearInterval(interval);
+  }, [isToastSimulationActive]);
+
   const addLog = (level: ConsoleLogMessage['level'], text: string, tag?: string) => {
     const now = new Date();
     const timestamp = now.toTimeString().split(' ')[0];
@@ -156,6 +283,26 @@ export default function App() {
       tag,
     };
     setLogs(prev => [...prev, newLog]);
+
+    // Automatically raise a Threat Toast when a suspicious/critical event is logged
+    if (level === 'ERROR' || level === 'WARN') {
+      // Check if not already a toast feedback loop
+      if (!text.startsWith('> ') && !text.startsWith('Conseil :')) {
+        const severity: ThreatNotification['severity'] = level === 'ERROR' ? 'CRITICAL' : 'HIGH';
+        const isC2 = text.toLowerCase().includes('c2') || text.toLowerCase().includes('port 4444') || text.toLowerCase().includes('connexion');
+        const isKernel = text.toLowerCase().includes('kernel') || text.toLowerCase().includes('driver') || text.toLowerCase().includes('verrouillé');
+        const isBits = text.toLowerCase().includes('bits');
+
+        addThreatToast({
+          title: tag ? `Alerte Activité : ${tag}` : 'Activité Suspecte Détectée',
+          description: text,
+          severity,
+          category: isC2 ? 'C2' : isKernel ? 'Kernel' : isBits ? 'Persistence' : 'Trojan',
+          source: tag || 'SYSTEM-MONITOR',
+          targetTab: isC2 ? 'network' : isKernel ? 'deep-excision' : isBits ? 'bits' : 'console',
+        });
+      }
+    }
   };
 
   const handleExecuteCommand = (cmd: string) => {
@@ -182,7 +329,8 @@ export default function App() {
         addLog('INFO', '  smb1-disable      : Désactive le protocole obsolète SMBv1 (WannaCry)');
         addLog('INFO', '  wmi-clean         : Purge les EventFilters persistants du namespace root\\subscription');
         addLog('INFO', '  clear             : Efface l\'écran de la console');
-        addLog('INFO', '  export-report     : Télécharge le rapport d\'incident complet');
+        addLog('INFO', '  export-report     : Génère et télécharge le rapport PDF détaillé avec graphiques de score');
+        addLog('INFO', '  pdf / export-pdf  : Raccourci pour générer le rapport PDF d\'audit forensique');
         break;
 
       case 'scan':
@@ -327,6 +475,10 @@ export default function App() {
         setLogs([]);
         break;
 
+      case 'pdf':
+      case 'pdf-report':
+      case 'report':
+      case 'export-pdf':
       case 'export-report':
         handleDownloadReport();
         break;
@@ -435,34 +587,27 @@ export default function App() {
     }
   };
 
-  const handleDownloadReport = () => {
-    const reportText = `================================================================================
-RAPPORT D'AUDIT & D'INCIDENT SPACESEC KERNEL EDITION v3.0
-Date : ${new Date().toISOString()}
-Host : LOCAL-SEC-ENDPOINT | Droits : Administrateur / Token SeTakeOwnership
-================================================================================
-
-1. MENACES IDENTIFIEES :
-${threats.map(t => `- [${t.severity}] ${t.name}\n  Cible : ${t.targetPath}\n  Technique MITRE : ${t.mitreTechnique}\n  Statut : ${t.status}`).join('\n\n')}
-
-2. JOURNAL DES OPERATIONS EN TEMPS REEL :
-${logs.map(l => `[${l.timestamp}] [${l.level}] ${l.tag ? `[${l.tag}] ` : ''}${l.text}`).join('\n')}
-
-3. RECOMMANDATIONS POUR INGENIEURS :
-- Executer SpaceSecurity_ULTRA_v3_Kernel.ps1 en mode Administrateur avec ExecutionPolicy Bypass.
-- Redemarrer la machine pour valider les suppressions Session Manager (PendingFileRenameOperations).
-- Verifier l'integrite du fichier HOSTS et des abonnements WMI root\\subscription.
-`;
-    const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `SpaceSec_Forensic_Report_${Date.now()}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    addLog('OK', 'Rapport d\'incident exporté avec succès.', 'EXPORT');
+  const handleDownloadReport = async () => {
+    addLog('KERNEL', 'Génération automatique du rapport PDF forensique haute définition...', 'PDF-REPORT');
+    try {
+      await generateAndDownloadPdfReport(threats, logs, {
+        includeCharts: true,
+        includeIocs: true,
+        includeLogs: true,
+      });
+      addLog('OK', 'Rapport PDF des menaces et graphiques de score téléchargé avec succès !', 'PDF-REPORT');
+      addThreatToast({
+        title: 'Rapport PDF Généré',
+        description: 'Le rapport forensique détaillé avec graphiques de score de sécurité a été téléchargé.',
+        severity: 'LOW',
+        category: 'Defender',
+        source: 'AUDIT-EXPORT',
+        targetTab: 'overview',
+      });
+    } catch (err) {
+      console.error('PDF generation error:', err);
+      addLog('ERROR', 'Erreur lors de la génération du rapport PDF.', 'PDF-REPORT');
+    }
   };
 
   const handleDownloadScript = () => {
@@ -486,6 +631,7 @@ ${logs.map(l => `[${l.timestamp}] [${l.level}] ${l.tag ? `[${l.tag}] ` : ''}${l.
         onSelectTab={setActiveTab}
         onDownloadScript={handleDownloadScript}
         onDownloadZip={handleDownloadZip}
+        onOpenPdfReport={() => setIsPdfModalOpen(true)}
       />
 
       {/* Main Container Viewport */}
@@ -496,6 +642,7 @@ ${logs.map(l => `[${l.timestamp}] [${l.level}] ${l.tag ? `[${l.tag}] ` : ''}${l.
             onRunInConsole={handleExecuteCommand}
             threats={threats}
             onDownloadZip={handleDownloadZip}
+            onOpenPdfReport={() => setIsPdfModalOpen(true)}
           />
         )}
 
@@ -585,12 +732,33 @@ ${logs.map(l => `[${l.timestamp}] [${l.level}] ${l.tag ? `[${l.tag}] ` : ''}${l.
             <button onClick={() => setActiveTab('console')} className="hover:text-slate-200 transition-colors">
               Console Interactive
             </button>
-            <button onClick={handleDownloadReport} className="hover:text-slate-200 transition-colors">
-              Rapport Forensique
+            <button onClick={() => setIsPdfModalOpen(true)} className="hover:text-rose-400 text-rose-300 font-semibold transition-colors flex items-center gap-1">
+              <span>Rapport Forensique (PDF)</span>
             </button>
           </div>
         </div>
       </footer>
+
+      {/* Forensic PDF Report Modal */}
+      <PdfReportModal
+        isOpen={isPdfModalOpen}
+        onClose={() => setIsPdfModalOpen(false)}
+        threats={threats}
+        logs={logs}
+        onNotifySuccess={(msg) => addLog('OK', msg, 'PDF-REPORT')}
+      />
+
+      {/* Persistent Threat Toast Notification Sentinel (Bottom-Right) */}
+      <ThreatToastContainer
+        toasts={threatToasts}
+        onDismiss={handleDismissToast}
+        onClearAll={handleClearAllToasts}
+        onNavigateTab={setActiveTab}
+        onRunInConsole={handleExecuteCommand}
+        isSimulationActive={isToastSimulationActive}
+        onToggleSimulation={() => setIsToastSimulationActive(!isToastSimulationActive)}
+        onTriggerTestThreat={handleTriggerTestThreat}
+      />
     </div>
   );
 }

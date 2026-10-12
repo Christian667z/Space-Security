@@ -102,3 +102,17 @@ export interface WindowsEventLogEntry {
   isIsolatedThreat: boolean;
 }
 
+export interface ThreatNotification {
+  id: string;
+  timestamp: string;
+  title: string;
+  description: string;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  category: 'C2' | 'Kernel' | 'Trojan' | 'Persistence' | 'Memory' | 'Network' | 'Defender';
+  source: string;
+  targetTab?: TabId;
+  actionCommand?: string;
+  actionLabel?: string;
+  isRead?: boolean;
+}
+

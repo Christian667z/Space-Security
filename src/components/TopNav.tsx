@@ -1,5 +1,27 @@
-import React from 'react';
-import { Shield, Terminal, Download, Cpu, Activity, Network, Lock, FileCode, Archive, Clock, Radio } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Shield,
+  Terminal,
+  Download,
+  Cpu,
+  Activity,
+  Network,
+  Lock,
+  FileCode,
+  Archive,
+  Clock,
+  Radio,
+  LayoutGrid,
+  ChevronDown,
+  Zap,
+  Search,
+  X,
+  CheckCircle2,
+  AlertTriangle,
+  ArrowRight,
+  ExternalLink,
+  FileText,
+} from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
 interface TopNavProps {
@@ -7,6 +29,27 @@ interface TopNavProps {
   onSelectTab: (tab: TabId) => void;
   onDownloadScript: () => void;
   onDownloadZip: () => void;
+  onOpenPdfReport: () => void;
+}
+
+interface NavItem {
+  id: TabId;
+  title: string;
+  category: string;
+  shortDesc: string;
+  icon: React.ComponentType<{ className?: string }>;
+  tag: string;
+  tagClass: string;
+  mitre?: string;
+}
+
+interface NavColumn {
+  title: string;
+  subtitle: string;
+  badge: string;
+  badgeClass: string;
+  icon: React.ComponentType<{ className?: string }>;
+  items: NavItem[];
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
@@ -14,135 +57,559 @@ export const TopNav: React.FC<TopNavProps> = ({
   onSelectTab,
   onDownloadScript,
   onDownloadZip,
+  onOpenPdfReport,
 }) => {
+  const [isMegaMenuOpen, setIsMegaMenuOpen] = useState(false);
+  const [searchFilter, setSearchFilter] = useState('');
+  const [systemTime, setSystemTime] = useState('');
+  const megaMenuRef = useRef<HTMLDivElement>(null);
+  const triggerButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Live system clock
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setSystemTime(
+        now.toLocaleTimeString('fr-FR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        })
+      );
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Close Mega Menu on Click Outside or Escape key
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        megaMenuRef.current &&
+        !megaMenuRef.current.contains(event.target as Node) &&
+        triggerButtonRef.current &&
+        !triggerButtonRef.current.contains(event.target as Node)
+      ) {
+        setIsMegaMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMegaMenuOpen(false);
+      }
+    };
+
+    if (isMegaMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isMegaMenuOpen]);
+
+  // Two columns navigation structure
+  const columns: NavColumn[] = [
+    {
+      title: 'SUPERVISION & PROCESSUS SYSTÈME',
+      subtitle: 'Télémétrie continue, analyse des tâches & flux d\'événements',
+      badge: 'SURVEILLANCE',
+      badgeClass: 'text-cyan-400 bg-cyan-950/60 border-cyan-800/40',
+      icon: Activity,
+      items: [
+        {
+          id: 'overview',
+          title: 'Vue Centrale',
+          category: 'Télémétrie Globale',
+          shortDesc: 'Tableau de bord de sécurité, indicateurs CPU/RAM, posture globale & alertes.',
+          icon: Activity,
+          tag: 'TEMPS RÉEL',
+          tagClass: 'text-cyan-400 bg-cyan-950/70 border-cyan-800/50',
+        },
+        {
+          id: 'task-manager',
+          title: 'Gestionnaire des Tâches',
+          category: 'Inspection Processus',
+          shortDesc: 'Arborescence des PID, détection DLL masquées, threads injectés & conso RAM.',
+          icon: Cpu,
+          tag: 'MONITORING',
+          tagClass: 'text-blue-400 bg-blue-950/70 border-blue-800/50',
+        },
+        {
+          id: 'bits',
+          title: 'BITS Task Manager',
+          category: 'Persistance T1197',
+          shortDesc: 'Audit & éradication des jobs BITS furtifs (svchost/netsvcs, C2 stage2 & exfil).',
+          icon: Radio,
+          tag: 'T1197 C2',
+          tagClass: 'text-amber-400 bg-amber-950/70 border-amber-800/50',
+        },
+        {
+          id: 'timeline',
+          title: 'Chronologie Menaces',
+          category: 'Corrélation MITRE',
+          shortDesc: 'Journal temporel des alertes, cycle de détection, confinement et remédiation.',
+          icon: Clock,
+          tag: 'TIMELINE',
+          tagClass: 'text-indigo-400 bg-indigo-950/70 border-indigo-800/50',
+        },
+        {
+          id: 'console',
+          title: 'Console Live',
+          category: 'Shell Interactif',
+          shortDesc: 'CLI cyberdéfense avec suggestions rapides, analyse de dumps & contre-mesures.',
+          icon: Terminal,
+          tag: 'INTERACTIF',
+          tagClass: 'text-emerald-400 bg-emerald-950/70 border-emerald-800/50',
+        },
+      ],
+    },
+    {
+      title: 'ÉRADICATION KERNEL & FORENSIQUE',
+      subtitle: 'Contre-mesures ring0, introspection mémoire & politiques d\'isolement',
+      badge: 'CONTRE-MESURES',
+      badgeClass: 'text-rose-400 bg-rose-950/60 border-rose-800/40',
+      icon: Zap,
+      items: [
+        {
+          id: 'deep-excision',
+          title: 'Éradication OS & Kernel',
+          category: 'Ring0 & Fichiers Verrouillés',
+          shortDesc: 'Déchargement de drivers rootkits, purge IFEO, TrustedInstaller & ADS cachés.',
+          icon: Zap,
+          tag: 'RING 0',
+          tagClass: 'text-rose-400 bg-rose-950/70 border-rose-800/50',
+        },
+        {
+          id: 'forensics',
+          title: 'Forensique RAM',
+          category: 'Mémoire Volatile',
+          shortDesc: 'Détection Process Hollowing, modules non signés et analyse mémoire dynamique.',
+          icon: Shield,
+          tag: 'MÉMOIRE',
+          tagClass: 'text-purple-400 bg-purple-950/70 border-purple-800/50',
+        },
+        {
+          id: 'network',
+          title: 'Réseau C2 & Sockets',
+          category: 'Trafic Sortant',
+          shortDesc: 'Cartographie des sockets furtifs, balises C2 persistantes & adresses IP suspectes.',
+          icon: Network,
+          tag: 'SOCKETS',
+          tagClass: 'text-cyan-400 bg-cyan-950/70 border-cyan-800/50',
+        },
+        {
+          id: 'hardening',
+          title: 'Durcissement OS',
+          category: 'GPO & Protection Hôte',
+          shortDesc: 'Audit des exclusions Defender, verrouillage des ports & isolation du système.',
+          icon: Lock,
+          tag: 'HARDENING',
+          tagClass: 'text-emerald-400 bg-emerald-950/70 border-emerald-800/50',
+        },
+        {
+          id: 'script-hub',
+          title: 'Script Hub (.ps1)',
+          category: 'Automatisation PowerShell',
+          shortDesc: 'Bibliothèque de scripts d\'assainissement complets et recettes d\'intervention.',
+          icon: FileCode,
+          tag: 'AUTOMATION',
+          tagClass: 'text-amber-400 bg-amber-950/70 border-amber-800/50',
+        },
+      ],
+    },
+  ];
+
+  // Helper to find title of active tab
+  const allItems = columns.flatMap((col) => col.items);
+  const currentActiveItem = allItems.find((item) => item.id === activeTab);
+
+  // Filter items based on search query
+  const query = searchFilter.toLowerCase().trim();
+  const filterItem = (item: NavItem) => {
+    if (!query) return true;
+    return (
+      item.title.toLowerCase().includes(query) ||
+      item.shortDesc.toLowerCase().includes(query) ||
+      item.category.toLowerCase().includes(query) ||
+      item.tag.toLowerCase().includes(query)
+    );
+  };
+
+  const handleSelectTab = (tab: TabId) => {
+    onSelectTab(tab);
+    setIsMegaMenuOpen(false);
+    setSearchFilter('');
+  };
+
   return (
-    <header className="flex items-center justify-between gap-8 px-6 py-4 border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
-      {/* Zone 1: Single text element wordmark */}
-      <div 
-        onClick={() => onSelectTab('overview')}
-        className="flex items-center gap-2.5 cursor-pointer text-slate-100 whitespace-nowrap shrink-0 group"
-      >
-        <div className="w-8 h-8 rounded-lg bg-cyan-950 border border-cyan-800/60 flex items-center justify-center text-cyan-400 group-hover:border-cyan-500 transition-colors">
-          <Shield className="w-4 h-4 text-cyan-400" />
+    <header className="relative border-b border-slate-800 bg-slate-950/90 backdrop-blur-md sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16 gap-4">
+          
+          {/* Zone 1: Brand Wordmark + Live Kernel Badge */}
+          <div className="flex items-center gap-3 shrink-0">
+            <div
+              onClick={() => handleSelectTab('overview')}
+              className="flex items-center gap-2.5 cursor-pointer text-slate-100 group select-none"
+              title="Retour à la Vue Centrale"
+            >
+              <div className="w-9 h-9 rounded-lg bg-cyan-950/80 border border-cyan-800/80 flex items-center justify-center text-cyan-400 group-hover:border-cyan-400 group-hover:shadow-sm group-hover:shadow-cyan-500/20 transition-all">
+                <Shield className="w-4 h-4 text-cyan-400" />
+              </div>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-2">
+                  <span className="text-base font-bold tracking-tight text-white font-['Plus_Jakarta_Sans']">
+                    SpaceSec Ultra
+                  </span>
+                  <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 hidden sm:inline-block">
+                    Kernel v3.0
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span className="font-mono text-emerald-400 font-medium">PROTECTION ACTIVE</span>
+                  <span className="text-slate-600 hidden md:inline">·</span>
+                  <span className="text-slate-400 hidden md:inline truncate max-w-[130px]">
+                    {currentActiveItem?.title || 'Vue Centrale'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Zone 2: Navigation Controls with Mega Menu Trigger & Direct Shortcuts */}
+          <div className="flex items-center gap-2 lg:gap-3">
+            {/* Direct Quick Link 1: Vue Centrale */}
+            <button
+              onClick={() => handleSelectTab('overview')}
+              className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'overview'
+                  ? 'bg-cyan-950/60 text-cyan-300 border border-cyan-800/60'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Vue Centrale</span>
+            </button>
+
+            {/* Direct Quick Link 2: Gestionnaire des Tâches */}
+            <button
+              onClick={() => handleSelectTab('task-manager')}
+              className={`hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'task-manager'
+                  ? 'bg-cyan-950/60 text-cyan-300 border border-cyan-800/60'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent'
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5 text-blue-400" />
+              <span>Gestionnaire</span>
+            </button>
+
+            {/* Direct Quick Link 3: Console Live */}
+            <button
+              onClick={() => handleSelectTab('console')}
+              className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'console'
+                  ? 'bg-cyan-950/60 text-cyan-300 border border-cyan-800/60'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent'
+              }`}
+            >
+              <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Console</span>
+            </button>
+
+            {/* MEGA MENU TRIGGER BUTTON */}
+            <div className="relative">
+              <button
+                ref={triggerButtonRef}
+                onClick={() => setIsMegaMenuOpen(!isMegaMenuOpen)}
+                aria-expanded={isMegaMenuOpen}
+                aria-haspopup="true"
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all border ${
+                  isMegaMenuOpen
+                    ? 'bg-cyan-950 text-cyan-300 border-cyan-500 shadow-md shadow-cyan-950/50'
+                    : 'bg-slate-900/90 hover:bg-slate-800/90 text-slate-100 border-slate-700/80 hover:border-cyan-600/70 shadow-sm'
+                }`}
+              >
+                <LayoutGrid className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span className="tracking-wide">
+                  Modules & Outils
+                </span>
+                <span className="hidden sm:inline-block px-1.5 py-0.2 font-mono text-[10px] rounded bg-slate-800 text-slate-300 border border-slate-700">
+                  10
+                </span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                    isMegaMenuOpen ? 'rotate-180 text-cyan-400' : ''
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* Zone 3: Live System Clock & Primary Action Button */}
+          <div className="flex items-center gap-3 shrink-0">
+            {/* System Clock Pill */}
+            {systemTime && (
+              <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-900/80 border border-slate-800 text-slate-300 text-xs font-mono">
+                <Clock className="w-3 h-3 text-slate-400" />
+                <span>{systemTime}</span>
+              </div>
+            )}
+
+            {/* Forensic PDF Report Button */}
+            <button
+              onClick={onOpenPdfReport}
+              title="Générer et télécharger un rapport PDF détaillé avec graphiques de score de sécurité"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-200 bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800/70 hover:border-rose-600 rounded-lg transition-all shadow-sm"
+            >
+              <FileText className="w-3.5 h-3.5 text-rose-400" />
+              <span className="font-semibold text-rose-200">Rapport PDF</span>
+              <span className="hidden lg:inline-block text-[9px] font-mono px-1 py-0.2 bg-rose-900/80 text-rose-300 rounded border border-rose-700/60">
+                PRO
+              </span>
+            </button>
+
+            {/* Download Script Button */}
+            <button
+              onClick={onDownloadScript}
+              title="Télécharger le script PowerShell SpaceSecurity_ULTRA_v3_Kernel.ps1"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-200 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 hover:border-slate-600 rounded-lg transition-all"
+            >
+              <Download className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Script (.ps1)</span>
+            </button>
+
+            {/* Primary Action: Download ZIP */}
+            <button
+              onClick={onDownloadZip}
+              className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-950 bg-cyan-400 hover:bg-cyan-300 rounded-lg transition-all shadow-sm shadow-cyan-500/20 active:translate-y-px"
+            >
+              <Archive className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Télécharger</span>
+              <span>Archive ZIP</span>
+            </button>
+          </div>
         </div>
-        <span className="text-base font-bold tracking-tight text-white font-['Plus_Jakarta_Sans']">
-          SpaceSec Ultra <span className="text-cyan-400 text-xs uppercase tracking-wider font-mono px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-800/40">Kernel v3.0</span>
-        </span>
       </div>
 
-      {/* Zone 2: Concise single-line navigation links */}
-      <nav className="flex items-center gap-4 lg:gap-6 text-sm font-medium text-slate-300 overflow-x-auto py-1 scrollbar-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <button
-          onClick={() => onSelectTab('overview')}
-          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            activeTab === 'overview' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
-          }`}
+      {/* ========================================================================= */}
+      {/* 2-COLUMN MEGA MENU DROPDOWN PANEL */}
+      {/* ========================================================================= */}
+      {isMegaMenuOpen && (
+        <div
+          ref={megaMenuRef}
+          className="absolute top-full left-0 right-0 bg-slate-950/95 backdrop-blur-xl border-b border-cyan-900/40 shadow-2xl shadow-black/80 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
         >
-          <Activity className="w-3.5 h-3.5" />
-          <span>Vue Centrale</span>
-        </button>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            
+            {/* Header of Mega Menu: Title & Quick Search Filter */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 mb-5 border-b border-slate-800/80">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-cyan-950 border border-cyan-800/70 flex items-center justify-center text-cyan-400">
+                  <LayoutGrid className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white tracking-wide uppercase font-mono flex items-center gap-2">
+                    Centre de Contrôle & Navigation SpaceSec
+                    <span className="text-[10px] text-cyan-400 font-mono font-normal px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-800/50">
+                      2 Colonnes
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Sélectionnez un moteur pour lancer l'analyse, l'éradication ou l'isolation mémoire.
+                  </p>
+                </div>
+              </div>
 
-        <button
-          onClick={() => onSelectTab('timeline')}
-          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            activeTab === 'timeline' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Clock className="w-3.5 h-3.5" />
-          <span>Chronologie Menaces</span>
-        </button>
+              {/* Search filter input */}
+              <div className="flex items-center gap-2 w-full sm:w-80">
+                <div className="relative w-full">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={searchFilter}
+                    onChange={(e) => setSearchFilter(e.target.value)}
+                    placeholder="Filtrer un module (ex: BITS, Rootkit, RAM)..."
+                    className="w-full bg-slate-900/90 border border-slate-700/80 rounded-lg pl-9 pr-8 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 font-mono transition-colors"
+                  />
+                  {searchFilter && (
+                    <button
+                      onClick={() => setSearchFilter('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={() => setIsMegaMenuOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-lg border border-slate-800 transition-colors shrink-0"
+                  title="Fermer (Échap)"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
 
-        <button
-          onClick={() => onSelectTab('task-manager')}
-          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            activeTab === 'task-manager' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Cpu className="w-3.5 h-3.5" />
-          <span>Gestionnaire des Tâches</span>
-        </button>
+            {/* 2 COLUMNS GRID */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8">
+              {columns.map((col, colIndex) => {
+                const filteredItems = col.items.filter(filterItem);
+                const ColIcon = col.icon;
 
-        <button
-          onClick={() => onSelectTab('bits')}
-          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            activeTab === 'bits' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Radio className="w-3.5 h-3.5" />
-          <span>BITS Task Manager</span>
-        </button>
+                return (
+                  <div
+                    key={col.title}
+                    className="flex flex-col space-y-3 bg-slate-900/40 p-4 rounded-xl border border-slate-800/60"
+                  >
+                    {/* Column Header */}
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
+                      <div className="flex items-center gap-2">
+                        <ColIcon className="w-4 h-4 text-cyan-400" />
+                        <h4 className="text-xs font-bold tracking-wider text-slate-200 font-mono">
+                          {col.title}
+                        </h4>
+                      </div>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${col.badgeClass}`}>
+                        {col.badge}
+                      </span>
+                    </div>
 
-        <button
-          onClick={() => onSelectTab('console')}
-          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            activeTab === 'console' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Terminal className="w-3.5 h-3.5" />
-          <span>Console Live</span>
-        </button>
+                    <p className="text-[11px] text-slate-400 italic">
+                      {col.subtitle}
+                    </p>
 
-        <button
-          onClick={() => onSelectTab('deep-excision')}
-          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            activeTab === 'deep-excision' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Cpu className="w-3.5 h-3.5" />
-          <span>Éradication OS & Kernel</span>
-        </button>
+                    {/* Column Items */}
+                    <div className="space-y-2 pt-1">
+                      {filteredItems.length === 0 ? (
+                        <div className="py-6 text-center text-xs text-slate-500 font-mono">
+                          Aucun module correspondant dans cette colonne
+                        </div>
+                      ) : (
+                        filteredItems.map((item) => {
+                          const ItemIcon = item.icon;
+                          const isActive = activeTab === item.id;
 
-        <button
-          onClick={() => onSelectTab('forensics')}
-          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            activeTab === 'forensics' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Activity className="w-3.5 h-3.5" />
-          <span>Forensique RAM</span>
-        </button>
+                          return (
+                            <button
+                              key={item.id}
+                              onClick={() => handleSelectTab(item.id)}
+                              className={`w-full text-left p-3 rounded-lg border transition-all group flex items-start gap-3 relative ${
+                                isActive
+                                  ? 'bg-cyan-950/60 border-cyan-500/80 shadow-sm shadow-cyan-950/40'
+                                  : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-600 hover:bg-slate-900/90'
+                              }`}
+                            >
+                              {/* Module Icon Box */}
+                              <div
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border transition-colors ${
+                                  isActive
+                                    ? 'bg-cyan-900/80 border-cyan-400 text-cyan-300'
+                                    : 'bg-slate-900 border-slate-800 text-slate-400 group-hover:text-cyan-400 group-hover:border-cyan-700/60'
+                                }`}
+                              >
+                                <ItemIcon className="w-4 h-4" />
+                              </div>
 
-        <button
-          onClick={() => onSelectTab('network')}
-          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            activeTab === 'network' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Network className="w-3.5 h-3.5" />
-          <span>Réseau C2</span>
-        </button>
+                              {/* Title, Badge & Description */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <div className="flex items-center gap-2 truncate">
+                                    <span
+                                      className={`text-xs font-semibold tracking-tight transition-colors truncate ${
+                                        isActive
+                                          ? 'text-cyan-300 font-bold'
+                                          : 'text-slate-200 group-hover:text-white'
+                                      }`}
+                                    >
+                                      {item.title}
+                                    </span>
+                                  </div>
 
-        <button
-          onClick={() => onSelectTab('hardening')}
-          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            activeTab === 'hardening' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Lock className="w-3.5 h-3.5" />
-          <span>Durcissement</span>
-        </button>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <span
+                                      className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${item.tagClass}`}
+                                    >
+                                      {item.tag}
+                                    </span>
+                                    {isActive && (
+                                      <span className="text-[9px] font-mono font-bold text-cyan-400 bg-cyan-950 border border-cyan-700/60 px-1 py-0.5 rounded flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                                        ACTIF
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
 
-        <button
-          onClick={() => onSelectTab('script-hub')}
-          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-            activeTab === 'script-hub' ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <FileCode className="w-3.5 h-3.5" />
-          <span>Script Hub (.ps1)</span>
-        </button>
-      </nav>
+                                <p className="text-[11px] text-slate-400 group-hover:text-slate-300 line-clamp-2 leading-relaxed">
+                                  {item.shortDesc}
+                                </p>
+                              </div>
 
-      {/* Zone 3: 1 primary action */}
-      <div className="flex items-center gap-3 shrink-0">
-        <button
-          onClick={onDownloadZip}
-          className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-950 bg-cyan-400 rounded-lg hover:bg-cyan-300 transition-colors whitespace-nowrap shrink-0 shadow-sm shadow-cyan-500/20 active:translate-y-px"
-        >
-          <Archive className="w-3.5 h-3.5" />
-          <span>Télécharger ZIP (.zip)</span>
-        </button>
-      </div>
+                              <ArrowRight
+                                className={`w-3.5 h-3.5 mt-1 transition-transform shrink-0 ${
+                                  isActive
+                                    ? 'text-cyan-400 translate-x-0.5'
+                                    : 'text-slate-600 group-hover:text-slate-300 group-hover:translate-x-0.5'
+                                }`}
+                              />
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Mega Menu Footer: Status, Shortcuts & Export */}
+            <div className="mt-5 pt-4 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+              <div className="flex items-center gap-2 font-mono text-[11px]">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Noyau NT sécurisé · Droits SeDebugPrivilege & SeTakeOwnership actifs</span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    onOpenPdfReport();
+                    setIsMegaMenuOpen(false);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-rose-950/70 hover:bg-rose-900 border border-rose-800/80 text-rose-200 hover:text-white transition-colors text-xs font-mono font-medium shadow-sm"
+                >
+                  <FileText className="w-3 h-3 text-rose-400" />
+                  <span>Rapport Forensique (PDF)</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    onDownloadScript();
+                    setIsMegaMenuOpen(false);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white transition-colors text-xs font-mono"
+                >
+                  <Download className="w-3 h-3 text-cyan-400" />
+                  <span>SpaceSecurity_ULTRA_v3_Kernel.ps1</span>
+                </button>
+
+                <button
+                  onClick={() => setIsMegaMenuOpen(false)}
+                  className="text-xs text-slate-500 hover:text-slate-300 transition-colors font-mono"
+                >
+                  Fermer [Échap]
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
     </header>
   );
 };

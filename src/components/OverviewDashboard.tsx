@@ -19,16 +19,20 @@ import {
   Flame,
   ArrowUpDown,
   X,
-  Info
+  Info,
+  FileText,
 } from 'lucide-react';
 import { TabId, ThreatItem } from '../types/cyberdefense';
 import { ThreatHeatmap } from './ThreatHeatmap';
+import { ThreatIntensityMap } from './ThreatIntensityMap';
+import { calculateSecurityScore } from '../utils/pdfReportGenerator';
 
 interface OverviewDashboardProps {
   onNavigateTab: (tab: TabId) => void;
   onRunInConsole: (command: string) => void;
   threats: ThreatItem[];
   onDownloadZip: () => void;
+  onOpenPdfReport?: () => void;
 }
 
 export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
@@ -36,15 +40,16 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
   onRunInConsole,
   threats,
   onDownloadZip,
+  onOpenPdfReport,
 }) => {
   const [severityFilter, setSeverityFilter] = useState<'ALL' | 'CRITICAL' | 'HIGH' | 'MEDIUM'>('ALL');
   const [searchThreatQuery, setSearchThreatQuery] = useState<string>('');
   const [sortBySeverity, setSortBySeverity] = useState<boolean>(true);
 
   // Counts by severity
-  const criticalCount = threats.filter(t => t.severity === 'CRITICAL').length;
-  const highCount = threats.filter(t => t.severity === 'HIGH').length;
-  const mediumCount = threats.filter(t => t.severity === 'MEDIUM').length;
+  // Security Score calculation
+  const scoreData = useMemo(() => calculateSecurityScore(threats), [threats]);
+  const { criticalCount, highCount, mediumCount } = scoreData;
 
   const severityWeight: Record<string, number> = {
     CRITICAL: 3,
@@ -108,6 +113,16 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
               <span>Télécharger le Pack ZIP (.zip)</span>
             </button>
 
+            {onOpenPdfReport && (
+              <button
+                onClick={onOpenPdfReport}
+                className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-xs transition-colors shadow-md shadow-rose-900/30"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Générer Rapport PDF (Score Sécurité)</span>
+              </button>
+            )}
+
             <button
               onClick={() => onNavigateTab('timeline')}
               className="flex items-center gap-2 px-4 py-2 bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-700/80 text-cyan-300 font-bold rounded-lg text-xs transition-colors shadow-sm"
@@ -140,6 +155,84 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
               <span>Ouvrir la Console Live</span>
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Security Score Posture Banner with PDF Export Button */}
+      <div className="p-5 bg-gradient-to-r from-slate-900 via-slate-900/95 to-slate-950 border border-slate-800 rounded-2xl relative overflow-hidden shadow-xl">
+        <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
+          
+          {/* Left: Score Gauge Dial & Status Text */}
+          <div className="flex items-center gap-5 w-full lg:w-auto">
+            <div className="relative w-20 h-20 shrink-0 flex items-center justify-center">
+              <svg className="w-20 h-20 transform -rotate-90" viewBox="0 0 100 100">
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="40"
+                  stroke="#1e293b"
+                  strokeWidth="10"
+                  fill="transparent"
+                />
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="40"
+                  stroke={scoreData.ratingColor}
+                  strokeWidth="10"
+                  strokeDasharray={251.2}
+                  strokeDashoffset={251.2 - (251.2 * scoreData.score) / 100}
+                  strokeLinecap="round"
+                  fill="transparent"
+                  className="transition-all duration-700 ease-out"
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                <span className="text-xl font-bold font-mono text-white leading-none">
+                  {scoreData.score}
+                </span>
+                <span className="text-[9px] text-slate-400 font-mono">/ 100</span>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono uppercase tracking-wider text-slate-400">
+                  Indice de Sécurité Hôte & Ring0
+                </span>
+                <span
+                  className="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold border"
+                  style={{
+                    color: scoreData.ratingColor,
+                    borderColor: `${scoreData.ratingColor}50`,
+                    backgroundColor: `${scoreData.ratingColor}15`,
+                  }}
+                >
+                  {scoreData.ratingLabel}
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
+                Score calculé à partir des {scoreData.totalThreats} menaces identifiées :{' '}
+                <strong className="text-rose-400">{scoreData.criticalCount} critique(s)</strong>,{' '}
+                <strong className="text-orange-400">{scoreData.highCount} élevée(s)</strong>, et{' '}
+                <strong className="text-emerald-400">{scoreData.neutralizedCount} en cours d'éradication / neutralisée(s)</strong>.
+              </p>
+            </div>
+          </div>
+
+          {/* Right: PDF Action Button */}
+          {onOpenPdfReport && (
+            <div className="flex items-center gap-3 w-full lg:w-auto shrink-0 justify-end">
+              <button
+                onClick={onOpenPdfReport}
+                className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-bold text-xs shadow-lg shadow-rose-950/50 transition-all hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <FileText className="w-4 h-4 text-white" />
+                <span>Télécharger Rapport PDF Détaillé</span>
+              </button>
+            </div>
+          )}
+
         </div>
       </div>
 
@@ -200,6 +293,9 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
 
       {/* Threat Heatmap: System Areas Visualizer (Kernel, Registry, Startup, Filesystem) */}
       <ThreatHeatmap onRunInConsole={onRunInConsole} />
+
+      {/* Threat Intensity Map: D3-based Heatmap Visualizing Geographical Origin of Malicious C2 Connections */}
+      <ThreatIntensityMap onRunInConsole={onRunInConsole} onNavigateTab={onNavigateTab} />
 
       {/* Visual Threat Timeline Mini Preview & Gateway */}
       <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
