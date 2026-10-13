@@ -1,0 +1,35 @@
+{
+  "appId": "com.spacesec.cyberdefense",
+  "productName": "Space-Security",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/**/*",
+    "dist-electron/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ],
+    "requestedExecutionLevel": "highestAvailable"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Space-Security CyberDefense"
+  },
+  "portable": {
+    "artifactName": "Space-Security-Portable.exe"
+  }
+}

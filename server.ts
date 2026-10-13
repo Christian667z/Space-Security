@@ -5,8 +5,8 @@ import os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
 const execAsync = promisify(exec);
@@ -222,9 +222,9 @@ async function getWindowsHardwareSpecs(clientTelemetry?: any) {
   };
 }
 
-async function startServer() {
+export async function startServer(portOverride?: number): Promise<http.Server> {
   const app = express();
-  const PORT = 3000;
+  const PORT = portOverride || (process.env.PORT ? parseInt(process.env.PORT, 10) : 3000);
 
   app.use(express.json());
 
@@ -1198,17 +1198,25 @@ Précise l'endroit exact (bâtiment, centre de données, rue ou quartier), les s
     res.json({ success: true, state: sharedState });
   });
 
-  // Mount Vite middleware in development
-  if (process.env.NODE_ENV !== 'production') {
+  // Mount Vite middleware in development (non-bundled)
+  if (process.env.NODE_ENV !== 'production' && !process.env.IS_ELECTRON) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
+    const candidates = [
+      process.env.DIST_PATH,
+      path.join(__dirname, 'dist'),
+      path.join(__dirname, '..', 'dist'),
+      path.join(process.cwd(), 'dist'),
+    ].filter(Boolean) as string[];
+    const distPath = candidates.find(p => fs.existsSync(p)) || path.join(__dirname, 'dist');
+    app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+      res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
@@ -1383,9 +1391,17 @@ Précise l'endroit exact (bâtiment, centre de données, rue ou quartier), les s
     });
   });
 
-  httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`[SpaceSec Live Server & WebSocket Multi-User Engine] Running on http://0.0.0.0:${PORT}`);
+  return new Promise((resolve) => {
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      console.log(`[SpaceSec Live Server & WebSocket Multi-User Engine] Running on http://0.0.0.0:${PORT}`);
+      resolve(httpServer);
+    });
   });
 }
 
-startServer();
+// In standard CLI / standalone mode, start automatically
+if (process.env.IS_ELECTRON !== 'true') {
+  startServer().catch((err) => {
+    console.error('[Server Error]', err);
+  });
+}

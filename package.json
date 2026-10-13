@@ -40,7 +40,7 @@
     "@types/topojson-client": "^3.1.5",
     "@types/ws": "^8.18.2",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"
