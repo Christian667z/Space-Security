@@ -297,16 +297,17 @@ export const ThreatCategoryDonutChart: React.FC<ThreatCategoryDonutChartProps> =
                 <ResponsiveContainer width="100%" height={230}>
                   <PieChart>
                     <Tooltip
+                      wrapperStyle={{ zIndex: 100, pointerEvents: 'none' }}
+                      offset={16}
                       content={({ active, payload }) => {
                         if (active && payload && payload.length) {
                           const item = payload[0].payload as ThreatCategoryData;
-                          const Icon = item.icon;
                           return (
-                            <div className="p-3 bg-slate-950/95 border border-slate-700 rounded-xl shadow-2xl backdrop-blur-md text-xs space-y-1.5 min-w-[210px]">
+                            <div className="p-3 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl text-xs space-y-1.5 min-w-[220px] pointer-events-none select-none z-50">
                               <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
                                 <div className="flex items-center gap-1.5 font-bold text-white">
                                   <span
-                                    className="w-2.5 h-2.5 rounded-full"
+                                    className="w-2.5 h-2.5 rounded-full shrink-0"
                                     style={{ backgroundColor: item.color }}
                                   />
                                   <span>{item.name}</span>
@@ -380,19 +381,21 @@ export const ThreatCategoryDonutChart: React.FC<ThreatCategoryDonutChartProps> =
                   </PieChart>
                 </ResponsiveContainer>
 
-                {/* Donut Center Display */}
+                {/* Donut Center Display (Fades out when hovered to prevent overlap with floating tooltip) */}
                 <div 
-                  className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center select-none"
+                  className={`absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center select-none z-0 transition-opacity duration-150 ${
+                    hoveredIndex !== null ? 'opacity-0' : 'opacity-100'
+                  }`}
                   style={{ transform: 'translateY(-2px)' }}
                 >
                   <span className="text-2xl font-black font-mono tracking-tight leading-none text-white drop-shadow">
-                    {currentFocalData ? currentFocalData.count : totalThreats}
+                    {activeSelectedData ? activeSelectedData.count : totalThreats}
                   </span>
                   <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mt-1 max-w-[90px] truncate">
-                    {currentFocalData ? currentFocalData.shortLabel : 'Menaces'}
+                    {activeSelectedData ? activeSelectedData.shortLabel : 'Menaces'}
                   </span>
                   <span className="text-[9px] font-mono text-cyan-400 font-semibold leading-none mt-0.5">
-                    {currentFocalData ? `${currentFocalData.percentage}%` : '100%'}
+                    {activeSelectedData ? `${activeSelectedData.percentage}%` : '100%'}
                   </span>
                 </div>
               </>

@@ -38,6 +38,7 @@ import { TabId, ThreatItem } from '../types/cyberdefense';
 import { ThreatHeatmap } from './ThreatHeatmap';
 import { ThreatIntensityMap } from './ThreatIntensityMap';
 import { ThreatCategoryDonutChart } from './ThreatCategoryDonutChart';
+import { VulnerabilityRadarChart } from './VulnerabilityRadarChart';
 import { SharedCommandModal } from './SharedCommandModal';
 import { calculateSecurityScore } from '../utils/pdfReportGenerator';
 
@@ -482,6 +483,13 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Machine Vulnerability Radar Chart (Recharts: Services, Patchs, Ports Audits) */}
+      <VulnerabilityRadarChart
+        threats={threats}
+        onNavigateTab={onNavigateTab}
+        onRunInConsole={onRunInConsole}
+      />
 
       {/* Threat Distribution Donut Chart (Recharts) */}
       <ThreatCategoryDonutChart
