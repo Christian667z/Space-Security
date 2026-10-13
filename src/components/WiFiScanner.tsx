@@ -23,6 +23,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { WiFiNetworkItem } from '../types/cyberdefense';
+import { apiFetch } from '../utils/api';
 
 interface WiFiScannerProps {
   onRunInConsole: (command: string) => void;
@@ -37,103 +38,8 @@ export const WiFiScanner: React.FC<WiFiScannerProps> = ({ onRunInConsole }) => {
   const [selectedNetwork, setSelectedNetwork] = useState<WiFiNetworkItem | null>(null);
   const [blockedBssids, setBlockedBssids] = useState<Set<string>>(new Set());
 
-  // WiFi Networks State
-  const [networks, setNetworks] = useState<WiFiNetworkItem[]>([
-    {
-      id: 'wifi-legit-1',
-      ssid: 'SpaceSec-Secure-Corp',
-      bssid: '00:14:D1:68:55:2A',
-      channel: 36,
-      frequency: '5 GHz',
-      signalDbm: -54,
-      signalPercent: 88,
-      security: 'WPA3-SAE',
-      vendor: 'Cisco Systems / Meraki',
-      isEvilTwin: false,
-      isUnsecured: false,
-      deauthFramesDetected: 0,
-      status: 'LEGITIMATE',
-      firstSeen: '10:14:00',
-      recommendedAction: 'Point d\'accès d\'entreprise légitime homologué.',
-      mitreTechnique: 'Standard IEEE 802.11ax (WPA3-SAE)',
-    },
-    {
-      id: 'wifi-evil-1',
-      ssid: 'SpaceSec-Secure-Corp',
-      bssid: '00:C0:CA:91:DE:3F',
-      channel: 6,
-      frequency: '2.4 GHz',
-      signalDbm: -32,
-      signalPercent: 99,
-      security: 'WPA2-PSK (AES)',
-      vendor: 'Alfa Network Inc. (Rogue Dongle)',
-      isEvilTwin: true,
-      evilTwinReason: 'SSID clone usurpé avec OUI pirate (Alfa Network), déclassement de sécurité (WPA3 -> WPA2) et 148 trames de désauthentification détectées.',
-      isUnsecured: false,
-      deauthFramesDetected: 148,
-      status: 'SUSPECT_EVIL_TWIN',
-      firstSeen: '11:38:12',
-      recommendedAction: 'Bloquer le BSSID clone immédiatement et activer la protection 802.11w (PMF).',
-      mitreTechnique: 'T1557.002 - Rogue AP / Evil Twin Spoofing',
-      legitimateTwinBssid: '00:14:D1:68:55:2A',
-    },
-    {
-      id: 'wifi-open-1',
-      ssid: 'FreeWifi_Public_Guest',
-      bssid: 'F4:8E:38:22:1A:BC',
-      channel: 1,
-      frequency: '2.4 GHz',
-      signalDbm: -68,
-      signalPercent: 62,
-      security: 'OPEN_UNSECURED',
-      vendor: 'TP-Link Corporation',
-      isEvilTwin: false,
-      isUnsecured: true,
-      evilTwinReason: 'Réseau sans aucun chiffrement 802.11. Trafic exposé aux attaques de reniflage (Packet Sniffing) et détournement de session.',
-      deauthFramesDetected: 0,
-      status: 'UNSECURED_WARNING',
-      firstSeen: '10:20:15',
-      recommendedAction: 'Éviter toute connexion sans tunnel VPN IPsec / WireGuard chiffré.',
-      mitreTechnique: 'T1040 - Network Sniffing / Cleartext Exposure',
-    },
-    {
-      id: 'wifi-legit-2',
-      ssid: 'EDR-Lab-VLAN20',
-      bssid: '24:A4:3C:99:41:88',
-      channel: 44,
-      frequency: '5 GHz',
-      signalDbm: -58,
-      signalPercent: 78,
-      security: 'WPA2-Enterprise',
-      vendor: 'Ubiquiti Networks (UniFi AP)',
-      isEvilTwin: false,
-      isUnsecured: false,
-      deauthFramesDetected: 0,
-      status: 'LEGITIMATE',
-      firstSeen: '09:45:00',
-      recommendedAction: 'Authentification RADIUS 802.1X vérifiée.',
-      mitreTechnique: 'Isolation 802.1X EAP-TLS',
-    },
-    {
-      id: 'wifi-evil-2',
-      ssid: 'Airport_Free_WiFi',
-      bssid: 'B8:27:EB:55:92:01',
-      channel: 11,
-      frequency: '2.4 GHz',
-      signalDbm: -39,
-      signalPercent: 93,
-      security: 'OPEN_UNSECURED',
-      vendor: 'Raspberry Pi Foundation (WiFi Pineapple Rogue)',
-      isEvilTwin: true,
-      evilTwinReason: 'Borne pirate mimant un hotspot d\'aéroport sur Raspberry Pi. Faux portail captif pour siphonner les identifiants et certificats.',
-      isUnsecured: true,
-      deauthFramesDetected: 36,
-      status: 'SUSPECT_EVIL_TWIN',
-      firstSeen: '11:35:40',
-      recommendedAction: 'Portail de phishing malveillant. Bloquer l\'adresse BSSID.',
-      mitreTechnique: 'T1557 - Adversary-in-the-Middle (Honeypot AP)',
-    },
-  ]);
+  // WiFi Networks State - starts empty and populates with real local Wi-Fi networks
+  const [networks, setNetworks] = useState<WiFiNetworkItem[]>([]);
 
   // Fetch or trigger scan from server
   const handlePerformScan = useCallback(async () => {
@@ -142,7 +48,7 @@ export const WiFiScanner: React.FC<WiFiScannerProps> = ({ onRunInConsole }) => {
     onRunInConsole('netsh wlan show networks mode=bssid');
 
     try {
-      const res = await fetch('/api/system/wifi');
+      const res = await apiFetch('/api/system/wifi');
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.networks) && data.networks.length > 0) {
@@ -164,6 +70,11 @@ export const WiFiScanner: React.FC<WiFiScannerProps> = ({ onRunInConsole }) => {
       });
     }, 250);
   }, [onRunInConsole]);
+
+  // Initial scan on component mount
+  useEffect(() => {
+    handlePerformScan();
+  }, [handlePerformScan]);
 
   // Live sniffing simulation (small jitter in signal & deauth count)
   useEffect(() => {

@@ -63,7 +63,7 @@ async function startBackendServer(): Promise<number> {
     const startServerFn = serverMod.startServer || serverMod.default?.startServer || (typeof serverMod === 'function' ? serverMod : null);
     if (typeof startServerFn === 'function') {
       await startServerFn(port);
-      console.log(`[Electron Main] Embedded SpaceSec server started on port ${port}`);
+      console.log(`[Electron Main] Embedded Space Security server started on port ${port}`);
     }
   } catch (err) {
     console.error('[Electron Main] Failed to dynamically start server module:', err);
@@ -81,7 +81,7 @@ async function createWindow() {
     backgroundColor: '#020617', // Dark slate cyber background
     show: false,
     autoHideMenuBar: true,
-    title: 'SpaceSec CyberDefense Suite & Kernel Extirpator',
+    title: 'Space Security - CyberDefense Suite & Kernel Extirpator',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

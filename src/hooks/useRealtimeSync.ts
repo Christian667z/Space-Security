@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ThreatItem, ConsoleLogMessage, OperatorSession, ThreatNotification } from '../types/cyberdefense';
+import { apiFetch, getWsUrl } from '../utils/api';
 
 interface UseRealtimeSyncProps {
   onNotification?: (notification: Omit<ThreatNotification, 'id' | 'timestamp'>) => void;
@@ -25,7 +26,7 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
   // Fallback REST fetch to ensure fast first render
   const fetchInitialState = useCallback(async () => {
     try {
-      const res = await fetch('/api/shared/state');
+      const res = await apiFetch('/api/shared/state');
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.state) {
@@ -67,8 +68,7 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
     setConnectionStatus('connecting');
 
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      const wsUrl = getWsUrl();
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -307,7 +307,7 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
       } catch (err) {
         console.warn('[Sync] WS send failed, fallback to REST:', err);
         // Fallback REST call
-        fetch('/api/shared/mutate', {
+        apiFetch('/api/shared/mutate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action, payload, operator: currentOperator }),
@@ -315,7 +315,7 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
       }
     } else {
       // Offline/connecting fallback REST
-      fetch('/api/shared/mutate', {
+      apiFetch('/api/shared/mutate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, payload, operator: currentOperator }),

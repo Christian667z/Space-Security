@@ -1,9 +1,9 @@
 {
-  "name": "spacesec-cyberdefense-suite",
+  "name": "space-security",
   "private": true,
   "version": "1.0.0",
-  "description": "SpaceSec CyberDefense Suite & Kernel Extirpator",
-  "author": "SpaceSec",
+  "description": "Space Security - CyberDefense Suite & Kernel Extirpator",
+  "author": "Space Security",
   "main": "dist-electron/main.cjs",
   "type": "module",
   "scripts": {

@@ -58,56 +58,8 @@ export const BITSTaskManager: React.FC<BITSTaskManagerProps> = ({ onRunInConsole
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
   const [isSimulateModalOpen, setIsSimulateModalOpen] = useState(false);
 
-  // Initial BITS Jobs database with real-world persistence and exfiltration vectors
+  // Initial BITS Jobs database (legitimate system transfers)
   const [jobs, setJobs] = useState<BITSJobItem[]>([
-    {
-      id: '{8F3C-41A9-E20B-78D1}',
-      jobName: 'WindowsUpdateHelper',
-      owner: 'NT AUTHORITY\\SYSTEM',
-      state: 'TRANSFERRING',
-      direction: 'DOWNLOAD',
-      remoteUrl: 'http://185.220.101.4/payload.bin',
-      localPath: 'C:\\Users\\User\\AppData\\Local\\Temp\\stage2.bin',
-      transferredBytes: '1.42 MB / 2.80 MB (51%)',
-      isSuspicious: true,
-      threatDetails: 'Téléchargement furtif de payload C2 Trojan.Swisyn contournant le pare-feu applicatif',
-      mitreTactic: 'T1197 - BITS Jobs / T1105 - Ingress Tool Transfer',
-      notifyCmdLine: 'powershell.exe -ExecutionPolicy Bypass -File C:\\Users\\User\\AppData\\Local\\Temp\\stage2.bin',
-      priority: 'NORMAL',
-      creationTime: 'Aujourd\'hui, 06:14:22',
-    },
-    {
-      id: '{3C7D-90E1-A42F-1197}',
-      jobName: 'DiagnosticDataExfil',
-      owner: 'SYSTEM',
-      state: 'SUSPENDED',
-      direction: 'UPLOAD_EXFIL',
-      remoteUrl: 'http://45.154.255.89:8080/collect',
-      localPath: 'C:\\ProgramData\\loot_archive.zip',
-      transferredBytes: '840 KB / 840 KB (100% en attente d\'acquittement)',
-      isSuspicious: true,
-      threatDetails: 'Exfiltration silencieuse de credentials et hashes SAM compressés via HTTP POST asynchrone',
-      mitreTactic: 'T1197 - BITS Jobs / T1048 - Exfiltration Over Alternative Protocol',
-      notifyCmdLine: 'cmd.exe /c del C:\\ProgramData\\loot_archive.zip',
-      priority: 'LOW',
-      creationTime: 'Aujourd\'hui, 07:02:11',
-    },
-    {
-      id: '{E50A-7782-B114-44FA}',
-      jobName: 'ChromeUpdateTaskPersistent',
-      owner: 'NT AUTHORITY\\LOCAL SERVICE',
-      state: 'TRANSFERRING',
-      direction: 'DOWNLOAD',
-      remoteUrl: 'http://evil-c2-cdn.org/beacon.dll',
-      localPath: 'C:\\Windows\\System32\\spool\\drivers\\color\\beacon.dll',
-      transferredBytes: '320 KB / 1.15 MB (27%)',
-      isSuspicious: true,
-      threatDetails: 'Persistance par Notification Command Line déclenchant une DLL injection à l\'achèvement du téléchargement',
-      mitreTactic: 'T1197 - BITS Jobs / T1574.002 - DLL Side-Loading',
-      notifyCmdLine: 'rundll32.exe C:\\Windows\\System32\\spool\\drivers\\color\\beacon.dll,DllRegisterServer',
-      priority: 'NORMAL',
-      creationTime: 'Aujourd\'hui, 08:45:00',
-    },
     {
       id: '{D42E-1197-00AA-8812}',
       jobName: 'WU-DefinitionUpdate',

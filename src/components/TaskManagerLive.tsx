@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { BITSTaskManager } from './BITSTaskManager';
+import { apiFetch } from '../utils/api';
 
 interface TaskManagerLiveProps {
   onRunInConsole: (command: string) => void;
@@ -240,7 +241,7 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
     setIsQueryingHardware(true);
     try {
       const telemetry = getClientHardwareTelemetry();
-      const res = await fetch('/api/system/specs', {
+      const res = await apiFetch('/api/system/specs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(telemetry),
@@ -317,7 +318,7 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
   }) => {
     try {
       setSyncErrorMsg(null);
-      const res = await fetch('/api/system/specs/sync', {
+      const res = await apiFetch('/api/system/specs/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(specsToSync),
@@ -363,15 +364,7 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
     fetchHardwareSpecs();
   }, [fetchHardwareSpecs, activeSubTab]);
 
-  const [processes, setProcesses] = useState<ProcessItem[]>([
-    { pid: 4, name: 'System (Kernel)', cpu: 1.2, ramMb: 120, status: 'Running', user: 'SYSTEM' },
-    { pid: 1492, name: 'services.exe', cpu: 0.4, ramMb: 24, status: 'Running', user: 'SYSTEM' },
-    { pid: 2140, name: 'svchost.exe', cpu: 1.8, ramMb: 85, status: 'Running', user: 'NETWORK SERVICE' },
-    { pid: 3880, name: 'explorer.exe', cpu: 2.5, ramMb: 165, status: 'Running', user: 'LocalUser' },
-    { pid: 5824, name: 'svch0st_updater.exe', cpu: 24.8, ramMb: 310, status: 'Running', user: 'LocalUser', isSuspicious: true },
-    { pid: 7340, name: 'powershell.exe', cpu: 6.4, ramMb: 82, status: 'Running', user: 'LocalUser', isSuspicious: true },
-    { pid: 9110, name: 'chrome.exe', cpu: 4.2, ramMb: 420, status: 'Running', user: 'LocalUser' },
-  ]);
+  const [processes, setProcesses] = useState<ProcessItem[]>([]);
 
   const [historyMetrics, setHistoryMetrics] = useState<MetricPoint[]>(() => {
     const list: MetricPoint[] = [];
@@ -401,7 +394,7 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
           cores: String(telemetry.cores),
           osName: telemetry.osName,
         });
-        const res = await fetch(`/api/system/taskmanager?${queryParams.toString()}`);
+        const res = await apiFetch(`/api/system/taskmanager?${queryParams.toString()}`);
         if (res.ok) {
           const data = await res.json();
           if (data.success) {
@@ -464,7 +457,7 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
 
   const handleKillProcess = async (pid: number, name: string) => {
     try {
-      const res = await fetch('/api/system/kill', {
+      const res = await apiFetch('/api/system/kill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pid }),
@@ -680,21 +673,32 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
           </div>
         </div>
 
-        <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
-          <div className="flex items-center justify-between text-slate-400 text-[11px] font-sans">
-            <span className="flex items-center gap-1.5">
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
-              Processus Suspects
-            </span>
-            <span className="text-rose-400 font-bold">ALERTE</span>
-          </div>
-          <div className="text-xl font-bold text-rose-400 tabular-nums">
-            {processes.filter(p => p.isSuspicious).length} Détecté(s)
-          </div>
-          <div className="text-[10px] text-slate-500 font-sans">
-            Prêts pour Fin de Tâche
-          </div>
-        </div>
+        {(() => {
+          const suspiciousCount = processes.filter(p => p.isSuspicious).length;
+          return (
+            <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
+              <div className="flex items-center justify-between text-slate-400 text-[11px] font-sans">
+                <span className="flex items-center gap-1.5">
+                  {suspiciousCount > 0 ? (
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  )}
+                  Processus Suspects
+                </span>
+                <span className={suspiciousCount > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}>
+                  {suspiciousCount > 0 ? 'ALERTE' : 'INTÈGRE'}
+                </span>
+              </div>
+              <div className={`text-xl font-bold tabular-nums ${suspiciousCount > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {suspiciousCount} {suspiciousCount > 0 ? 'Détecté(s)' : 'Détecté'}
+              </div>
+              <div className={`text-[10px] font-sans ${suspiciousCount > 0 ? 'text-rose-400/80' : 'text-slate-500'}`}>
+                {suspiciousCount > 0 ? 'Prêts pour Fin de Tâche' : 'Tous les processus sont sains'}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* SUB-TAB 1: PROCESS LIST WITH END TASK */}

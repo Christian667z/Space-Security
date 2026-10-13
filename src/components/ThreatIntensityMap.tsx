@@ -42,6 +42,7 @@ import {
   PROTECTED_SYSTEM_LOCATION,
   TargetHostLocation,
 } from '../data/threatGeoData';
+import { apiFetch } from '../utils/api';
 
 interface ThreatIntensityMapProps {
   onRunInConsole: (command: string) => void;
@@ -62,7 +63,7 @@ export const ThreatIntensityMap: React.FC<ThreatIntensityMapProps> = ({
 
   // UI & View States
   const [selectedThreat, setSelectedThreat] = useState<ThreatGeoLocation | null>(
-    DETECTED_MALICIOUS_ORIGINS[0]
+    DETECTED_MALICIOUS_ORIGINS[0] || null
   );
   const [projectionMode, setProjectionMode] = useState<'2D_MAPBOX' | '3D_GLOBE'>('2D_MAPBOX');
   const [filterType, setFilterType] = useState<string>('ALL');
@@ -86,7 +87,7 @@ export const ThreatIntensityMap: React.FC<ThreatIntensityMapProps> = ({
 
     // Strategy 1: Check internal proxy endpoint /api/system/geo
     try {
-      const res = await fetch('/api/system/geo');
+      const res = await apiFetch('/api/system/geo');
       if (res.ok) {
         const data = await res.json();
         if (data && data.success && data.latitude && data.longitude) {
@@ -992,6 +993,24 @@ export const ThreatIntensityMap: React.FC<ThreatIntensityMapProps> = ({
               <button
                 onClick={() => onRunInConsole(`sockets`)}
                 className="w-full py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-mono text-xs rounded-lg transition-colors"
+              >
+                Inspecter tous les sockets ouverts (Netstat)
+              </button>
+            </div>
+          ) : (
+            <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800 text-center space-y-2">
+              <div className="w-8 h-8 rounded-full bg-emerald-950/80 border border-emerald-800 text-emerald-400 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+              <div className="text-xs font-bold text-slate-200">
+                0 Balise C2 Malveillante Détectée
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Tous les flux réseau sortants vers des infrastructures distantes sont sains.
+              </p>
+              <button
+                onClick={() => onRunInConsole(`sockets`)}
+                className="w-full mt-2 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-mono text-xs rounded-lg transition-colors"
               >
                 Inspecter tous les sockets ouverts (Netstat)
               </button>

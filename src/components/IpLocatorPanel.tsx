@@ -64,14 +64,13 @@ export const IpLocatorPanel: React.FC<IpLocatorPanelProps> = ({
     '8.8.8.8',
   ]);
 
-  // Target presets
+  // Target presets (clean real-world network anchors)
   const presets = [
-    { label: 'Mon IP Locale / Hôte', ip: '', tag: 'LOCAL', color: 'border-cyan-800 text-cyan-400 bg-cyan-950/40' },
-    { label: 'C2 Cobalt Strike (Tor)', ip: '185.220.101.4', tag: 'C2 THREAT', color: 'border-rose-800 text-rose-400 bg-rose-950/40' },
-    { label: 'PowerShell Trojan C2', ip: '45.154.255.89', tag: 'HOSTILE', color: 'border-amber-800 text-amber-400 bg-amber-950/40' },
-    { label: 'Job BITS Exfiltration', ip: '194.26.29.112', tag: 'EXFIL', color: 'border-purple-800 text-purple-400 bg-purple-950/40' },
-    { label: 'Cloudflare DNS Edge', ip: '1.1.1.1', tag: 'SECURE', color: 'border-blue-800 text-blue-400 bg-blue-950/40' },
-    { label: 'Google Primary Anycast', ip: '8.8.8.8', tag: 'ANYCAST', color: 'border-emerald-800 text-emerald-400 bg-emerald-950/40' },
+    { label: 'Mon IP Publique', ip: '', tag: 'HÔTE ACTUEL', color: 'border-cyan-800 text-cyan-400 bg-cyan-950/40' },
+    { label: 'Passerelle LAN (192.168.1.1)', ip: '192.168.1.1', tag: 'ROUTEUR LOCAL', color: 'border-slate-800 text-slate-300 bg-slate-900/60' },
+    { label: 'Cloudflare DNS (1.1.1.1)', ip: '1.1.1.1', tag: 'DNS ANYCAST', color: 'border-blue-800 text-blue-400 bg-blue-950/40' },
+    { label: 'Google Primary DNS (8.8.8.8)', ip: '8.8.8.8', tag: 'DNS ANYCAST', color: 'border-emerald-800 text-emerald-400 bg-emerald-950/40' },
+    { label: 'Quad9 Sécurisé (9.9.9.9)', ip: '9.9.9.9', tag: 'DNS CYBERDEFENSE', color: 'border-purple-800 text-purple-400 bg-purple-950/40' },
   ];
 
   // Lookup function
@@ -80,7 +79,8 @@ export const IpLocatorPanel: React.FC<IpLocatorPanelProps> = ({
     setError(null);
     try {
       const trimmed = targetIp.trim();
-      const res = await fetch(`/api/ip/geolocate?ip=${encodeURIComponent(trimmed)}`);
+      const baseUrl = typeof window !== 'undefined' && window.location.protocol === 'file:' ? 'http://127.0.0.1:3000' : '';
+      const res = await fetch(`${baseUrl}/api/ip/geolocate?ip=${encodeURIComponent(trimmed)}`);
       if (!res.ok) {
         throw new Error(`Erreur réseau (${res.status}) lors de la résolution de l'IP`);
       }
@@ -100,9 +100,9 @@ export const IpLocatorPanel: React.FC<IpLocatorPanelProps> = ({
     }
   }, [recentSearches]);
 
-  // Initial lookup on mount or initialIp change
+  // Initial lookup on mount or initialIp change (defaults to current machine IP)
   useEffect(() => {
-    const ipToQuery = initialIp || '185.220.101.4';
+    const ipToQuery = initialIp || '';
     setSearchQuery(ipToQuery);
     lookupIp(ipToQuery);
   }, [initialIp, lookupIp]);

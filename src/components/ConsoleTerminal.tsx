@@ -110,7 +110,7 @@ export const ConsoleTerminal: React.FC<ConsoleTerminalProps> = ({
           </div>
           <Terminal className="w-4 h-4 text-cyan-400" />
           <span className="text-slate-200 font-semibold tracking-wide">
-            SpaceSec Live CyberDefense Shell · Windows NT [Root / TrustedInstaller Access]
+            Space Security Live CyberDefense Shell · Windows NT [Root / TrustedInstaller Access]
           </span>
         </div>
 
@@ -175,7 +175,7 @@ export const ConsoleTerminal: React.FC<ConsoleTerminalProps> = ({
         className="flex-1 p-4 overflow-y-auto space-y-1 bg-black/60 scrollbar-thin scrollbar-thumb-slate-800"
       >
         <div className="text-slate-500 mb-3 pb-2 border-b border-slate-900">
-          <span className="text-cyan-400 font-bold">SpaceSec Ultra Engine v3.0</span> - Initialisation des privilèges SeDebugPrivilege et SeTakeOwnershipPrivilege terminée.
+          <span className="text-cyan-400 font-bold">Space Security Engine v3.0</span> - Initialisation des privilèges SeDebugPrivilege et SeTakeOwnershipPrivilege terminée.
           <br />
           Prêt pour l'analyse forensique, interception C2 et éradication racine de malwares OS/Kernel. Tapez <span className="text-amber-300">'help'</span> pour la liste des commandes.
         </div>
@@ -206,7 +206,7 @@ export const ConsoleTerminal: React.FC<ConsoleTerminalProps> = ({
         className="flex items-center gap-2 px-4 py-3 bg-slate-900 border-t border-slate-800"
       >
         <span className="text-cyan-400 font-bold select-none shrink-0">
-          SpaceSec#
+          SpaceSecurity#
         </span>
         <input
           ref={inputRef}

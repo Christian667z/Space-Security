@@ -30,36 +30,12 @@ import { generateAndDownloadPdfReport } from './utils/pdfReportGenerator';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
-  const [targetIpToLocate, setTargetIpToLocate] = useState<string>('185.220.101.4');
+  const [targetIpToLocate, setTargetIpToLocate] = useState<string>('');
   const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
   const [isCollabModalOpen, setIsCollabModalOpen] = useState<boolean>(false);
 
-  const [threatToasts, setThreatToasts] = useState<ThreatNotification[]>([
-    {
-      id: 'toast-init-1',
-      timestamp: '07:35:05',
-      title: 'Balise C2 Détectée (Port 4444)',
-      description: 'Connexion réseau sortante vers 185.220.101.4 initiée par svch0st_updater.exe (PID 5824).',
-      severity: 'CRITICAL',
-      category: 'C2',
-      source: 'C2-HUNTER / Network Monitor',
-      targetTab: 'network',
-      actionCommand: 'kill 5824',
-      actionLabel: 'Abattre PID 5824',
-    },
-    {
-      id: 'toast-init-2',
-      timestamp: '07:35:06',
-      title: 'Driver Rootkit Verrouillé',
-      description: 'Hook noyau sur IRP_MJ_CREATE protégé par TrustedInstaller : suspicious_kernel_hook.sys.',
-      severity: 'HIGH',
-      category: 'Kernel',
-      source: 'KERNEL-LOCK / P/Invoke',
-      targetTab: 'deep-excision',
-      actionCommand: 'unlock C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys',
-      actionLabel: 'Déverrouiller & Supprimer',
-    },
-  ]);
+  // Initial toast list starts clean (no fake simulated alerts)
+  const [threatToasts, setThreatToasts] = useState<ThreatNotification[]>([]);
 
   const addThreatToast = (notification: Omit<ThreatNotification, 'id' | 'timestamp'>) => {
     const now = new Date();
@@ -92,7 +68,8 @@ export default function App() {
     onNotification: addThreatToast,
   });
 
-  const [isToastSimulationActive, setIsToastSimulationActive] = useState(true);
+  // Simulation is OFF by default so users only see real telemetry
+  const [isToastSimulationActive, setIsToastSimulationActive] = useState<boolean>(false);
 
   const handleDismissToast = (id: string) => {
     setThreatToasts(prev => prev.filter(t => t.id !== id));
@@ -102,7 +79,7 @@ export default function App() {
     setThreatToasts([]);
   };
 
-  // Automated background threat simulation ticker
+  // Test pool for manual sandbox verification only
   const simulationPool: Array<Omit<ThreatNotification, 'id' | 'timestamp'>> = [
     {
       title: 'Tâche BITS d\'Exfiltration Détectée',
@@ -134,45 +111,24 @@ export default function App() {
       actionCommand: 'defender-exclusions',
       actionLabel: 'Auditer les exclusions',
     },
-    {
-      title: 'Scan Furtif de Ports Sortants Détecté',
-      description: 'Flux TCP SYN consécutifs vers 8 sous-réseaux externes non répertoriés (Analyse heuristique).',
-      severity: 'MEDIUM',
-      category: 'Network',
-      source: 'NetFilter Driver',
-      targetTab: 'network',
-      actionCommand: 'sockets',
-      actionLabel: 'Voir sockets ouverts',
-    },
-    {
-      title: 'Piège IFEO Actif sur taskmgr.exe',
-      description: 'Clé Debugger détournée pour masquer la liste des processus actifs lors du lancement du Gestionnaire.',
-      severity: 'CRITICAL',
-      category: 'Persistence',
-      source: 'Registry Inspector',
-      targetTab: 'overview',
-      actionCommand: 'ifeo',
-      actionLabel: 'Corriger IFEO',
-    },
   ];
 
-  // Manual trigger button to test anytime
+  // Manual trigger button to test anytime if requested
   const handleTriggerTestThreat = () => {
     const randomThreat = simulationPool[Math.floor(Math.random() * simulationPool.length)];
     addThreatToast(randomThreat);
-    addLog('WARN', `[THREAT-ALERT] ${randomThreat.title} - ${randomThreat.description}`, randomThreat.category.toUpperCase());
+    addLog('WARN', `[TEST-SANDBOX] ${randomThreat.title} - ${randomThreat.description}`, randomThreat.category.toUpperCase());
   };
 
-  // Periodic threat stream simulation if active
+  // Periodic threat stream simulation is DISABLED by default for authentic user experience
   React.useEffect(() => {
     if (!isToastSimulationActive) return;
 
     const interval = setInterval(() => {
-      // Pick a random simulated event every 35 seconds
       const randomThreat = simulationPool[Math.floor(Math.random() * simulationPool.length)];
       addThreatToast(randomThreat);
       addLog('WARN', `[SENTINEL-LOG] ${randomThreat.title} : ${randomThreat.description}`, randomThreat.category.toUpperCase());
-    }, 38000);
+    }, 45000);
 
     return () => clearInterval(interval);
   }, [isToastSimulationActive]);
@@ -997,7 +953,7 @@ export default function App() {
       <footer className="border-t border-slate-900 bg-slate-950 py-6 px-6 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-300">SpaceSec CyberDefense Suite</span>
+            <span className="font-semibold text-slate-300">Space Security CyberDefense Suite</span>
             <span aria-hidden="true">·</span>
             <span>Édition Kernel v3.0</span>
             <span aria-hidden="true">·</span>

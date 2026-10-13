@@ -1,6 +1,6 @@
 {
-  "appId": "com.spacesec.cyberdefense",
-  "productName": "Space-Security",
+  "appId": "com.spacesecurity.cyberdefense",
+  "productName": "Space Security",
   "directories": {
     "output": "release"
   },
@@ -29,7 +29,7 @@
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
-    "shortcutName": "Space-Security CyberDefense"
+    "shortcutName": "Space Security"
   },
   "portable": {
     "artifactName": "Space-Security-Portable.exe"

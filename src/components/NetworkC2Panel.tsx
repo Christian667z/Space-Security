@@ -24,6 +24,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tool
 import { NetworkConnectionItem } from '../types/cyberdefense';
 import { PortScanner } from './PortScanner';
 import { WiFiScanner } from './WiFiScanner';
+import { apiFetch } from '../utils/api';
 
 interface HostGeoInfo {
   ip: string;
@@ -52,67 +53,37 @@ interface TrafficDataPoint {
 }
 
 export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, onLocateIp }) => {
-  const [connections] = useState<NetworkConnectionItem[]>([
-    {
-      local: '192.168.1.42:52110',
-      remote: '142.250.190.46:443',
-      protocol: 'TCP',
-      pid: 3880,
-      processName: 'chrome.exe',
-      state: 'ESTABLISHED',
-      isSuspicious: false,
-      country: 'US',
-      intel: 'Google Services (HTTPS)',
-    },
-    {
-      local: '192.168.1.42:52314',
-      remote: '185.220.101.4:4444',
-      protocol: 'TCP',
-      pid: 5824,
-      processName: 'svch0st_updater.exe',
-      state: 'ESTABLISHED',
-      isSuspicious: true,
-      country: 'RU/Tor Exit Node',
-      intel: 'Port 4444 typique Metasploit / C2 Cobalt Strike Beaconing',
-    },
-    {
-      local: '192.168.1.42:52410',
-      remote: '45.154.255.89:8080',
-      protocol: 'TCP',
-      pid: 7340,
-      processName: 'powershell.exe',
-      state: 'ESTABLISHED',
-      isSuspicious: true,
-      country: 'BG',
-      intel: 'Connexion sortante PowerShell vers IP sous surveillance Threat Intel',
-    },
-    {
-      local: '0.0.0.0:135',
-      remote: '0.0.0.0:0',
-      protocol: 'TCP',
-      pid: 1044,
-      processName: 'svchost.exe',
-      state: 'LISTENING',
-      isSuspicious: false,
-      intel: 'RPC Endpoint Mapper (Local)',
-    },
-    {
-      local: '0.0.0.0:445',
-      remote: '0.0.0.0:0',
-      protocol: 'TCP',
-      pid: 4,
-      processName: 'System',
-      state: 'LISTENING',
-      isSuspicious: true,
-      intel: 'Port SMB 445 ouvert (Risque propagation WannaCry / EternalBlue si SMBv1 actif)',
-    },
-  ]);
+  const [connections, setConnections] = useState<NetworkConnectionItem[]>([]);
+  const [isLoadingSockets, setIsLoadingSockets] = useState<boolean>(false);
+
+  const fetchRealSockets = useCallback(async () => {
+    try {
+      setIsLoadingSockets(true);
+      const res = await apiFetch('/api/system/sockets');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.connections)) {
+          setConnections(data.connections);
+        }
+      }
+    } catch (err) {
+      console.warn('[Network Sockets Fetch Error]:', err);
+    } finally {
+      setIsLoadingSockets(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRealSockets();
+    const interval = setInterval(fetchRealSockets, 4000);
+    return () => clearInterval(interval);
+  }, [fetchRealSockets]);
 
   const namedPipes = [
-    { name: '\\\\.\\pipe\\msagent_6812', isSuspicious: true, description: 'Format type Cobalt Strike Beacon Named Pipe' },
-    { name: '\\\\.\\pipe\\postex_ssh_412', isSuspicious: true, description: 'Format post-exploitation Metasploit' },
-    { name: '\\\\.\\pipe\\lsass', isSuspicious: false, description: 'Tuyau système légitime Local Security Authority' },
-    { name: '\\\\.\\pipe\\spoolss', isSuspicious: false, description: 'Spooler d\'impression Windows' },
+    { name: '\\\\.\\pipe\\lsass', isSuspicious: false, description: 'Tuyau système légitime Local Security Authority (LSASS)' },
+    { name: '\\\\.\\pipe\\spoolss', isSuspicious: false, description: 'Spooler d\'impression Windows officiel' },
+    { name: '\\\\.\\pipe\\ntsvcs', isSuspicious: false, description: 'Contrôleur de services Windows NT (services.exe)' },
+    { name: '\\\\.\\pipe\\epmapper', isSuspicious: false, description: 'Mappage d\'extrémités RPC Windows légitime' },
   ];
 
   // Real-time Traffic Simulator for Malicious IPs
@@ -145,7 +116,7 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, 
     setIsDetectingHostIp(true);
     setDetectError(null);
     try {
-      const res = await fetch('/api/system/geo');
+      const res = await apiFetch('/api/system/geo');
       if (!res.ok) throw new Error(`Erreur réseau (${res.status})`);
       const data = await res.json();
       if (data && data.success && data.ip) {

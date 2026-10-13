@@ -1,5 +1,5 @@
 {
-  "name": "SpaceSec CyberDefense Suite & Kernel Extirpator",
+  "name": "Space Security - CyberDefense Suite & Kernel Extirpator",
   "description": "Suite avancée de cyberdéfense, console d'analyse en temps réel, éradication profonde de malwares au niveau OS/SYSTEM et générateur de scripts PowerShell ultra-boostés.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

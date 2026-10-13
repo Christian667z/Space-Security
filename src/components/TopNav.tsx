@@ -291,7 +291,7 @@ export const TopNav: React.FC<TopNavProps> = ({
               <div className="flex flex-col">
                 <div className="flex items-center gap-2">
                   <span className="text-base font-bold tracking-tight text-white font-['Plus_Jakarta_Sans']">
-                    SpaceSec Ultra
+                    Space Security
                   </span>
                   <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 hidden sm:inline-block">
                     Kernel v3.0
@@ -475,7 +475,7 @@ export const TopNav: React.FC<TopNavProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-white tracking-wide uppercase font-mono flex items-center gap-2">
-                    Centre de Contrôle & Navigation SpaceSec
+                    Centre de Contrôle & Navigation Space Security
                     <span className="text-[10px] text-cyan-400 font-mono font-normal px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-800/50">
                       2 Colonnes
                     </span>
