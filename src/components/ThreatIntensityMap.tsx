@@ -958,7 +958,7 @@ export const ThreatIntensityMap: React.FC<ThreatIntensityMapProps> = ({
           </div>
 
           {/* Action Buttons for Selected Node */}
-          {selectedThreat && (
+          {selectedThreat ? (
             <div className="pt-4 border-t border-slate-800 space-y-2">
               {selectedThreat.status === 'BLOCKED' ? (
                 <button

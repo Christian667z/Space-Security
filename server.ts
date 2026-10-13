@@ -571,6 +571,8 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
         if (queryIp === '127.0.0.1' || queryIp === '::1') queryIp = '';
       }
 
+      const isLocalOrEmpty = Boolean(!rawIp || isPrivateLan);
+
       // 1. Fetch IP Geolocation Data from ip-api.com
       let geoData: any = null;
       try {
@@ -1598,7 +1600,7 @@ Précise l'endroit exact (bâtiment, centre de données, rue ou quartier), les s
       const fileStream = fs.createReadStream(targetPath);
       await new Promise((resolve, reject) => {
         fileStream.on('data', data => hash.update(data));
-        fileStream.on('end', resolve);
+        fileStream.on('end', () => resolve(true));
         fileStream.on('error', reject);
       });
       const sha256 = hash.digest('hex');

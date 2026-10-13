@@ -659,7 +659,7 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole, onMu
                     </td>
                   </tr>
                 );
-              })}
+              }))}
             </tbody>
           </table>
         </div>
