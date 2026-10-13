@@ -6,6 +6,7 @@ export type TabId =
   | 'heuristic'
   | 'console'
   | 'deep-excision'
+  | 'deep-detection'
   | 'forensics'
   | 'network'
   | 'wifi'

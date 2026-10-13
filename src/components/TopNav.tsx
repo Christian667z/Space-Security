@@ -27,6 +27,7 @@ import {
   MapPin,
   Wifi,
   Wrench,
+  ShieldAlert,
 } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
@@ -205,6 +206,15 @@ export const TopNav: React.FC<TopNavProps> = ({
           icon: Zap,
           tag: 'RING 0',
           tagClass: 'text-rose-400 bg-rose-950/70 border-rose-800/50',
+        },
+        {
+          id: 'deep-detection',
+          title: 'Détection Profonde (Menus 10-14)',
+          category: 'Menus 10 à 14',
+          shortDesc: 'Usurpation de processus, processus cachés brute-force PID, quarantaine restaurable & règles ASR.',
+          icon: ShieldAlert,
+          tag: 'MENUS 10-14',
+          tagClass: 'text-cyan-400 bg-cyan-950/70 border-cyan-800/50',
         },
         {
           id: 'forensics',

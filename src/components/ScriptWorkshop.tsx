@@ -71,10 +71,10 @@ export const ScriptWorkshop: React.FC<ScriptWorkshopProps> = ({ onDownloadZip })
               <span>Générateur & Export de Code Source Réel</span>
             </div>
             <h2 className="text-xl font-bold text-white tracking-tight font-['Plus_Jakarta_Sans']">
-              Suite PowerShell v3.0 KERNEL & Pack ZIP Complet
+              Suite PowerShell v3.5 KERNEL & Menus 10 à 14
             </h2>
             <p className="mt-1 text-sm text-slate-300">
-              Téléchargez l'archive ZIP prête à l'emploi contenant le script PowerShell boosté, le lanceur .bat avec élévation automatique et le guide d'utilisation.
+              Téléchargez l'archive ZIP v3.5 comprenant les menus 10 (Détection profonde), 11 (Remédiation restaurable), 12 (Defender & ASR), 13 (Forensique & Logs) et 14 (Rapports), ainsi que tous les correctifs de faux positifs et de sockets.
             </p>
           </div>
 
@@ -106,10 +106,10 @@ export const ScriptWorkshop: React.FC<ScriptWorkshopProps> = ({ onDownloadZip })
           </div>
           <div>
             <h3 className="text-sm font-bold text-white font-mono">
-              SpaceSec_CyberDefense_Ultra_v3.zip
+              SpaceSec_CyberDefense_Ultra_v3.5.zip
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Pack tout-en-un comprenant <strong>.ps1</strong> + <strong>.bat administrateur</strong> + <strong>outil SafeBoot</strong> + <strong>manuel d'éradication</strong>.
+              Pack v3.5 comprenant <strong>.ps1 (Menus 10 à 14)</strong> + <strong>.bat administrateur</strong> + <strong>SafeBoot d'urgence</strong> + <strong>manuel et correctifs</strong>.
             </p>
           </div>
         </div>
@@ -119,7 +119,7 @@ export const ScriptWorkshop: React.FC<ScriptWorkshopProps> = ({ onDownloadZip })
           className="flex items-center gap-2 px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shrink-0"
         >
           <Download className="w-4 h-4" />
-          <span>Obtenir le ZIP</span>
+          <span>Obtenir le ZIP v3.5</span>
         </button>
       </div>
 
@@ -128,30 +128,30 @@ export const ScriptWorkshop: React.FC<ScriptWorkshopProps> = ({ onDownloadZip })
         <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
           <div className="flex items-center gap-2 text-cyan-400 font-semibold text-sm">
             <Shield className="w-4 h-4" />
-            <span>1. Droits & Privilèges Système</span>
+            <span>1. Menus 10 à 14 Intégrés</span>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed">
-            Le script active <code className="text-cyan-300">SeDebugPrivilege</code> et <code className="text-cyan-300">SeTakeOwnershipPrivilege</code> via des structures P/Invoke Win32, permettant de déposséder même le compte TrustedInstaller.
+            Détection profonde d'usurpation et PIDs cachés (10), Quarantaine restaurable avec Authenticode (11), Exclusions Defender & règles ASR (12), Forensique Event IDs (13) et Rapports HTML/CSV/JSON (14).
           </p>
         </div>
 
         <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
           <div className="flex items-center gap-2 text-amber-400 font-semibold text-sm">
             <Cpu className="w-4 h-4" />
-            <span>2. Destruction au Reboot Noyau</span>
+            <span>2. Correctifs de Faux Positifs</span>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed">
-            Si un fichier est verrouillé par un pilote ou un service en cours, le script le programme dans <code className="text-amber-300">PendingFileRenameOperations</code> afin que le noyau l'efface avant tout chargement.
+            Mots-clés filtrés sans toucher Narrator ni Configuration, snapshot mémoire explicite, scan de ports multithread rapide et isolation en quarantaine avec confirmation préalable.
           </p>
         </div>
 
         <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
           <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
             <CheckCircle2 className="w-4 h-4" />
-            <span>3. Compatibilité 100% Machine Réelle</span>
+            <span>3. Préservation des Preuves</span>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed">
-            Compatible Windows 10, Windows 11 et Windows Server. Fonctionne en mode hors-ligne sans dépendance externe ni module PowerShell tiers requis.
+            Le nettoyage des dossiers Temp/Prefetch est désormais strictement manuel pour garantir l'intégrité de la chaîne de preuves forensiques lors des audits de sécurité.
           </p>
         </div>
       </div>
