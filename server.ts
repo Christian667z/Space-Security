@@ -147,7 +147,7 @@ async function getWindowsHardwareSpecs(clientTelemetry?: any) {
     if (clientTelemetry?.hostname && clientTelemetry.hostname !== 'localhost' && clientTelemetry.hostname.length > 2) {
       hostname = clientTelemetry.hostname;
     } else if (!hostname || hostname === 'localhost') {
-      hostname = 'DESKTOP-WIN11-CYBER';
+      hostname = os.hostname() || 'Poste-Local';
     }
 
     if (clientTelemetry?.cpuModel && !clientTelemetry.cpuModel.toLowerCase().includes('unknown')) {
@@ -159,18 +159,7 @@ async function getWindowsHardwareSpecs(clientTelemetry?: any) {
       if (nodeCpu && nodeCpu !== 'unknown' && nodeCpu !== 'Processor') {
         cpuModel = nodeCpu;
       } else {
-        // High-precision Windows processor reference mapping
-        if (cores >= 24) {
-          cpuModel = '14th Gen Intel(R) Core(TM) i9-14900K @ 3.20GHz (24 Cores)';
-        } else if (cores >= 16) {
-          cpuModel = '13th Gen Intel(R) Core(TM) i7-13700K @ 3.40GHz (16 Cores)';
-        } else if (cores >= 12) {
-          cpuModel = 'AMD Ryzen 9 7900X 12-Core Processor @ 4.70GHz';
-        } else if (cores >= 8) {
-          cpuModel = '12th Gen Intel(R) Core(TM) i7-12700H @ 2.70GHz (16 Threads)';
-        } else {
-          cpuModel = 'Intel(R) Core(TM) i5-11400H @ 2.70GHz (6 Cores)';
-        }
+        cpuModel = `Processeur ${cores} cœurs`;
       }
     }
 
@@ -201,15 +190,16 @@ async function getWindowsHardwareSpecs(clientTelemetry?: any) {
     }
   }
 
-  // Safety assertions: NEVER return 'unknown' or 'linux'
+  // Safety fallbacks: use dynamic OS data, never hardcoded names
   if (!cpuModel || cpuModel.toLowerCase().includes('unknown') || cpuModel === 'Processor') {
-    cpuModel = '13th Gen Intel(R) Core(TM) i7-13700K @ 3.40GHz';
+    const fallbackCpu = os.cpus()[0]?.model;
+    cpuModel = (fallbackCpu && fallbackCpu !== 'unknown') ? fallbackCpu : `Processeur ${os.cpus().length} cœurs`;
   }
   if (!osName || osName.toLowerCase().includes('linux')) {
-    osName = 'Microsoft Windows 11 Pro 64-bit (Build 22631.3880, Version 23H2)';
+    osName = `Windows ${os.release()}`;
   }
   if (!hostname || hostname === 'localhost') {
-    hostname = 'DESKTOP-WIN11-CYBER';
+    hostname = os.hostname() || 'Poste-Local';
   }
 
   cachedSpecs = {

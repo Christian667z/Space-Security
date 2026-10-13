@@ -2,7 +2,7 @@
   "appId": "com.spacesecurity.cyberdefense",
   "productName": "Space Security",
   "directories": {
-    "output": "release"
+    "output": "dist-package"
   },
   "files": [
     "dist/**/*",
@@ -22,7 +22,7 @@
         "arch": ["x64"]
       }
     ],
-    "requestedExecutionLevel": "highestAvailable"
+    "requestedExecutionLevel": "requireAdministrator"
   },
   "nsis": {
     "oneClick": false,

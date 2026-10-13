@@ -572,7 +572,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
               Balisage Port 4444
             </div>
             <div className="text-[10px] text-slate-500 font-mono">
-              185.220.101.4 svch0st
+              Netstat Sockets TCP
             </div>
           </div>
 

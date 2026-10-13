@@ -517,13 +517,9 @@ export async function generateAndDownloadPdfReport(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(51, 65, 85);
-  const executiveText =
-    `L'audit approfondi a isolé des activités malveillantes actives exploitant des techniques d'évasion avancées. ` +
-    `Plusieurs composants résiduels verrouillent leurs accès en usurpant l'identité de NT SERVICE\\TrustedInstaller, ` +
-    `interdisant leur suppression même par les comptes Administrateurs locaux. Des flux réseau sortants non autorisés ` +
-    `(port 4444 vers 185.220.101.4) ainsi que des tâches asynchrones BITS confirment une tentative d'exfiltration. ` +
-    `L'application immédiate du protocole Kernel de destruction différée (PendingFileRenameOperations) et la purge ` +
-    `des exclusions Windows Defender sont impérativement requises.`;
+  const executiveText = threats.length > 0
+    ? `L'audit a isolé ${threats.length} menace(s). Les sockets TCP actifs ont été analysés. Application des contre-mesures requise.`
+    : `Aucune activité malveillante détectée. Les sockets TCP actifs ont été analysés. Le système est conforme.`;
 
   const splitExecutive = doc.splitTextToSize(executiveText, contentWidth - 10);
   doc.text(splitExecutive, margin + 5, curY + 13);
@@ -691,12 +687,17 @@ export async function generateAndDownloadPdfReport(
 
     curY += 7;
 
-    // IOC Table
-    const iocList = [
-      { ip: '185.220.101.4', port: '4444 (TCP)', proto: 'Metasploit Reverse TCP', proc: 'svch0st_updater.exe (PID 5824)', geo: 'Pays-Bas (NL) / Tor Node', status: 'CRITIQUE' },
-      { ip: '45.154.255.89', port: '8080 (HTTP)', proto: 'BITS Asynchronous Exfil', proc: 'bitsadmin.exe (Job {3C7D})', geo: 'Russie (RU) / Bulletproof', status: 'ÉLEVÉ' },
-      { ip: '198.51.100.22', port: '443 (HTTPS)', proto: 'Cobalt Strike Beacon', proc: 'powershell.exe -enc', geo: 'États-Unis (US) / Cloud VPS', status: 'CRITIQUE' },
-    ];
+    // IOC Table — dynamically generated from actual threats
+    const iocList = threats.length > 0
+      ? threats.map(t => ({
+          ip: t.name || 'N/A',
+          port: t.mitreTechnique || 'N/A',
+          proto: t.category || 'N/A',
+          proc: t.targetPath || 'N/A',
+          geo: t.severity || 'N/A',
+          status: t.severity || 'INFO',
+        }))
+      : [{ ip: 'AUCUN IOC', port: '-', proto: '-', proc: 'Système conforme', geo: '-', status: 'OK' }];
 
     doc.setFillColor(15, 23, 42);
     doc.rect(margin, curY, contentWidth, 6, 'F');

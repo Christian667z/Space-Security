@@ -97,11 +97,11 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
     cpuModel: string;
     uptimeSec: number;
   }>({
-    hostname: 'SEC-WIN11-WORKSTATION',
+    hostname: 'Poste Local',
     platform: 'Microsoft Windows 11 Pro 64-bit (Build 22631.3880)',
     arch: 'x64 (AMD64 / Intel 64)',
     cores: 16,
-    cpuModel: '13th Gen Intel(R) Core(TM) i7-13700K @ 3.40GHz',
+    cpuModel: 'Détection du processeur...',
     uptimeSec: 34200,
   });
 
@@ -112,12 +112,12 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
       if (saved) {
         const parsed = JSON.parse(saved);
         return {
-          hostname: parsed.hostname || 'DESKTOP-WIN11-CYBER',
+          hostname: parsed.hostname || 'Poste Local',
           osName: parsed.osName || 'Microsoft Windows 11 Pro 64-bit (Build 22631.3880, Version 23H2)',
           platform: 'Windows 11 x64',
           kernelRelease: '10.0.22631.3880',
           arch: 'x64 (AMD64 / Intel 64)',
-          cpuModel: parsed.cpuModel || '13th Gen Intel(R) Core(TM) i7-13700K @ 3.40GHz',
+          cpuModel: parsed.cpuModel || 'Détection du processeur...',
           cores: Number(parsed.cores) || 16,
           totalRamGb: parsed.totalRamGb || '16.00',
           usedRamGb: '6.08',
@@ -135,12 +135,12 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
     } catch {}
 
     return {
-      hostname: 'DESKTOP-WIN11-CYBER',
+      hostname: 'Poste Local',
       osName: 'Microsoft Windows 11 Pro 64-bit (Build 22631.3880, Version 23H2)',
       platform: 'Windows 11 x64',
       kernelRelease: '10.0.22631.3880',
       arch: 'x64 (AMD64 / Intel 64)',
-      cpuModel: '13th Gen Intel(R) Core(TM) i7-13700K @ 3.40GHz',
+      cpuModel: 'Détection du processeur...',
       cores: 16,
       totalRamGb: '16.00',
       usedRamGb: '6.08',
@@ -209,20 +209,10 @@ export const TaskManagerLive: React.FC<TaskManagerLiveProps> = ({ onRunInConsole
 
     let cpuModel = cached.cpuModel || '';
     if (!cpuModel || cpuModel.toLowerCase().includes('unknown')) {
-      if (cores >= 24) {
-        cpuModel = '14th Gen Intel(R) Core(TM) i9-14900K @ 3.20GHz';
-      } else if (cores >= 16) {
-        cpuModel = '13th Gen Intel(R) Core(TM) i7-13700K @ 3.40GHz';
-      } else if (cores >= 12) {
-        cpuModel = 'AMD Ryzen 9 7900X 12-Core Processor @ 4.70GHz';
-      } else if (cores >= 8) {
-        cpuModel = '12th Gen Intel(R) Core(TM) i7-12700H @ 2.70GHz';
-      } else {
-        cpuModel = 'Intel(R) Core(TM) i5-11400H @ 2.70GHz';
-      }
+      cpuModel = '';
     }
 
-    const hostname = cached.hostname && cached.hostname !== 'localhost' ? cached.hostname : 'DESKTOP-WIN11-CYBER';
+    const hostname = cached.hostname && cached.hostname !== 'localhost' ? cached.hostname : 'Poste Local';
 
     return {
       hostname,

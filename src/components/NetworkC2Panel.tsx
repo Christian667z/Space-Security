@@ -44,8 +44,8 @@ interface NetworkC2PanelProps {
 
 interface TrafficDataPoint {
   time: string;
-  inboundBeacon: number;     // KB/s from 185.220.101.4
-  outboundExfil: number;     // KB/s to 185.220.101.4
+  inboundBeacon: number;     // KB/s download
+  outboundExfil: number;     // KB/s upload
   inboundPowerShell: number; // KB/s from 45.154.255.89
   outboundPowerShell: number;// KB/s to 45.154.255.89
   totalExfiltration: number; // Sum outbound
@@ -337,7 +337,7 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, 
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
               <span>
-                <strong className="text-slate-200">Moteur SOC Actif :</strong> 5 sockets analysés, 2 connexions C2 isolées (185.220.101.4 & 45.154.255.89).
+                <strong className="text-slate-200">Moteur SOC Actif :</strong> {connections.length} socket(s) TCP analysé(s).
               </span>
             </div>
             <div className="text-[11px] text-slate-400 flex items-center gap-1.5 shrink-0">
@@ -528,7 +528,7 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, 
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                185.220.101.4:4444
+                Flux Principal
               </button>
               <button
                 onClick={() => setSelectedTargetIP('powershell')}
@@ -662,7 +662,7 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, 
                 <Line
                   type="monotone"
                   dataKey="outboundExfil"
-                  name="185.220.101.4:4444 (Sortant - Swisyn / Cobalt)"
+                  name="Débit Sortant (Upload KB/s)"
                   stroke="#f43f5e"
                   strokeWidth={2.5}
                   dot={false}
@@ -675,7 +675,7 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, 
                 <Line
                   type="monotone"
                   dataKey="inboundBeacon"
-                  name="185.220.101.4:4444 (Entrant - Instructions C2)"
+                  name="Débit Entrant (Download KB/s)"
                   stroke="#38bdf8"
                   strokeWidth={1.8}
                   strokeDasharray="4 2"
@@ -719,7 +719,7 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, 
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
               <span>
-                <strong>Pic d'exfiltration anormal détecté :</strong> Transfert de données volumineux vers l'hôte distant C2 185.220.101.4 ({latestPoint.outboundExfil} KB/s).
+                <strong>Pic d'exfiltration anormal détecté :</strong> Transfert sortant important détecté ({latestPoint.outboundExfil} KB/s). Vérifiez les connexions actives.
               </span>
             </div>
             <button

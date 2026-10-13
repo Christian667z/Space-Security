@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShieldAlert, ShieldCheck, Play, RefreshCw, AlertTriangle, Terminal, Lock, Search, CheckCircle2, XCircle, Ban, Zap } from 'lucide-react';
 
 interface PortScannerProps {
@@ -23,141 +23,49 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onRunInConsole }) => {
   const [filterMode, setFilterMode] = useState<'ALL' | 'OPEN_ONLY' | 'CRITICAL_ONLY'>('ALL');
   const [customPortInput, setCustomPortInput] = useState<string>('');
 
-  const initialPorts: ScannedPort[] = [
-    {
-      port: 135,
-      protocol: 'TCP',
-      serviceName: 'RPC Endpoint Mapper',
-      state: 'OPEN',
-      risk: 'MEDIUM',
-      processName: 'svchost.exe (RpcSs)',
-      pid: 1044,
-      threatDescription: 'Service de mappage d\'extrémités RPC Windows standard (Système nominal).',
-      cveOrTactic: 'T1046 - Network Discovery',
-    },
-    {
-      port: 445,
-      protocol: 'TCP',
-      serviceName: 'Microsoft-DS SMB (Server Message Block)',
-      state: 'OPEN',
-      risk: 'MEDIUM',
-      processName: 'System (ntoskrnl.exe)',
-      pid: 4,
-      threatDescription: 'Partage de fichiers et imprimantes Windows local. Normal si le partage réseau est activé.',
-      cveOrTactic: 'T1021.002 - SMB Shares',
-    },
-    {
-      port: 139,
-      protocol: 'TCP',
-      serviceName: 'NetBIOS Session Service',
-      state: 'OPEN',
-      risk: 'HIGH',
-      processName: 'System (ntoskrnl.exe)',
-      pid: 4,
-      threatDescription: 'Protocole NetBIOS legacy facilitant l\'énumération des noms de machines et partages locaux.',
-      cveOrTactic: 'T1046 - Network Service Discovery',
-    },
-    {
-      port: 135,
-      protocol: 'TCP',
-      serviceName: 'RPC Endpoint Mapper',
-      state: 'OPEN',
-      risk: 'MEDIUM',
-      processName: 'svchost.exe (RpcSs)',
-      pid: 1044,
-      threatDescription: 'Service de mappage d\'extrémités RPC Windows légitime, souvent sondé lors d\'analyses réseau internes.',
-      cveOrTactic: 'T1046 - Network Discovery',
-    },
-    {
-      port: 8080,
-      protocol: 'TCP',
-      serviceName: 'HTTP-Alt / Web Proxy / Reverse Proxy',
-      state: 'OPEN',
-      risk: 'HIGH',
-      processName: 'powershell.exe',
-      pid: 7340,
-      threatDescription: 'Socket d\'écoute HTTP alternatif maintenu par un processus PowerShell non privilégié.',
-      cveOrTactic: 'T1071.001 - Web Protocols C2',
-    },
-    {
-      port: 23,
-      protocol: 'TCP',
-      serviceName: 'Telnet (Protocole en Clair)',
-      state: 'CLOSED',
-      risk: 'CRITICAL',
-      threatDescription: 'Protocole de gestion non chiffré. Statut : Fermé et sécurisé.',
-    },
-    {
-      port: 21,
-      protocol: 'TCP',
-      serviceName: 'FTP (File Transfer Protocol)',
-      state: 'CLOSED',
-      risk: 'MEDIUM',
-      threatDescription: 'Serveur de transfert FTP. Statut : Aucun service en écoute.',
-    },
-    {
-      port: 22,
-      protocol: 'TCP',
-      serviceName: 'SSH (Secure Shell)',
-      state: 'CLOSED',
-      risk: 'LOW',
-      threatDescription: 'Accès distant SSH chiffré. Statut : Fermé.',
-    },
-    {
-      port: 1433,
-      protocol: 'TCP',
-      serviceName: 'Microsoft SQL Server',
-      state: 'CLOSED',
-      risk: 'MEDIUM',
-      threatDescription: 'Port de base de données SQL. Statut : Fermé.',
-    },
-    {
-      port: 3306,
-      protocol: 'TCP',
-      serviceName: 'MySQL Server',
-      state: 'CLOSED',
-      risk: 'MEDIUM',
-      threatDescription: 'Port de base de données MySQL. Statut : Fermé.',
-    },
-    {
-      port: 5900,
-      protocol: 'TCP',
-      serviceName: 'VNC Remote FrameBuffer',
-      state: 'CLOSED',
-      risk: 'HIGH',
-      threatDescription: 'Serveur de prise en main à distance VNC. Statut : Fermé.',
-    },
-    {
-      port: 80,
-      protocol: 'TCP',
-      serviceName: 'HTTP (World Wide Web)',
-      state: 'CLOSED',
-      risk: 'LOW',
-      threatDescription: 'Serveur Web HTTP. Statut : Aucun serveur IIS ou Apache ouvert.',
-    },
-    {
-      port: 443,
-      protocol: 'TCP',
-      serviceName: 'HTTPS (SSL/TLS Encrypted)',
-      state: 'CLOSED',
-      risk: 'LOW',
-      threatDescription: 'Port Web sécurisé entrant. Statut : Fermé (Clients sortants normaux).',
-    },
-  ];
+  const initialPorts: ScannedPort[] = [];
 
   const [portsList, setPortsList] = useState<ScannedPort[]>(initialPorts);
 
   const startScan = (targetGroup?: string) => {
     setIsScanning(true);
     setScanProgress(15);
-    onRunInConsole(`Test-NetConnection -ComputerName localhost -CommonTCPPorts`);
+    onRunInConsole(`netstat -ano | findstr LISTENING`);
 
-    const t1 = setTimeout(() => setScanProgress(45), 400);
-    const t2 = setTimeout(() => setScanProgress(80), 800);
-    const t3 = setTimeout(() => {
-      setScanProgress(100);
-      setIsScanning(false);
-    }, 1200);
+    setScanProgress(30);
+    fetch('http://localhost:3001/api/system/listening-ports')
+      .then(res => res.json())
+      .then((data: { ports?: Array<{ port: number; protocol: string; pid: number; processName: string; address: string }> }) => {
+        setScanProgress(70);
+        if (data.ports && data.ports.length > 0) {
+          const realPorts: ScannedPort[] = data.ports.map(p => {
+            const dangerousPorts = [4444, 5555, 6667, 31337, 1337, 23, 21];
+            const highPorts = [139, 445, 3389, 5900, 8080];
+            let risk: ScannedPort['risk'] = 'LOW';
+            if (dangerousPorts.includes(p.port)) risk = 'CRITICAL';
+            else if (highPorts.includes(p.port)) risk = 'HIGH';
+            else if (p.port < 1024) risk = 'MEDIUM';
+
+            return {
+              port: p.port,
+              protocol: (p.protocol || 'TCP') as 'TCP' | 'UDP',
+              serviceName: p.processName || `Port ${p.port}`,
+              state: 'OPEN' as const,
+              risk,
+              processName: p.processName,
+              pid: p.pid,
+              threatDescription: `Port en écoute sur ${p.address || '0.0.0.0'}. Processus : ${p.processName || 'inconnu'} (PID ${p.pid}).`,
+            };
+          });
+          setPortsList(realPorts);
+        }
+        setScanProgress(100);
+        setIsScanning(false);
+      })
+      .catch(() => {
+        setScanProgress(100);
+        setIsScanning(false);
+      });
   };
 
   const handleScanCustomPort = (e: React.FormEvent) => {
