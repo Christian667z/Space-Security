@@ -25,6 +25,7 @@ import { IpLocatorPanel } from './components/IpLocatorPanel';
 import { WiFiScanner } from './components/WiFiScanner';
 import { PostInfectionRepairPanel } from './components/PostInfectionRepairPanel';
 import { DeepDetectionPanel } from './components/DeepDetectionPanel';
+import { SandboxIsolationPanel } from './components/SandboxIsolationPanel';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { TabId, ConsoleLogMessage, ThreatItem, ThreatNotification } from './types/cyberdefense';
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
@@ -207,6 +208,9 @@ export default function App() {
         addLog('INFO', '  menu 12 / defender-advanced : Audit exclusions malware & règles ASR');
         addLog('INFO', '  menu 13 / forensics-events  : Détection force brute 4625, logs effacés 1102 & nouveaux admins');
         addLog('INFO', '  menu 14 / export-reports    : Exports multi-formats (HTML sombre, CSV, JSON)');
+        addLog('INFO', '  menu 15 / sandbox / isolate : Module Isolateur & Sandbox Live (Kill-Switch Réseau & Confinement)');
+        addLog('INFO', '  kill-switch           : Coupe instantanément Wi-Fi & Ethernet via netsh (Boucle 127.0.0.1 préservée)');
+        addLog('INFO', '  restore-net / restore-network : Réactive les interfaces réseau après neutralisation');
         addLog('INFO', '  snapshot-memoire      : Snapshot instantané des processus et modules (remplace l\'ancien dump RAM)');
         addLog('INFO', '  export-report         : Génère et télécharge le rapport PDF détaillé avec graphiques de score');
         addLog('INFO', '  pdf / export-pdf      : Raccourci pour générer le rapport PDF d\'audit forensique');

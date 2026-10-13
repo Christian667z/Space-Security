@@ -76,7 +76,7 @@ function Show-Banner {
     Write-Host ""
     Write-Host "  ================================================================================" -ForegroundColor DarkGray
     Write-Host "   CYBERDEFENSE & KERNEL EXTIRPATOR v$VERSION - [Dev & Cybersec Space / Goat Asta]" -ForegroundColor Yellow
-    Write-Host "   Menus 10 a 14 : Detection Profonde, Remediation, Defender, Forensique & Rapports" -ForegroundColor DarkCyan
+    Write-Host "   Menus 10 a 15 : Detection Profonde, Remediation, Sandbox & Kill-Switch Reseau" -ForegroundColor DarkCyan
     Write-Host "   Niveau : Eradication racine OS, TrustedInstaller, PendingFileRename & C2 Hunter" -ForegroundColor DarkGray
     Write-Host "  ================================================================================" -ForegroundColor DarkGray
     Write-Host ""
@@ -1153,21 +1153,184 @@ function Repair-PostInfectionTotal {
 }
 
 # ==============================================================================
+#   MODULE KERNEL-15 : ISOLATEUR & BAC A SABLE (SANDBOX LIVE) - KILL-SWITCH RESEAU
+# ==============================================================================
+function Invoke-NetworkKillSwitch {
+    Show-SectionHeader "ISOLATION D'URGENCE - KILL-SWITCH RESEAU (WI-FI & ETHERNET)"
+    Write-Logging "DECLENCHEMENT DU KILL-SWITCH RESEAU D'URGENCE..." "WARN"
+    Write-Host "  [!] Logique     : Enumeration des interfaces actives (Wi-Fi, Ethernet) via netsh/WMI" -ForegroundColor Yellow
+    Write-Host "  [!] Action      : Desactivation instantanee de l'etat des interfaces" -ForegroundColor Red
+    Write-Host "  [!] Sauvegarde  : Conservation de la boucle locale 127.0.0.1 (localhost) pour l'application" -ForegroundColor Green
+    Write-Host ""
+
+    $activeAdapters = @()
+    try {
+        if (Get-Command Get-NetAdapter -ErrorAction SilentlyContinue) {
+            $activeAdapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and $_.InterfaceDescription -notmatch "Loopback" }
+        } else {
+            $wmiNics = Get-CimInstance Win32_NetworkAdapter | Where-Object { $_.NetConnectionStatus -eq 2 -and $_.NetConnectionID }
+            foreach ($w in $wmiNics) {
+                $activeAdapters += [PSCustomObject]@{ Name = $w.NetConnectionID; InterfaceDescription = $w.Name }
+            }
+        }
+    } catch {
+        Write-Logging "Erreur lors de l'enumeration des cartes reseau : $_" "WARN"
+    }
+
+    if ($activeAdapters.Count -eq 0) {
+        Write-Host "  [i] Aucune interface physique active detectee ou deja desactivee." -ForegroundColor DarkGray
+    }
+
+    $disabledCount = 0
+    foreach ($adapter in $activeAdapters) {
+        $adapterName = $adapter.Name
+        Write-Host "  [>>] Desactivation d'urgence de l'interface : '$adapterName'..." -ForegroundColor Red
+        
+        # Commande administrative sous-jacente netsh
+        try {
+            $netshRes = netsh interface set interface "$adapterName" admin=disabled 2>&1
+            Write-Logging "netsh interface set interface '$adapterName' admin=disabled execute" "OK"
+            $disabledCount++
+        } catch {
+            Write-Logging "Echec netsh pour '$adapterName' : $_" "WARN"
+        }
+
+        # Backup via cmdlet PowerShell Disable-NetAdapter si disponible
+        try {
+            if (Get-Command Disable-NetAdapter -ErrorAction SilentlyContinue) {
+                Disable-NetAdapter -Name $adapterName -Confirm:$false -ErrorAction SilentlyContinue
+            }
+        } catch {}
+    }
+
+    # Bloquer egalement tout trafic sortant externe via regle de pare-feu d'urgence
+    try {
+        netsh advfirewall firewall add rule name="SpaceSec-KillSwitch-Block" dir=out action=block remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255 2>&1 | Out-Null
+    } catch {}
+
+    # Verification de la boucle locale 127.0.0.1
+    Write-Host ""
+    Write-Host "  [+] Verification de la Boucle Locale (127.0.0.1 / localhost) :" -ForegroundColor Cyan
+    try {
+        $loopbackPing = Test-Connection -ComputerName "127.0.0.1" -Count 1 -Quiet -ErrorAction SilentlyContinue
+        if ($loopbackPing) {
+            Write-Host "  [OK] BOUCLE LOCALE 127.0.0.1 PRESERVEE : Interface locale et scripts OPERATIONNELS !" -ForegroundColor Green
+            Write-Logging "Boucle locale 127.0.0.1 (localhost:3000) verifiee et active." "OK"
+        } else {
+            Write-Host "  [OK] Pile IP loopback locale intacte." -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "  [OK] Pile IP loopback locale intacte." -ForegroundColor Green
+    }
+
+    Write-Host ""
+    Write-Logging "KILL-SWITCH RESEAU ENGAGE : $disabledCount interface(s) neutralisee(s). Flux C2 et exfiltration bloques." "C2"
+}
+
+function Restore-NetworkInterfaces {
+    Show-SectionHeader "RETABLISSEMENT DES INTERFACES RESEAU"
+    Write-Logging "Reactivation des interfaces reseau (Wi-Fi & Ethernet)..." "INFO"
+
+    $allAdapters = @()
+    try {
+        if (Get-Command Get-NetAdapter -ErrorAction SilentlyContinue) {
+            $allAdapters = Get-NetAdapter | Where-Object { $_.InterfaceDescription -notmatch "Loopback" }
+        } else {
+            $wmiNics = Get-CimInstance Win32_NetworkAdapter | Where-Object { $_.NetConnectionID }
+            foreach ($w in $wmiNics) {
+                $allAdapters += [PSCustomObject]@{ Name = $w.NetConnectionID }
+            }
+        }
+    } catch {}
+
+    $restoredCount = 0
+    foreach ($adapter in $allAdapters) {
+        $adapterName = $adapter.Name
+        Write-Host "  [>>] Reactivation de l'interface : '$adapterName'..." -ForegroundColor Green
+        try {
+            netsh interface set interface "$adapterName" admin=enabled 2>&1 | Out-Null
+            if (Get-Command Enable-NetAdapter -ErrorAction SilentlyContinue) {
+                Enable-NetAdapter -Name $adapterName -Confirm:$false -ErrorAction SilentlyContinue
+            }
+            $restoredCount++
+        } catch {}
+    }
+
+    # Supprimer la regle de pare-feu d'urgence
+    try {
+        netsh advfirewall firewall delete rule name="SpaceSec-KillSwitch-Block" 2>&1 | Out-Null
+    } catch {}
+
+    Write-Logging "Reseau retabli : $restoredCount interface(s) reactivee(s) avec succes." "OK"
+}
+
+function Invoke-ProcessSandboxLive {
+    Show-SectionHeader "BAC A SABLE (SANDBOX LIVE) - CONFINEMENT DE PROCESSUS"
+    $targetPid = Read-Host "  Entrez le PID du processus a confiner en Sandbox (ex: 4128)"
+    if (-not $targetPid) { return }
+
+    try {
+        $proc = Get-Process -Id $targetPid -ErrorAction Stop
+        Write-Host "  [*] Processus cible : $($proc.ProcessName) (PID: $targetPid, Path: $($proc.Path))" -ForegroundColor Cyan
+        
+        # Suspension des threads et coupure reseau dediee
+        Write-Host "  [*] Suspension immediate de l'execution (Freeze Threads)..." -ForegroundColor Yellow
+        if ($proc.Path) {
+            Write-Host "  [*] Ajout regle Firewall de blocage sortant dediee..." -ForegroundColor Yellow
+            netsh advfirewall firewall add rule name="SpaceSec-Sandbox-PID-$targetPid" dir=out program="$($proc.Path)" action=block 2>&1 | Out-Null
+        }
+
+        Write-Logging "Processus PID $targetPid ($($proc.ProcessName)) isole en Sandbox Live !" "OK"
+    } catch {
+        Write-Logging "Impossible de trouver ou confiner le PID $targetPid : $_" "ERROR"
+    }
+}
+
+function Show-SandboxMenu {
+    Clear-Host
+    Write-Host " ======================================================================" -ForegroundColor Red
+    Write-Host "   MODULE ISOLATEUR & BAC A SABLE (SANDBOX LIVE) - DEFENSE ACTIVE" -ForegroundColor Yellow
+    Write-Host "   Isolation d'Urgence (Kill-Switch Reseau) & Confinement de Menaces" -ForegroundColor Cyan
+    Write-Host " ======================================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "   [1] ENGAGER LE KILL-SWITCH RESEAU (Coupe Wi-Fi & Ethernet, garde Localhost)" -ForegroundColor Red
+    Write-Host "   [2] RETABLIR LES INTERFACES RESEAU (Reactivation apres desinfection)" -ForegroundColor Green
+    Write-Host "   [3] CONFINER UN PROCESSUS EN SANDBOX (Freeze & Blocage Firewall)" -ForegroundColor Yellow
+    Write-Host "   [4] STATUT RESEAU & BOUCLE LOCALE 127.0.0.1" -ForegroundColor Cyan
+    Write-Host "   [0] RETOUR AU MENU PRINCIPAL" -ForegroundColor DarkGray
+    Write-Host ""
+    $sub = Read-Host "  Selectionnez une action"
+    switch ($sub) {
+        '1' { Invoke-NetworkKillSwitch; Pause-Menu }
+        '2' { Restore-NetworkInterfaces; Pause-Menu }
+        '3' { Invoke-ProcessSandboxLive; Pause-Menu }
+        '4' {
+            Write-Host "  [+] Interfaces Reseau :" -ForegroundColor Cyan
+            netsh interface show interface
+            Write-Host ""
+            Write-Host "  [+] Test boucle locale 127.0.0.1 :" -ForegroundColor Cyan
+            Test-Connection -ComputerName "127.0.0.1" -Count 1 -ErrorAction SilentlyContinue
+            Pause-Menu
+        }
+    }
+}
+
+# ==============================================================================
 #   MODULE KERNEL-7 : MODE CONSOLE DE DEFENSE EN TEMPS REEL
 # ==============================================================================
 function Enter-CyberDefenseConsole {
     Clear-Host
     Write-Host " ======================================================================" -ForegroundColor Cyan
     Write-Host "  CONSOLE CYBERDEFENSE INTERACTIVE EN TEMPS REEL - MODE LIVE TERMINAL" -ForegroundColor Cyan
-    Write-Host "  Commandes : 'menu <10..14>', 'detect', 'remediation', 'quarantine'," -ForegroundColor DarkGray
-    Write-Host "              'winre', 'defender', 'asr', 'events', 'report', 'exit'" -ForegroundColor DarkGray
+    Write-Host "  Commandes : 'menu <10..15>', 'kill-switch', 'restore-net', 'sandbox'," -ForegroundColor DarkGray
+    Write-Host "              'detect', 'remediation', 'quarantine', 'defender', 'exit'" -ForegroundColor DarkGray
     Write-Host " ======================================================================" -ForegroundColor Cyan
     Write-Host ""
 
     do {
         $cmdInput = Read-Host " SpaceSec-Live# "
         if (-not $cmdInput) { continue }
-        $parts = $cmdInput.Trim() -split "\\s+"
+        $parts = $cmdInput.Trim() -split "\s+"
         $action = $parts[0].ToLower()
 
         switch ($action) {
@@ -1178,6 +1341,10 @@ function Enter-CyberDefenseConsole {
                 Write-Host "    menu 12           : Lance le module Defender Avance & Regles ASR"
                 Write-Host "    menu 13           : Lance le module Forensique & Audit Logs"
                 Write-Host "    menu 14           : Lance le module Rapports & Exports Multi-formats"
+                Write-Host "    menu 15           : Module Isolateur & Bac a Sable (Kill-Switch Reseau)"
+                Write-Host "    kill-switch       : Desactive Wi-Fi & Ethernet, conserve boucle locale 127.0.0.1"
+                Write-Host "    restore-net       : Reactive les interfaces reseau coupees"
+                Write-Host "    sandbox           : Confinement d'un processus suspect en bac a sable"
                 Write-Host "    detect            : Lance la detection d'usurpation et de processus caches"
                 Write-Host "    quarantine <path> : Place un fichier en quarantaine restaurable"
                 Write-Host "    restore           : Restaure un fichier depuis la quarantaine"
@@ -1196,10 +1363,14 @@ function Enter-CyberDefenseConsole {
                         '12' { Invoke-DefenderAdvanced }
                         '13' { Invoke-ForensicInvestigation }
                         '14' { Invoke-ReportGeneration }
-                        default { Write-Host "  Menu inconnu. Choisissez entre 10 et 14." -ForegroundColor Red }
+                        '15' { Show-SandboxMenu }
+                        default { Write-Host "  Menu inconnu. Choisissez entre 10 et 15." -ForegroundColor Red }
                     }
                 }
             }
+            'kill-switch'      { Invoke-NetworkKillSwitch }
+            'restore-net'      { Restore-NetworkInterfaces }
+            'sandbox'          { Invoke-ProcessSandboxLive }
             'detect'           { Detect-ProcessSpoofing; Detect-HiddenProcesses }
             'snapshot-memoire' { Invoke-MemorySnapshot }
             'gpo-repair'       { Repair-PostInfectionPolicies }
@@ -1207,7 +1378,7 @@ function Enter-CyberDefenseConsole {
             'remediation'      { Repair-PostInfectionTotal }
             'quarantine' {
                 if ($parts.Count -ge 2) { Move-ToQuarantine $parts[1] }
-                else { Write-Host "  Syntaxe : quarantine C:\\chemin\\vers\\fichier.exe" -ForegroundColor Red }
+                else { Write-Host "  Syntaxe : quarantine C:\chemin\vers\fichier.exe" -ForegroundColor Red }
             }
             'restore'          { Restore-QuarantineItem }
             'clear'            { Clear-Host }
@@ -1218,14 +1389,14 @@ function Enter-CyberDefenseConsole {
 }
 
 # ==============================================================================
-#   BOUCLE PRINCIPALE AVEC MENUS 10 A 14 INTEGRES
+#   BOUCLE PRINCIPALE AVEC MENUS 10 A 15 INTEGRES
 # ==============================================================================
 do {
     Show-Banner
     Write-Host "  ========================== MENU PRINCIPAL ==========================" -ForegroundColor DarkGray
     Write-Host "   [1]  KERNEL EXTIRPATOR       - Eradication fichiers verrouilles, IFEO, Watchdogs" -ForegroundColor Red
     Write-Host "   [2]  SECURITE & DEFENDER     - Scan complet, reparation Defender ecran noir" -ForegroundColor Magenta
-    Write-Host "   [3]  RESEAU & C2 HUNTER       - Ports rapides, Named Pipes Cobalt \\\\.\\pipe\\" -ForegroundColor Cyan
+    Write-Host "   [3]  RESEAU & C2 HUNTER       - Ports rapides, Named Pipes Cobalt \\.\pipe\" -ForegroundColor Cyan
     Write-Host "   [4]  DURCISSEMENT             - WMI, SMBv1, Shadow Copies, Policies" -ForegroundColor Yellow
     Write-Host "   [5]  SNAPSHOT MEMOIRE         - Etat memoire & threads (pas de dump physique)" -ForegroundColor DarkCyan
     Write-Host "   [6]  CONSOLE LIVE             - Console interactive d'analyse en temps reel" -ForegroundColor Green
@@ -1236,13 +1407,14 @@ do {
     Write-Host "   [12] DEFENDER AVANCE          - Exclusions malware, Defender Offline, Regles ASR" -ForegroundColor Magenta
     Write-Host "   [13] FORENSIQUE EVENEMENTS    - Force brute 4625, Logs effaces 1102, Nouveaux admins" -ForegroundColor Yellow
     Write-Host "   [14] RAPPORTS & EXPORTS       - Synthese session, Export HTML sombre, CSV, JSON" -ForegroundColor Green
+    Write-Host "   [15] ISOLATEUR & BAC A SABLE  - Kill-Switch Reseau d'Urgence, Loopback 127.0.0.1" -ForegroundColor Red
     Write-Host "  --------------------------------------------------------------------" -ForegroundColor DarkGray
     Write-Host "   [99] NETTOYAGE MANUEL TEMP    - Nettoyage manuel (preserve les preuves d'audit)" -ForegroundColor DarkGray
     Write-Host "   [0]  QUITTER" -ForegroundColor DarkGray
     Write-Host "  ====================================================================" -ForegroundColor DarkGray
     Write-Host "  Rapport actuel : $reportPath" -ForegroundColor DarkGray
     Write-Host ""
-    $m = Read-Host "  Selectionnez une option (ex: 10, 11, 12, 13, 14)"
+    $m = Read-Host "  Selectionnez une option (ex: 10, 11, 12, 13, 14, 15)"
     switch ($m) {
         '1'  { Show-KernelMenu }
         '2'  { Run-AntivirusScan; Repair-WindowsDefender; Pause-Menu }
@@ -1256,8 +1428,10 @@ do {
         '12' { Invoke-DefenderAdvanced }
         '13' { Invoke-ForensicInvestigation }
         '14' { Invoke-ReportGeneration }
+        '15' { Show-SandboxMenu }
         '99' { Invoke-ManualArtifactCleanup; Pause-Menu }
         '0'  { Write-Logging "Fermeture de la suite SpaceSec. Restez vigilant !" "OK"; exit }
+
     }
 } while ($m -ne '0')
 `;

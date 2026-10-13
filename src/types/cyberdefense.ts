@@ -7,6 +7,7 @@ export type TabId =
   | 'console'
   | 'deep-excision'
   | 'deep-detection'
+  | 'sandbox-isolation'
   | 'forensics'
   | 'network'
   | 'wifi'
@@ -273,5 +274,46 @@ export interface IpLocationReport {
   openStreetMapUrl: string;
   groundingUrls?: Array<{ uri: string; title: string }>;
   error?: string;
+}
+
+export interface NetworkInterfaceInfo {
+  id: string;
+  name: string;
+  displayName: string;
+  type: 'Wi-Fi' | 'Ethernet' | 'Virtual' | 'Loopback' | 'Cellular' | 'Other';
+  status: 'Up' | 'Down' | 'Disabled' | 'Unknown';
+  adminStatus: 'Enabled' | 'Disabled';
+  mac: string;
+  ipAddresses: string[];
+  speedMbps?: number;
+  isLoopback: boolean;
+  isPhysical: boolean;
+  rxBytes?: number;
+  txBytes?: number;
+}
+
+export interface SandboxProcessItem {
+  pid: number;
+  name: string;
+  path: string;
+  status: 'RUNNING' | 'FROZEN' | 'ISOLATED' | 'SANDBOXED' | 'TERMINATED';
+  isolatedAt?: string;
+  networkBlocked: boolean;
+  cpuRestricted: boolean;
+  threatScore: number;
+  details?: string;
+}
+
+export interface KillSwitchStatus {
+  isActive: boolean;
+  engagedAt?: string;
+  disabledInterfaces: string[];
+  loopbackProtected: boolean;
+  localhostPort: number;
+  interfaces: NetworkInterfaceInfo[];
+  totalActiveInterfaces: number;
+  externalAccessBlocked: boolean;
+  sandboxedProcesses: SandboxProcessItem[];
+  appliedCommands: string[];
 }
 

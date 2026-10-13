@@ -26,6 +26,7 @@ import {
   Globe,
   MapPin,
   Wifi,
+  WifiOff,
   Wrench,
   ShieldAlert,
 } from 'lucide-react';
@@ -215,6 +216,15 @@ export const TopNav: React.FC<TopNavProps> = ({
           icon: ShieldAlert,
           tag: 'MENUS 10-14',
           tagClass: 'text-cyan-400 bg-cyan-950/70 border-cyan-800/50',
+        },
+        {
+          id: 'sandbox-isolation',
+          title: 'Isolateur & Bac à Sable (Sandbox Live)',
+          category: 'Kill-Switch Réseau & Confinement',
+          shortDesc: 'Coupure d\'urgence Wi-Fi/Ethernet (netsh/WMI), conservation 127.0.0.1 et bac à sable de processus.',
+          icon: WifiOff,
+          tag: 'KILL-SWITCH',
+          tagClass: 'text-rose-400 bg-rose-950/70 border-rose-800/50',
         },
         {
           id: 'forensics',
@@ -497,6 +507,16 @@ export const TopNav: React.FC<TopNavProps> = ({
                   : 'Synchro En Cours'}
               </span>
               <Users className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            </button>
+
+            {/* Kill-Switch Quick Action Shortcut */}
+            <button
+              onClick={() => onSelectTab('sandbox-isolation')}
+              title="Isolateur & Kill-Switch Réseau d'Urgence : Couper le trafic sortant/entrant tout en maintenant localhost"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all border shadow-sm bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/80 hover:border-rose-500"
+            >
+              <WifiOff className="w-3.5 h-3.5 text-rose-400" />
+              <span className="hidden md:inline">Kill-Switch</span>
             </button>
 
             {/* Primary Action: Download ZIP */}
