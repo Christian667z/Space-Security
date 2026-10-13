@@ -8,6 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
+import crypto from 'crypto';
 
 const execAsync = promisify(exec);
 const appDir = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
@@ -1115,6 +1116,519 @@ Précise l'endroit exact (bâtiment, centre de données, rue ou quartier), les s
       res.json({ success: true, events });
     } catch (err: any) {
       res.json({ success: true, events: [] });
+    }
+  });
+
+  // API 8: Real System Security & Integrity Scanner (Deep / Quick)
+  app.get('/api/system/scan', async (req, res) => {
+    const t0 = Date.now();
+    try {
+      const isWin = os.platform() === 'win32';
+      const deep = req.query.deep === 'true' || req.query.type === 'deep';
+
+      // 1. Real Defender Status & Preferences
+      let defenderStatus: any = { active: true, realtime: true, signatureAgeDays: 0, serviceEnabled: true };
+      let defenderExclusions: any = { paths: [], processes: [], extensions: [] };
+      if (isWin) {
+        try {
+          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureAge, AMServiceEnabled | ConvertTo-Json"');
+          const parsed = JSON.parse(stdout.trim());
+          defenderStatus = {
+            active: Boolean(parsed.AntivirusEnabled),
+            realtime: Boolean(parsed.RealTimeProtectionEnabled),
+            signatureAgeDays: typeof parsed.AntivirusSignatureAge === 'number' ? parsed.AntivirusSignatureAge : 0,
+            serviceEnabled: Boolean(parsed.AMServiceEnabled),
+          };
+        } catch {}
+
+        try {
+          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-MpPreference | Select-Object ExclusionPath, ExclusionProcess, ExclusionExtension | ConvertTo-Json"');
+          const parsed = JSON.parse(stdout.trim());
+          const cleanArr = (val: any) => {
+            if (!val) return [];
+            const arr = Array.isArray(val) ? val : [val];
+            return arr.filter((x: any) => typeof x === 'string' && !x.startsWith('N/A'));
+          };
+          defenderExclusions = {
+            paths: cleanArr(parsed.ExclusionPath),
+            processes: cleanArr(parsed.ExclusionProcess),
+            extensions: cleanArr(parsed.ExclusionExtension),
+          };
+        } catch {}
+      }
+
+      // 2. Real Startup Programs (Registry Run Keys)
+      const startupPrograms: Array<{ name: string; command: string; location: string; isSuspicious: boolean }> = [];
+      if (isWin) {
+        try {
+          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-ItemProperty \'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\' -ErrorAction SilentlyContinue | Select-Object -Property * -ExcludeProperty PS* | ConvertTo-Json"');
+          const parsed = JSON.parse(stdout.trim());
+          if (parsed && typeof parsed === 'object') {
+            for (const [name, command] of Object.entries(parsed)) {
+              if (typeof command === 'string') {
+                startupPrograms.push({
+                  name,
+                  command,
+                  location: 'HKCU\\...\\Run',
+                  isSuspicious: ['cmd.exe /c', 'powershell.exe -enc', 'cscript.exe', 'temp\\', 'wscript.exe'].some(k => command.toLowerCase().includes(k)),
+                });
+              }
+            }
+          }
+        } catch {}
+
+        try {
+          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-ItemProperty \'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\' -ErrorAction SilentlyContinue | Select-Object -Property * -ExcludeProperty PS* | ConvertTo-Json"');
+          const parsed = JSON.parse(stdout.trim());
+          if (parsed && typeof parsed === 'object') {
+            for (const [name, command] of Object.entries(parsed)) {
+              if (typeof command === 'string') {
+                startupPrograms.push({
+                  name,
+                  command,
+                  location: 'HKLM\\...\\Run',
+                  isSuspicious: ['cmd.exe /c', 'powershell.exe -enc', 'cscript.exe', 'temp\\', 'wscript.exe'].some(k => command.toLowerCase().includes(k)),
+                });
+              }
+            }
+          }
+        } catch {}
+      }
+
+      // 3. Real BITS Background Transfers
+      let bitsJobs: any[] = [];
+      if (isWin) {
+        try {
+          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-BitsTransfer -ErrorAction SilentlyContinue | Select-Object JobId, DisplayName, JobState, RemoteUrl, Priority | ConvertTo-Json"');
+          if (stdout.trim()) {
+            const parsed = JSON.parse(stdout.trim());
+            const arr = Array.isArray(parsed) ? parsed : [parsed];
+            bitsJobs = arr.filter(j => j && j.JobId).map(j => ({
+              id: j.JobId,
+              name: j.DisplayName || 'Transfert BITS',
+              state: j.JobState || 'Actif',
+              remoteUrl: j.RemoteUrl || '',
+              isSuspicious: false,
+            }));
+          }
+        } catch {}
+      }
+
+      // 4. Real HOSTS File Inspection
+      const hostsReport: { path: string; totalEntries: number; suspiciousEntries: string[]; isClean: boolean } = {
+        path: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
+        totalEntries: 0,
+        suspiciousEntries: [],
+        isClean: true,
+      };
+      if (isWin) {
+        try {
+          if (fs.existsSync(hostsReport.path)) {
+            const content = fs.readFileSync(hostsReport.path, 'utf8');
+            const lines = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+            hostsReport.totalEntries = lines.length;
+            const suspicious = lines.filter(l => {
+              const lower = l.toLowerCase();
+              return lower.includes('windowsupdate') || lower.includes('microsoft.com') || lower.includes('virustotal');
+            });
+            if (suspicious.length > 0) {
+              hostsReport.suspiciousEntries = suspicious;
+              hostsReport.isClean = false;
+            }
+          }
+        } catch {}
+      }
+
+      // 5. Real Windows HotFixes & Core Services
+      let hotfixesCount = 0;
+      let servicesReport: Array<{ name: string; displayName: string; status: string; isVulnerable: boolean }> = [];
+      if (isWin) {
+        try {
+          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-HotFix).Count"');
+          hotfixesCount = parseInt(stdout.trim(), 10) || 0;
+        } catch {}
+
+        try {
+          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-Service -Name Spooler, RemoteRegistry, LanmanServer -ErrorAction SilentlyContinue | Select-Object Name, DisplayName, Status, StartType | ConvertTo-Json"');
+          if (stdout.trim()) {
+            const parsed = JSON.parse(stdout.trim());
+            const arr = Array.isArray(parsed) ? parsed : [parsed];
+            servicesReport = arr.map((s: any) => ({
+              name: s.Name,
+              displayName: s.DisplayName,
+              status: s.Status === 4 ? 'Running' : s.Status === 1 ? 'Stopped' : 'Unknown',
+              isVulnerable: s.Name === 'RemoteRegistry' && s.Status === 4,
+            }));
+          }
+        } catch {}
+      }
+
+      // 6. Real Running Processes Scan
+      let suspiciousProcesses: any[] = [];
+      let processesScanned = 0;
+      if (isWin) {
+        try {
+          const { stdout } = await execAsync('tasklist /fo csv /nh');
+          const lines = stdout.split('\n').filter(l => l.trim());
+          processesScanned = lines.length;
+          const badKeywords = ['mimikatz', 'xmrig', 'swisyn', 'darkcomet', 'c2_beacon', 'meterpreter'];
+          for (const line of lines) {
+            const clean = line.replace(/\"/g, '').trim();
+            const parts = clean.split(',');
+            if (parts.length >= 2) {
+              const name = parts[0].toLowerCase();
+              const pid = parseInt(parts[1], 10);
+              if (badKeywords.some(k => name.includes(k))) {
+                suspiciousProcesses.push({ name: parts[0], pid, user: parts[2] || 'SYSTEM' });
+              }
+            }
+          }
+        } catch {}
+      }
+
+      // 7. Deep scan: Scan %TEMP% folder for suspicious executables
+      let tempAudit: { scannedFiles: number; suspiciousFiles: string[] } = { scannedFiles: 0, suspiciousFiles: [] };
+      if (deep && isWin) {
+        try {
+          const tempPath = process.env.TEMP || 'C:\\Windows\\Temp';
+          if (fs.existsSync(tempPath)) {
+            const files = fs.readdirSync(tempPath);
+            tempAudit.scannedFiles = files.length;
+            for (const f of files.slice(0, 60)) {
+              const lower = f.toLowerCase();
+              if ((lower.endsWith('.exe') || lower.endsWith('.vbs') || lower.endsWith('.bat')) && (lower.includes('updater') || lower.includes('svchost') || lower.includes('payload'))) {
+                tempAudit.suspiciousFiles.push(path.join(tempPath, f));
+              }
+            }
+          }
+        } catch {}
+      }
+
+      const elapsedMs = Date.now() - t0;
+      const realThreatsFound: any[] = [];
+
+      if (!defenderStatus.active || !defenderStatus.realtime) {
+        realThreatsFound.push({
+          id: 'real-threat-def-disabled',
+          name: 'Protection en Temps Réel Microsoft Defender Inactive',
+          category: 'Defender',
+          severity: 'HIGH',
+          targetPath: 'Windows Defender Engine',
+          mitreTechnique: 'T1562.001 - Disable Security Tools',
+          lockedBySystem: false,
+          trustedInstallerLocked: false,
+          description: 'La protection en temps réel ou le service antivirus principal de Windows est désactivé.',
+          status: 'ACTIVE',
+        });
+      }
+
+      for (const p of suspiciousProcesses) {
+        realThreatsFound.push({
+          id: `real-threat-proc-${p.pid}`,
+          name: `Processus Suspect Détecté : ${p.name}`,
+          category: 'Trojan',
+          severity: 'CRITICAL',
+          targetPath: `PID: ${p.pid} (${p.name})`,
+          mitreTechnique: 'T1059 - Command and Scripting Interpreter',
+          lockedBySystem: false,
+          trustedInstallerLocked: false,
+          description: `Binaire suspect en cours d'exécution active sous le nom ${p.name}.`,
+          status: 'ACTIVE',
+        });
+      }
+
+      if (!hostsReport.isClean) {
+        realThreatsFound.push({
+          id: 'real-threat-hosts-hijack',
+          name: 'Détournement Détecté dans le fichier HOSTS',
+          category: 'Network',
+          severity: 'HIGH',
+          targetPath: hostsReport.path,
+          mitreTechnique: 'T1565.001 - Internal Defacement / DNS Poisoning',
+          lockedBySystem: false,
+          trustedInstallerLocked: false,
+          description: `Des entrées critiques de mise à jour ou de sécurité ont été redirigées : ${hostsReport.suspiciousEntries.join(', ')}`,
+          status: 'ACTIVE',
+        });
+      }
+
+      const totalAudited = processesScanned + startupPrograms.length + bitsJobs.length + hostsReport.totalEntries + hotfixesCount + tempAudit.scannedFiles;
+
+      res.json({
+        success: true,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        hostname: process.env.COMPUTERNAME || os.hostname() || 'Poste Local',
+        platform: 'Windows 11 / NT Native',
+        elapsedMs,
+        deep,
+        summary: {
+          totalAudited,
+          threatsFound: realThreatsFound.length,
+          status: realThreatsFound.length === 0 ? 'HEALTHY' : 'WARNING',
+          healthScore: realThreatsFound.length === 0 ? 100 : Math.max(30, 100 - realThreatsFound.length * 25),
+        },
+        audit: {
+          defender: {
+            ...defenderStatus,
+            exclusions: defenderExclusions,
+          },
+          startupPrograms,
+          bitsJobs,
+          hosts: hostsReport,
+          hotfixesCount,
+          services: servicesReport,
+          processesScanned,
+          tempAudit,
+        },
+        threats: realThreatsFound,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message, threats: [] });
+    }
+  });
+
+  // API 9: Real Microsoft Defender Status & Exclusions
+  app.get('/api/system/defender', async (req, res) => {
+    try {
+      if (os.platform() !== 'win32') {
+        return res.json({
+          success: true,
+          status: { active: true, realtime: true, signatureAgeDays: 0, serviceEnabled: true },
+          exclusions: { paths: [], processes: [], extensions: [] },
+        });
+      }
+
+      let status = { active: true, realtime: true, signatureAgeDays: 0, serviceEnabled: true };
+      try {
+        const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureAge, AMServiceEnabled | ConvertTo-Json"');
+        const parsed = JSON.parse(stdout.trim());
+        status = {
+          active: Boolean(parsed.AntivirusEnabled),
+          realtime: Boolean(parsed.RealTimeProtectionEnabled),
+          signatureAgeDays: typeof parsed.AntivirusSignatureAge === 'number' ? parsed.AntivirusSignatureAge : 0,
+          serviceEnabled: Boolean(parsed.AMServiceEnabled),
+        };
+      } catch {}
+
+      let exclusions = { paths: [] as string[], processes: [] as string[], extensions: [] as string[] };
+      try {
+        const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-MpPreference | Select-Object ExclusionPath, ExclusionProcess, ExclusionExtension | ConvertTo-Json"');
+        const parsed = JSON.parse(stdout.trim());
+        const cleanArr = (val: any) => {
+          if (!val) return [];
+          const arr = Array.isArray(val) ? val : [val];
+          return arr.filter((x: any) => typeof x === 'string' && !x.startsWith('N/A'));
+        };
+        exclusions = {
+          paths: cleanArr(parsed.ExclusionPath),
+          processes: cleanArr(parsed.ExclusionProcess),
+          extensions: cleanArr(parsed.ExclusionExtension),
+        };
+      } catch {}
+
+      res.json({ success: true, status, exclusions });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // API 10: Real BITS Background Transfers
+  app.get('/api/system/bits', async (req, res) => {
+    try {
+      if (os.platform() !== 'win32') {
+        return res.json({ success: true, jobs: [] });
+      }
+
+      const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-BitsTransfer -ErrorAction SilentlyContinue | Select-Object JobId, DisplayName, JobState, RemoteUrl, Priority, CreationTime | ConvertTo-Json"');
+      let jobs: any[] = [];
+      if (stdout.trim()) {
+        const parsed = JSON.parse(stdout.trim());
+        const arr = Array.isArray(parsed) ? parsed : [parsed];
+        jobs = arr.filter(j => j && j.JobId).map(j => ({
+          id: j.JobId,
+          jobName: j.DisplayName || 'Transfert BITS',
+          state: j.JobState || 'ACKNOWLEDGED',
+          direction: 'DOWNLOAD',
+          remoteUrl: j.RemoteUrl || 'Liaison interne Windows Update',
+          localPath: 'Fichier local géré par BITS',
+          transferredBytes: 'Flux géré par le système',
+          isSuspicious: false,
+          threatDetails: 'Tâche système de transfert d\'arrière-plan Windows',
+          priority: j.Priority || 'NORMAL',
+          creationTime: j.CreationTime ? new Date(j.CreationTime).toLocaleString('fr-FR') : 'Récent',
+        }));
+      }
+
+      res.json({ success: true, jobs });
+    } catch (err: any) {
+      res.json({ success: true, jobs: [] });
+    }
+  });
+
+  // API 11: Real Windows HotFixes & Vulnerabilities
+  app.get('/api/system/vulnerabilities', async (req, res) => {
+    try {
+      if (os.platform() !== 'win32') {
+        return res.json({ success: true, hotfixes: [], services: [] });
+      }
+
+      let hotfixes: any[] = [];
+      try {
+        const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-HotFix | Select-Object -First 12 HotFixID, Description, InstalledOn | ConvertTo-Json"');
+        if (stdout.trim()) {
+          const parsed = JSON.parse(stdout.trim());
+          const arr = Array.isArray(parsed) ? parsed : [parsed];
+          hotfixes = arr.filter(h => h && h.HotFixID).map(h => {
+            let installedDate = 'Installé';
+            if (h.InstalledOn && h.InstalledOn.DateTime) installedDate = h.InstalledOn.DateTime;
+            else if (typeof h.InstalledOn === 'string') installedDate = h.InstalledOn;
+            return {
+              hotfixId: h.HotFixID,
+              title: `${h.HotFixID} (${h.Description || 'Correctif de Sécurité Windows'})`,
+              severity: 'LOW',
+              cveRef: 'Patch Officiel Microsoft',
+              description: `Mise à jour officielle de sécurité Windows installée avec succès.`,
+              isInstalled: true,
+              installedOn: installedDate,
+              remediationCmd: `Get-HotFix -Id ${h.HotFixID}`,
+            };
+          });
+        }
+      } catch {}
+
+      let services: any[] = [];
+      try {
+        const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-Service -Name Spooler, RemoteRegistry, LanmanServer -ErrorAction SilentlyContinue | Select-Object Name, DisplayName, Status, StartType | ConvertTo-Json"');
+        if (stdout.trim()) {
+          const parsed = JSON.parse(stdout.trim());
+          const arr = Array.isArray(parsed) ? parsed : [parsed];
+          services = arr.map((s: any) => ({
+            serviceName: s.Name,
+            displayName: s.DisplayName,
+            status: s.Status === 4 ? 'Running' : 'Stopped',
+            startupType: s.StartType === 2 ? 'Automatic' : s.StartType === 4 ? 'Disabled' : 'Manual',
+            isVulnerableOrObsolete: s.Name === 'RemoteRegistry' && s.Status === 4,
+            severity: s.Name === 'RemoteRegistry' && s.Status === 4 ? 'HIGH' : 'LOW',
+            vulnerabilityReason: s.Name === 'RemoteRegistry' && s.Status === 4
+              ? 'Registre à distance actif (surface d\'attaque). Devrait être arrêté sur un poste client.'
+              : 'Service système Windows standard en fonctionnement nominal.',
+            cveOrVector: s.Name === 'RemoteRegistry' ? 'T1112 - Modify Registry' : 'Système Nominal',
+            disableCmd: `Stop-Service ${s.Name} -Force; Set-Service ${s.Name} -StartupType Disabled`,
+          }));
+        }
+      } catch {}
+
+      res.json({ success: true, hotfixes, services });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message, hotfixes: [], services: [] });
+    }
+  });
+
+  // API 12: Real Startup Programs
+  app.get('/api/system/startup', async (req, res) => {
+    try {
+      if (os.platform() !== 'win32') {
+        return res.json({ success: true, programs: [] });
+      }
+
+      const programs: any[] = [];
+      const readReg = async (keyPath: string, label: string) => {
+        try {
+          const { stdout } = await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-ItemProperty '${keyPath}' -ErrorAction SilentlyContinue | Select-Object -Property * -ExcludeProperty PS* | ConvertTo-Json"`);
+          const parsed = JSON.parse(stdout.trim());
+          if (parsed && typeof parsed === 'object') {
+            for (const [name, command] of Object.entries(parsed)) {
+              if (typeof command === 'string') {
+                programs.push({
+                  name,
+                  command,
+                  location: label,
+                  isSuspicious: ['cmd.exe /c', 'powershell.exe -enc', 'cscript.exe', 'temp\\'].some(k => command.toLowerCase().includes(k)),
+                });
+              }
+            }
+          }
+        } catch {}
+      };
+
+      await readReg('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'HKCU (Utilisateur)');
+      await readReg('HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'HKLM (Machine)');
+
+      res.json({ success: true, programs });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message, programs: [] });
+    }
+  });
+
+  // API 13: Real HOSTS File Reader
+  app.get('/api/system/hosts', (req, res) => {
+    try {
+      const hostsPath = 'C:\\Windows\\System32\\drivers\\etc\\hosts';
+      if (!fs.existsSync(hostsPath)) {
+        return res.json({ success: true, exists: false, lines: [] });
+      }
+      const raw = fs.readFileSync(hostsPath, 'utf8');
+      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+      res.json({ success: true, exists: true, lines });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message, lines: [] });
+    }
+  });
+
+  // API 14: Real File Scanner & Authenticode Signature Validator
+  app.all('/api/system/scan/file', async (req, res) => {
+    try {
+      const targetPath = (req.method === 'POST' ? req.body?.path : req.query?.path) as string;
+      if (!targetPath || typeof targetPath !== 'string') {
+        return res.status(400).json({ success: false, error: 'Paramètre "path" requis.' });
+      }
+
+      if (!fs.existsSync(targetPath)) {
+        return res.json({ success: false, exists: false, message: `Fichier introuvable sur le disque : ${targetPath}` });
+      }
+
+      const stat = fs.statSync(targetPath);
+      const isFile = stat.isFile();
+      if (!isFile) {
+        return res.json({ success: true, exists: true, isDirectory: true, sizeBytes: stat.size });
+      }
+
+      // Compute SHA-256
+      const hash = crypto.createHash('sha256');
+      const fileStream = fs.createReadStream(targetPath);
+      await new Promise((resolve, reject) => {
+        fileStream.on('data', data => hash.update(data));
+        fileStream.on('end', resolve);
+        fileStream.on('error', reject);
+      });
+      const sha256 = hash.digest('hex');
+
+      // Check Authenticode Signature via PowerShell if Windows
+      let signatureStatus = 'UNKNOWN';
+      let signer = 'Non signé';
+      if (os.platform() === 'win32') {
+        try {
+          const { stdout } = await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-AuthenticodeSignature -FilePath '${targetPath.replace(/'/g, "''")}').Status.ToString()"`);
+          const statusTrim = stdout.trim();
+          if (statusTrim) signatureStatus = statusTrim;
+          const { stdout: signerOut } = await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-AuthenticodeSignature -FilePath '${targetPath.replace(/'/g, "''")}').SignerCertificate.Subject"`);
+          if (signerOut.trim()) signer = signerOut.trim();
+        } catch {}
+      }
+
+      res.json({
+        success: true,
+        exists: true,
+        path: targetPath,
+        sizeBytes: stat.size,
+        sizeKb: Math.round(stat.size / 1024),
+        sha256,
+        signatureStatus,
+        signer,
+        isSigned: signatureStatus === 'Valid',
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 

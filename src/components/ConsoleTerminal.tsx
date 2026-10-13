@@ -90,12 +90,12 @@ export const ConsoleTerminal: React.FC<ConsoleTerminalProps> = ({
     { label: 'Audit Vulnérabilités (Get-HotFix)', cmd: 'vulnscan' },
     { label: 'Parser EventLog (WinEvent)', cmd: 'eventlog' },
     { label: 'Scanner Ports (Localhost)', cmd: 'ports' },
-    { label: 'Eradication Fichier Bloqué', cmd: 'unlock C:\\Windows\\System32\\drivers\\suspicious_rootkit.sys' },
+    { label: 'Éradication Fichier Protégé', cmd: 'unlock C:\\Windows\\System32\\drivers\\etc\\hosts' },
     { label: 'Audit IFEO Hijacks', cmd: 'ifeo' },
     { label: 'Suspension Watchdogs', cmd: 'suspend swisyn' },
     { label: 'Audit Pilotes Kernel', cmd: 'drivers' },
-    { label: 'Sockets C2 Actifs', cmd: 'sockets' },
-    { label: 'Reparation Defender', cmd: 'defender-repair' },
+    { label: 'Sockets Réseau Actifs', cmd: 'sockets' },
+    { label: 'Réparation Defender', cmd: 'defender-repair' },
   ];
 
   return (

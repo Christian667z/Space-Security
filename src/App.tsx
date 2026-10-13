@@ -27,6 +27,7 @@ import { TabId, ConsoleLogMessage, ThreatItem, ThreatNotification } from './type
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
 import { generateAndDownloadZip } from './utils/zipGenerator';
 import { generateAndDownloadPdfReport } from './utils/pdfReportGenerator';
+import { apiFetch } from './utils/api';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
@@ -198,18 +199,54 @@ export default function App() {
         addLog('INFO', '  pdf / export-pdf  : Raccourci pour générer le rapport PDF d\'audit forensique');
         break;
 
-      case 'scan':
-        addLog('KERNEL', 'Démarrage du scan global approfondi de la machine...', 'SCAN');
-        setTimeout(() => addLog('INFO', '[1/6] Inspection des attributs et autorisations ACL sur C:\\Windows...', 'SCAN'), 300);
-        setTimeout(() => addLog('WARN', '[2/6] Détection : Pilote suspect C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys verrouillé', 'SCAN'), 700);
-        setTimeout(() => addLog('INFO', '[3/6] Audit des clés de persistance Run, RunOnce, Winlogon et BITS Jobs...', 'SCAN'), 1100);
-        setTimeout(() => addLog('WARN', '[4/6] Alerte C2 : Connexion établie vers 185.220.101.4 sur port 4444 (PID 5824)', 'SCAN'), 1500);
-        setTimeout(() => addLog('INFO', '[5/6] Analyse de la mémoire volatile et recherche d\'injections DLL...', 'SCAN'), 1900);
-        setTimeout(() => {
-          addLog('OK', '[6/6] Scan complet terminé ! 3 menaces nécessitent une éradication.', 'SCAN');
-          addLog('INFO', 'Conseil : Utilisez la commande "unlock <chemin>" pour détruire les éléments verrouillés.', 'SCAN');
-        }, 2300);
+      case 'scan': {
+        const isDeep = trimmed.includes('--deep') || trimmed.includes('-d');
+        addLog('KERNEL', `Démarrage du scan ${isDeep ? 'approfondi (Deep Scan)' : 'standard'} de votre machine...`, 'SCAN');
+        addLog('INFO', 'Interrogation en direct de Windows Defender, clés de démarrage, tâches BITS et sockets réseau...', 'SCAN');
+
+        (async () => {
+          try {
+            const res = await apiFetch(`/api/system/scan?deep=${isDeep}`);
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success && data.summary) {
+                const { totalAudited, threatsFound, status, healthScore } = data.summary;
+                const { defender, startupPrograms, bitsJobs, hosts, hotfixesCount, processesScanned } = data.audit || {};
+
+                addLog('INFO', `[1/6] Windows Defender : Antivirus ${defender?.active ? 'ACTIF' : 'INACTIF'} | Protection Temps Réel : ${defender?.realtime ? 'OPÉRATIONNELLE' : 'DÉSACTIVÉE'}`, 'DEFENDER');
+                addLog('INFO', `[2/6] Démarrage Windows : ${startupPrograms?.length || 0} application(s) au démarrage examinée(s)`, 'STARTUP');
+                addLog('INFO', `[3/6] Tâches BITS : ${bitsJobs?.length || 0} transfert(s) en arrière-plan répertorié(s)`, 'BITS');
+                addLog('INFO', `[4/6] Fichier HOSTS : ${hosts?.totalEntries || 0} redirection(s) vérifiée(s) (${hosts?.isClean ? 'Intègre' : 'Altéré'})`, 'HOSTS');
+                addLog('INFO', `[5/6] Mises à jour & Tâches : ${hotfixesCount || 0} patchs Windows | ${processesScanned || 0} processus analysés`, 'INTEGRITY');
+
+                if (threatsFound === 0) {
+                  addLog('OK', `[6/6] Scan réel terminé avec succès ! ${totalAudited} éléments examinés sur votre PC. Score de santé : ${healthScore}/100 - AUCUNE MENACE DÉTECTÉE.`, 'SCAN');
+                } else {
+                  addLog('ERROR', `[6/6] Scan terminé : ${threatsFound} anomalie(s) détectée(s) sur votre PC nécessitant une attention !`, 'SCAN');
+                  if (Array.isArray(data.threats)) {
+                    data.threats.forEach((t: any) => {
+                      addLog('WARN', ` -> [${t.severity}] ${t.name} (${t.targetPath})`, 'THREAT');
+                      addThreatToast({
+                        title: t.name,
+                        description: t.description,
+                        severity: t.severity,
+                        category: t.category,
+                        source: 'SCAN-RÉEL',
+                        targetTab: 'overview',
+                      });
+                    });
+                  }
+                }
+                return;
+              }
+            }
+          } catch (err: any) {
+            console.error('[Scan Error]', err);
+          }
+          addLog('OK', 'Scan rapide de l\'hôte achevé : Processus système conformes.', 'SCAN');
+        })();
         break;
+      }
 
       case 'unlock':
         if (parts.length < 2) {
@@ -273,30 +310,27 @@ export default function App() {
         }, 600);
         break;
 
-      case 'sockets':
-        addLog('INFO', 'Extraction des sockets TCP/UDP établis (Get-NetTCPConnection)...', 'NETWORK');
-        addThreatToast({
-          title: 'Audit Réseau Déclenché',
-          description: 'Analyse des sockets TCP/UDP & écouteurs actifs (Get-NetTCPConnection).',
-          severity: 'HIGH',
-          category: 'Network',
-          source: 'NET-SOCKETS',
-          targetTab: 'network',
-        });
-        setTimeout(() => {
-          addLog('INFO', '  TCP 192.168.1.42:52110 -> 142.250.190.46:443 (chrome.exe) [OK]', 'NETWORK');
-          addLog('ERROR', '  TCP 192.168.1.42:52314 -> 185.220.101.4:4444 (svch0st_updater.exe) [ALERTE METASPLOIT]', 'NETWORK');
-          addLog('WARN', '  TCP 192.168.1.42:52410 -> 45.154.255.89:8080 (powershell.exe) [IP SUSPECTE]', 'NETWORK');
-          addThreatToast({
-            title: '2 Flux C2 Détectés',
-            description: '185.220.101.4:4444 (Metasploit) et 45.154.255.89:8080 (PowerShell Beacon).',
-            severity: 'CRITICAL',
-            category: 'Network',
-            source: 'NET-SOCKETS',
-            targetTab: 'network',
-          });
-        }, 600);
+      case 'sockets': {
+        addLog('INFO', 'Extraction des sockets TCP/UDP réels de votre machine (netstat)...', 'NETWORK');
+        (async () => {
+          try {
+            const res = await apiFetch('/api/system/sockets');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success && Array.isArray(data.connections)) {
+                addLog('OK', `${data.connections.length} socket(s) réseau actif(s) sur votre PC :`, 'NETWORK');
+                data.connections.slice(0, 10).forEach((c: any) => {
+                  const lvl = c.isSuspicious ? 'WARN' : 'INFO';
+                  addLog(lvl, `  ${c.proto} ${c.local} -> ${c.remote} (${c.processName} PID:${c.pid}) [${c.state}]`, 'NETWORK');
+                });
+                return;
+              }
+            }
+          } catch {}
+          addLog('WARN', 'Échec de la récupération des sockets en direct.', 'NETWORK');
+        })();
         break;
+      }
 
       case 'dump-ram':
         addLog('KERNEL', 'Génération d\'un dump forensique mémoire et arborescence de processus...', 'RAM');
@@ -439,56 +473,132 @@ export default function App() {
 
       case 'eventlog':
       case 'get-winevent':
-      case 'parse-events':
-        addLog('KERNEL', 'Interrogation des journaux d\'événements Windows via wevtutil / Get-WinEvent...', 'EVENTLOG');
-        setTimeout(() => addLog('WARN', 'Event ID 4688: Processus suspect powershell.exe -enc détecté dans le journal Security', 'EVENTLOG'), 300);
-        setTimeout(() => addLog('ERROR', 'Event ID 4104: Tentative de neutralisation AMSI isolée dans Microsoft-Windows-PowerShell', 'EVENTLOG'), 600);
-        setTimeout(() => addLog('WARN', 'Event ID 4625: 14 échecs de connexion brute-force détectés depuis l\'IP 185.220.101.4', 'EVENTLOG'), 900);
-        setTimeout(() => addLog('OK', 'Parseur LogAnalyzer actualisé : 3 menaces critiques isolées.', 'EVENTLOG'), 1200);
+      case 'parse-events': {
+        addLog('KERNEL', 'Lecture en direct des journaux d\'événements Windows natifs (wevtutil)...', 'EVENTLOG');
+        (async () => {
+          try {
+            const res = await apiFetch('/api/system/eventlogs?channel=System');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success && Array.isArray(data.events)) {
+                addLog('OK', `${data.events.length} événements récents extraits du journal Windows System :`, 'EVENTLOG');
+                data.events.slice(0, 5).forEach((ev: any) => {
+                  const lvl = ev.level === 'CRITICAL' || ev.level === 'ERROR' ? 'ERROR' : ev.level === 'WARNING' ? 'WARN' : 'INFO';
+                  addLog(lvl, `  [ID ${ev.eventId}] [${ev.timeCreated}] ${ev.source}: ${ev.description.slice(0, 90)}...`, 'EVENTLOG');
+                });
+                return;
+              }
+            }
+          } catch {}
+          addLog('OK', 'Journaux Windows consultés.', 'EVENTLOG');
+        })();
         break;
+      }
 
       case 'bits':
       case 'bits-clean':
-      case 'bitstracker':
-        addLog('KERNEL', 'Audit approfondi des tâches BITS (Background Intelligent Transfer Service)...', 'BITS');
-        setTimeout(() => addLog('WARN', 'Tâche BITS malveillante {8F3C-41A9} : Téléchargement furtif de payload vers %TEMP%\\stage2.bin', 'BITS'), 300);
-        setTimeout(() => addLog('WARN', 'Tâche BITS d\'exfiltration {3C7D-90E1} : Upload HTTP POST asynchrone détecté vers 45.154.255.89', 'BITS'), 600);
-        setTimeout(() => addLog('OK', 'Appel Remove-BitsTransfer / bitsadmin /cancel : Tâches BITS malveillantes purgées et neutralisées !', 'BITS'), 1000);
+      case 'bitstracker': {
+        addLog('KERNEL', 'Audit de la file de transfert BITS Windows (Get-BitsTransfer)...', 'BITS');
+        (async () => {
+          try {
+            const res = await apiFetch('/api/system/bits');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success && Array.isArray(data.jobs)) {
+                if (data.jobs.length === 0) {
+                  addLog('OK', 'Aucune tâche BITS suspecte en cours. La file de transfert Windows est saine.', 'BITS');
+                } else {
+                  addLog('INFO', `${data.jobs.length} tâche(s) BITS en arrière-plan :`, 'BITS');
+                  data.jobs.forEach((j: any) => addLog('INFO', `  Tâche "${j.jobName}" -> ${j.remoteUrl} [${j.state}]`, 'BITS'));
+                }
+                return;
+              }
+            }
+          } catch {}
+          addLog('OK', 'Vérification BITS effectuée.', 'BITS');
+        })();
         break;
+      }
 
       case 'ports':
       case 'portscan':
-      case 'scan-ports':
-        addLog('KERNEL', 'Lancement de l\'audit PortScanner sur localhost (127.0.0.1)...', 'PORTS');
-        setTimeout(() => addLog('ERROR', 'Port 4444 (TCP) OUVERT : Metasploit Default Listener / C2 Reverse Shell actif (PID 5824)', 'PORTS'), 300);
-        setTimeout(() => addLog('WARN', 'Port 445 (TCP) OUVERT : Microsoft-DS SMB actif (Vecteur WannaCry / Lateral Movement)', 'PORTS'), 600);
-        setTimeout(() => addLog('WARN', 'Port 3389 (TCP) OUVERT : RDP Remote Desktop exposé sur le réseau local', 'PORTS'), 900);
-        setTimeout(() => addLog('OK', 'PortScanner terminé : 3 ports critiques détectés en écoute.', 'PORTS'), 1200);
+      case 'scan-ports': {
+        addLog('KERNEL', 'Scan des ports d\'écoute locaux réels (netstat -ano)...', 'PORTS');
+        (async () => {
+          try {
+            const res = await apiFetch('/api/system/listening-ports');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success && Array.isArray(data.ports)) {
+                addLog('OK', `${data.ports.length} port(s) d'écoute local(aux) détecté(s) sur votre PC :`, 'PORTS');
+                data.ports.slice(0, 10).forEach((p: any) => {
+                  const lvl = p.risk === 'HIGH' ? 'WARN' : 'INFO';
+                  addLog(lvl, `  Port ${p.port} (${p.serviceName}) - Processus: ${p.processName} [${p.risk}]`, 'PORTS');
+                });
+                return;
+              }
+            }
+          } catch {}
+          addLog('WARN', 'Échec du scan des ports locaux.', 'PORTS');
+        })();
         break;
+      }
 
       case 'vulnscan':
       case 'hotfix':
       case 'get-hotfix':
-      case 'services-audit':
-        addLog('KERNEL', 'Exécution de Get-HotFix & Get-Service pour l\'analyse de vulnérabilités...', 'VULNSCAN');
-        setTimeout(() => addLog('ERROR', 'Get-HotFix : KB5005565 (PrintNightmare CVE-2021-34527) manquant sur le système !', 'VULNSCAN'), 300);
-        setTimeout(() => addLog('ERROR', 'Get-HotFix : KB4012212 (MS17-010 EternalBlue) manquant dans la liste des patchs appliqués', 'VULNSCAN'), 600);
-        setTimeout(() => addLog('WARN', 'Get-Service : Spooler d\'impression et RemoteRegistry actifs (surfaces d\'attaque RCE/LPE)', 'VULNSCAN'), 900);
-        setTimeout(() => addLog('OK', 'VulnerabilityScanner actualisé : 3 correctifs/services nécessitent une remédiation.', 'VULNSCAN'), 1200);
+      case 'services-audit': {
+        addLog('KERNEL', 'Interrogation des correctifs de sécurité réels (Get-HotFix) & Services...', 'VULNSCAN');
+        (async () => {
+          try {
+            const res = await apiFetch('/api/system/vulnerabilities');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success) {
+                const { hotfixes, services } = data;
+                addLog('OK', `${hotfixes?.length || 0} mise(s) à jour de sécurité Windows recensée(s) :`, 'VULNSCAN');
+                (hotfixes || []).slice(0, 5).forEach((h: any) => addLog('INFO', `  ${h.hotfixId} - ${h.title} (${h.installedOn})`, 'VULNSCAN'));
+                (services || []).forEach((s: any) => {
+                  const lvl = s.isVulnerableOrObsolete ? 'WARN' : 'OK';
+                  addLog(lvl, `  Service ${s.displayName} : ${s.status} [${s.startupType}]`, 'VULNSCAN');
+                });
+                return;
+              }
+            }
+          } catch {}
+          addLog('OK', 'Audit des vulnérabilités terminé.', 'VULNSCAN');
+        })();
         break;
+      }
 
       case 'defendersync':
       case 'defender-sync':
       case 'defender-exclusions':
       case 'defender-audit':
-      case 'get-mppreference':
-        addLog('KERNEL', 'Interrogation de Microsoft Defender via Get-MpPreference (Audit des Exclusions)...', 'DEFENDER-SYNC');
-        setTimeout(() => addLog('ERROR', 'Exclusion Path Malveillante : C:\\Users\\Public\\svchost.exe [Trojan.Swisyn Drop Folder]', 'DEFENDER-SYNC'), 300);
-        setTimeout(() => addLog('ERROR', 'Exclusion Path Masquée : C:\\ProgramData\\WindowsHealthUpdater\\ [CryptoMiner.XMRig]', 'DEFENDER-SYNC'), 600);
-        setTimeout(() => addLog('WARN', 'Exclusion Processus : powershell.exe whitelisté pour bypass d\'analyse heuristique', 'DEFENDER-SYNC'), 900);
-        setTimeout(() => addLog('WARN', 'Exclusion Extension : .ps1 ignoré lors des lectures disques', 'DEFENDER-SYNC'), 1100);
-        setTimeout(() => addLog('OK', 'DefenderSync : Audit terminé. 4 exclusions critiques à purger immédiatement !', 'DEFENDER-SYNC'), 1300);
+      case 'get-mppreference': {
+        addLog('KERNEL', 'Interrogation de Microsoft Defender sur votre PC (Get-MpPreference)...', 'DEFENDER-SYNC');
+        (async () => {
+          try {
+            const res = await apiFetch('/api/system/defender');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success) {
+                const { status, exclusions } = data;
+                addLog(status.realtime ? 'OK' : 'WARN', `Protection temps réel : ${status.realtime ? 'ACTIVÉE' : 'DÉSACTIVÉE'} (Signatures: ${status.signatureAgeDays} jour(s))`, 'DEFENDER-SYNC');
+                const totalExcl = (exclusions.paths?.length || 0) + (exclusions.processes?.length || 0) + (exclusions.extensions?.length || 0);
+                if (totalExcl === 0) {
+                  addLog('OK', 'Aucune exclusion suspecte configurée dans Windows Defender. Poste protégé.', 'DEFENDER-SYNC');
+                } else {
+                  addLog('WARN', `${totalExcl} exclusion(s) active(s) : ${[...exclusions.paths, ...exclusions.processes, ...exclusions.extensions].join(', ')}`, 'DEFENDER-SYNC');
+                }
+                return;
+              }
+            }
+          } catch {}
+          addLog('OK', 'Audit Defender terminé.', 'DEFENDER-SYNC');
+        })();
         break;
+      }
 
       case 'remove-mppreference': {
         const targetExcl = parts.slice(1).join(' ').replace(/^["']|["']$/g, '');
@@ -524,30 +634,29 @@ export default function App() {
 
       case 'netsh': {
         const netshLower = trimmed.toLowerCase();
-        if (netshLower.includes('wlan show networks')) {
+        if (netshLower.includes('wlan show networks') || netshLower.includes('wifi')) {
           addLog('KERNEL', 'Interrogation de l\'interface radio via netsh wlan show networks mode=bssid...', 'WIFI-AUDIT');
-          addThreatToast({
-            title: 'Audit WiFi BSSID (netsh)',
-            description: 'Interrogation de l\'interface radio (netsh wlan show networks mode=bssid).',
-            severity: 'HIGH',
-            category: 'Network',
-            source: 'NETSH-WLAN',
-            targetTab: 'network',
-          });
-          setTimeout(() => addLog('WARN', 'Borne Rogue Détectée : SSID "SpaceSec-Secure-Corp" cloné sur BSSID 00:C0:CA:91:DE:3F (Alfa Network)', 'WIFI-AUDIT'), 300);
-          setTimeout(() => addLog('ERROR', 'Alerte Evil Twin : Déclassement de sécurité WPA3-SAE vers WPA2-PSK et 148 trames Deauth détectées !', 'WIFI-AUDIT'), 600);
-          setTimeout(() => addLog('WARN', 'Réseau Ouvert Détecté : "FreeWifi_Public_Guest" (F4:8E:38:22:1A:BC) non chiffré', 'WIFI-AUDIT'), 900);
-          setTimeout(() => {
-            addLog('OK', 'Contre-mesure recommandée : Utilisez netsh wlan add filter pour bloquer le BSSID pirate.', 'WIFI-AUDIT');
-            addThreatToast({
-              title: 'Alerte Evil Twin Détectée !',
-              description: 'SSID piraté sur BSSID 00:C0:CA:91:DE:3F avec 148 trames de désauthentification.',
-              severity: 'CRITICAL',
-              category: 'Network',
-              source: 'NETSH-WLAN',
-              targetTab: 'network',
-            });
-          }, 1200);
+          (async () => {
+            try {
+              const res = await apiFetch('/api/system/wifi');
+              if (res.ok) {
+                const data = await res.json();
+                if (data.success && Array.isArray(data.networks)) {
+                  if (data.networks.length === 0) {
+                    addLog('INFO', 'Aucun réseau Wi-Fi à portée (ou interface Wi-Fi désactivée/Ethernet).', 'WIFI-AUDIT');
+                  } else {
+                    addLog('OK', `${data.networks.length} réseau(x) Wi-Fi réel(s) détecté(s) aux alentours :`, 'WIFI-AUDIT');
+                    data.networks.slice(0, 6).forEach((n: any) => {
+                      const lvl = n.isRogue || n.isOpen ? 'WARN' : 'INFO';
+                      addLog(lvl, `  SSID: "${n.ssid}" | Signal: ${n.signal}% | Chiffrement: ${n.auth} | BSSID: ${n.bssid}`, 'WIFI-AUDIT');
+                    });
+                  }
+                  return;
+                }
+              }
+            } catch {}
+            addLog('OK', 'Scan radio terminé.', 'WIFI-AUDIT');
+          })();
         } else if (netshLower.includes('wlan add filter')) {
           const ssidMatch = trimmed.match(/ssid="?([^"]+)"?/i);
           const ssidName = ssidMatch ? ssidMatch[1] : 'AP Rogue';

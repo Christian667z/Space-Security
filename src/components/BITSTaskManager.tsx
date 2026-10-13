@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { apiFetch } from '../utils/api';
 import {
   Radio,
   RefreshCw,
@@ -58,39 +59,30 @@ export const BITSTaskManager: React.FC<BITSTaskManagerProps> = ({ onRunInConsole
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
   const [isSimulateModalOpen, setIsSimulateModalOpen] = useState(false);
 
-  // Initial BITS Jobs database (legitimate system transfers)
-  const [jobs, setJobs] = useState<BITSJobItem[]>([
-    {
-      id: '{D42E-1197-00AA-8812}',
-      jobName: 'WU-DefinitionUpdate',
-      owner: 'NT AUTHORITY\\NETWORK SERVICE',
-      state: 'ACKNOWLEDGED',
-      direction: 'DOWNLOAD',
-      remoteUrl: 'http://download.windowsupdate.com/msdownload/update/v3/def.cab',
-      localPath: 'C:\\Windows\\SoftwareDistribution\\Download\\def.cab',
-      transferredBytes: '14.2 MB / 14.2 MB (Terminé)',
-      isSuspicious: false,
-      threatDetails: 'Tâche système Microsoft Windows Update légitime de mise à jour des signatures antivirales',
-      mitreTactic: 'Légitime (Microsoft Update)',
-      priority: 'NORMAL',
-      creationTime: 'Aujourd\'hui, 04:30:19',
-    },
-    {
-      id: '{11A2-990B-55CC-2024}',
-      jobName: 'EdgeBrowserUpdateBackground',
-      owner: 'NT AUTHORITY\\SYSTEM',
-      state: 'TRANSFERRING',
-      direction: 'DOWNLOAD',
-      remoteUrl: 'http://msedge.b.tlu.dl.delivery.mp.microsoft.com/filestreamingservice/files/edge_patch.msi',
-      localPath: 'C:\\Program Files (x86)\\Microsoft\\EdgeUpdate\\Download\\edge_patch.msi',
-      transferredBytes: '45.1 MB / 88.0 MB (51%)',
-      isSuspicious: false,
-      threatDetails: 'Téléchargement planifié du composant Edge WebView2 Runtime officiel',
-      mitreTactic: 'Légitime (Edge Delivery)',
-      priority: 'LOW',
-      creationTime: 'Aujourd\'hui, 05:12:00',
-    },
-  ]);
+  // Real BITS jobs state from host
+  const [jobs, setJobs] = useState<BITSJobItem[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  const fetchBitsJobs = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await apiFetch('/api/system/bits');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.jobs)) {
+          setJobs(data.jobs);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch BITS jobs:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchBitsJobs();
+  }, [fetchBitsJobs]);
 
   // New simulated task form state
   const [newJobName, setNewJobName] = useState('MalwareBeaconTransfer');

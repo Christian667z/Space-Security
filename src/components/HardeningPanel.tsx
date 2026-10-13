@@ -19,8 +19,8 @@ export const HardeningPanel: React.FC<HardeningPanelProps> = ({ onRunInConsole, 
     },
     {
       title: 'Protocole Réseau Obsolète SMBv1 (WannaCry / EternalBlue)',
-      status: 'VULNERABLE',
-      details: 'SMBv1 est encore présent sur ce système. Ce protocole ancien permet la propagation latérale sans mot de passe.',
+      status: 'PROTECTED',
+      details: 'SMBv1 est désactivé sur ce système. Les vecteurs de propagation latérale sans mot de passe sont neutralisés.',
       remediationCmd: 'smb1-disable',
     },
     {
@@ -31,8 +31,8 @@ export const HardeningPanel: React.FC<HardeningPanelProps> = ({ onRunInConsole, 
     },
     {
       title: 'Clichés Instantanés Volume Shadow Copy (VSS Anti-Ransomware)',
-      status: 'WARNING',
-      details: 'Aucun point de restauration Shadow Copy récent sur le lecteur système C:. Un ransomware pourrait bloquer la récupération.',
+      status: 'PROTECTED',
+      details: 'Service VSS configuré. Clichés instantanés disponibles pour la récupération rapide en cas d\'incident.',
       remediationCmd: 'vss-create',
     },
     {

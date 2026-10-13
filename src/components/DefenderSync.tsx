@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 
 import { ThreatItem } from '../types/cyberdefense';
+import { apiFetch } from '../utils/api';
 
 interface DefenderSyncProps {
   onRunInConsole: (command: string) => void;
@@ -64,99 +65,91 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole, onMu
     logs: string[];
   } | null>(null);
 
-  // Initial exclusions data representing realistic malware hijacking scenarios
-  const [exclusions, setExclusions] = useState<DefenderExclusionItem[]>([
-    {
-      id: 'ex-1',
-      type: 'PATH',
-      value: 'C:\\Users\\Public\\svchost.exe',
-      threatLevel: 'MALICIOUS',
-      malwareFamily: 'Trojan.Swisyn / GhostRAT Drop',
-      reason: 'Faux processus système placé dans le répertoire Public partagé, exclu de Windows Defender pour éviter la quarantaine lors du dropping.',
-      registryKey: 'HKLM:\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Paths',
-      addedTimestamp: '2026-10-11 03:22 (Injection silencieuse)',
-      status: 'ACTIVE',
-    },
-    {
-      id: 'ex-2',
-      type: 'PATH',
-      value: 'C:\\ProgramData\\WindowsHealthUpdater\\',
-      threatLevel: 'MALICIOUS',
-      malwareFamily: 'CryptoMiner.XMRig / Persistence',
-      reason: 'Répertoire caché sous un faux nom de composant de santé Windows. Héberge un mineur XMRig tournant en arrière-plan à l\'abri des scans.',
-      registryKey: 'HKLM:\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Paths',
-      addedTimestamp: '2026-10-09 21:14',
-      status: 'ACTIVE',
-    },
-    {
-      id: 'ex-3',
-      type: 'PATH',
-      value: 'C:\\Windows\\Temp\\payload.bin',
-      threatLevel: 'MALICIOUS',
-      malwareFamily: 'CobaltStrike Beacon / Stager',
-      reason: 'Exclusion ciblée d\'un artefact de staging de charge utile dans le cache temporaire Windows.',
-      registryKey: 'HKLM:\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Paths',
-      addedTimestamp: '2026-10-12 01:45',
-      status: 'ACTIVE',
-    },
-    {
-      id: 'ex-4',
-      type: 'PROCESS',
-      value: 'powershell.exe',
-      threatLevel: 'MALICIOUS',
-      malwareFamily: 'Blindfold Execution / AMSI Bypass',
-      reason: 'Exclusion du binaire powershell.exe lui-même ! Permet à n\'importe quel script obfusqué encodé en Base64 de s\'exécuter sans analyse heuristique de l\'antivirus.',
-      registryKey: 'HKLM:\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Processes',
-      addedTimestamp: '2026-10-10 14:02',
-      status: 'ACTIVE',
-    },
-    {
-      id: 'ex-5',
-      type: 'EXTENSION',
-      value: '.ps1',
-      threatLevel: 'SUSPICIOUS',
-      malwareFamily: 'Script Engine Blindspot',
-      reason: 'L\'extension de script PowerShell est exclue globalement. Aucun fichier .ps1 n\'est scanné lors de sa lecture sur le disque.',
-      registryKey: 'HKLM:\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Extensions',
-      addedTimestamp: '2026-10-10 14:03',
-      status: 'ACTIVE',
-    },
-    {
-      id: 'ex-6',
-      type: 'PATH',
-      value: 'C:\\Users\\admin\\AppData\\Local\\Temp\\*.exe',
-      threatLevel: 'SUSPICIOUS',
-      malwareFamily: 'Dropper Wildcard Masking',
-      reason: 'Exclusion avec joker (*) sur tous les exécutables dans %TEMP%, vecteur numéro 1 d\'infection par pièce jointe ou exploit kit.',
-      registryKey: 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Exclusions\\Paths',
-      addedTimestamp: '2026-10-08 19:30',
-      status: 'ACTIVE',
-    },
-    {
-      id: 'ex-7',
-      type: 'PATH',
-      value: 'C:\\Program Files\\Git\\bin\\git.exe',
-      threatLevel: 'SAFE',
-      malwareFamily: 'Outil de Développement Authentique',
-      reason: 'Binaire officiel signé par Git for Windows. Exclusion de performance standard configurée par l\'administrateur.',
-      registryKey: 'HKLM:\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Paths',
-      addedTimestamp: '2026-04-12 09:15',
-      status: 'ACTIVE',
-    },
-  ]);
+  // Live Defender exclusions from host
+  const [exclusions, setExclusions] = useState<DefenderExclusionItem[]>([]);
+  const [defenderRealtimeActive, setDefenderRealtimeActive] = useState<boolean>(true);
+  const [signaturesAgeDays, setSignaturesAgeDays] = useState<number>(0);
+
+  const fetchDefenderStatus = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/system/defender');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (data.status) {
+            setDefenderRealtimeActive(Boolean(data.status.realtime));
+            setSignaturesAgeDays(typeof data.status.signatureAgeDays === 'number' ? data.status.signatureAgeDays : 0);
+          }
+          if (data.exclusions) {
+            const list: DefenderExclusionItem[] = [];
+            let idx = 1;
+            (data.exclusions.paths || []).forEach((p: string) => {
+              list.push({
+                id: `ex-path-${idx++}`,
+                type: 'PATH',
+                value: p,
+                threatLevel: 'SUSPICIOUS',
+                malwareFamily: 'Exclusion de Chemin Répertoire',
+                reason: `Chemin exclu de l'analyse automatique sur votre PC : ${p}`,
+                registryKey: 'HKLM:\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Paths',
+                addedTimestamp: 'Configurée sur l\'hôte',
+                status: 'ACTIVE',
+              });
+            });
+            (data.exclusions.processes || []).forEach((proc: string) => {
+              list.push({
+                id: `ex-proc-${idx++}`,
+                type: 'PROCESS',
+                value: proc,
+                threatLevel: 'SUSPICIOUS',
+                malwareFamily: 'Exclusion de Processus Binaire',
+                reason: `Processus whitelisté sur votre PC : ${proc}`,
+                registryKey: 'HKLM:\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Processes',
+                addedTimestamp: 'Configurée sur l\'hôte',
+                status: 'ACTIVE',
+              });
+            });
+            (data.exclusions.extensions || []).forEach((ext: string) => {
+              list.push({
+                id: `ex-ext-${idx++}`,
+                type: 'EXTENSION',
+                value: ext,
+                threatLevel: 'SUSPICIOUS',
+                malwareFamily: 'Exclusion d\'Extension',
+                reason: `Extension ignorée lors des lectures disques : ${ext}`,
+                registryKey: 'HKLM:\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Extensions',
+                addedTimestamp: 'Configurée sur l\'hôte',
+                status: 'ACTIVE',
+              });
+            });
+            setExclusions(list);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Defender fetch error:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDefenderStatus();
+  }, [fetchDefenderStatus]);
 
   // Handle live audit scan
-  const handleStartAudit = () => {
+  const handleStartAudit = async () => {
     setIsAuditing(true);
-    setAuditProgress(15);
+    setAuditProgress(20);
     onRunInConsole('defender-audit');
 
-    setTimeout(() => setAuditProgress(45), 350);
-    setTimeout(() => setAuditProgress(80), 750);
+    try {
+      await fetchDefenderStatus();
+      setAuditProgress(70);
+    } catch {}
+
     setTimeout(() => {
       setAuditProgress(100);
       setIsAuditing(false);
-    }, 1100);
+    }, 600);
   };
 
   // Remove individual exclusion
@@ -514,17 +507,34 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole, onMu
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
-              {filteredExclusions.map(item => {
-                const isPurged = item.status === 'PURGED';
-                const isMalicious = item.threatLevel === 'MALICIOUS';
-                const isSuspicious = item.threatLevel === 'SUSPICIOUS';
+              {filteredExclusions.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-3">
+                      <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                        <ShieldCheck className="w-6 h-6" />
+                      </div>
+                      <div className="text-sm font-semibold text-slate-200">
+                        Aucune exclusion suspecte détectée dans Microsoft Defender
+                      </div>
+                      <p className="text-xs text-slate-400 max-w-md">
+                        Votre système Windows ne présente aucune exclusion de chemin, de processus ou d'extension. L'ensemble des répertoires et fichiers est audité et protégé en temps réel.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredExclusions.map(item => {
+                  const isPurged = item.status === 'PURGED';
+                  const isMalicious = item.threatLevel === 'MALICIOUS';
+                  const isSuspicious = item.threatLevel === 'SUSPICIOUS';
 
-                return (
-                  <tr
-                    key={item.id}
-                    className={`transition-colors ${
-                      isPurged
-                        ? 'bg-slate-950/60 opacity-60'
+                  return (
+                    <tr
+                      key={item.id}
+                      className={`transition-colors ${
+                        isPurged
+                          ? 'bg-slate-950/60 opacity-60'
                         : isMalicious
                         ? 'bg-rose-950/20 hover:bg-rose-950/30'
                         : isSuspicious

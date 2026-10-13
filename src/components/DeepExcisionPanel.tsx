@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Cpu,
   ShieldAlert,
@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { ThreatItem } from '../types/cyberdefense';
 import { SharedCommandModal } from './SharedCommandModal';
+import { apiFetch } from '../utils/api';
 
 interface DeepExcisionPanelProps {
   onRunInConsole: (command: string) => void;
@@ -233,21 +234,21 @@ export const DeepExcisionPanel: React.FC<DeepExcisionPanelProps> = ({
     handleClearSelection();
   };
 
-  // BITS Jobs State
-  const [bitsJobs, setBitsJobs] = useState<BITSJobItem[]>([
-    {
-      id: '{D42E-1197-00AA-8812}',
-      jobName: 'WU-DefinitionUpdate',
-      owner: 'NT AUTHORITY\\NETWORK SERVICE',
-      state: 'ACKNOWLEDGED',
-      direction: 'DOWNLOAD',
-      remoteUrl: 'http://download.windowsupdate.com/msdownload/update/v3/def.cab',
-      localPath: 'C:\\Windows\\SoftwareDistribution\\Download\\def.cab',
-      transferredBytes: '14.2 MB / 14.2 MB (Terminé)',
-      isSuspicious: false,
-      threatDetails: 'Tâche système légitime de mise à jour des signatures',
-    },
-  ]);
+  // BITS Jobs State from live host
+  const [bitsJobs, setBitsJobs] = useState<BITSJobItem[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    apiFetch('/api/system/bits')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.jobs) && isMounted) {
+          setBitsJobs(data.jobs);
+        }
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
+  }, []);
 
   const handleCancelBitsJob = (jobId: string) => {
     onRunInConsole(`bitsadmin /cancel ${jobId}`);
@@ -278,7 +279,7 @@ export const DeepExcisionPanel: React.FC<DeepExcisionPanelProps> = ({
     },
   ];
 
-  const generatedScript = `# Protocole d'Eradication Racine SpaceSec
+  const generatedScript = `# Protocole d'Éradication Racine Space Security
 $target = "${customPath}"
 # 1. Reset Attributs
 Set-ItemProperty -Path $target -Name Attributes -Value Normal -ErrorAction SilentlyContinue
