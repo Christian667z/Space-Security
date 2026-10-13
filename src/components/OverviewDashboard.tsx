@@ -39,6 +39,7 @@ import { ThreatHeatmap } from './ThreatHeatmap';
 import { ThreatIntensityMap } from './ThreatIntensityMap';
 import { ThreatCategoryDonutChart } from './ThreatCategoryDonutChart';
 import { VulnerabilityRadarChart } from './VulnerabilityRadarChart';
+import { HealthScoreEvolutionChart } from './HealthScoreEvolutionChart';
 import { SharedCommandModal } from './SharedCommandModal';
 import { calculateSecurityScore } from '../utils/pdfReportGenerator';
 
@@ -483,6 +484,13 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Security HealthScore 30-Day Evolution Chart (Recharts) */}
+      <HealthScoreEvolutionChart
+        threats={threats}
+        onRunInConsole={onRunInConsole}
+        onNavigateTab={onNavigateTab}
+      />
 
       {/* Machine Vulnerability Radar Chart (Recharts: Services, Patchs, Ports Audits) */}
       <VulnerabilityRadarChart

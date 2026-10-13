@@ -116,6 +116,17 @@ export const ThreatHeatmap: React.FC<ThreatHeatmapProps> = ({ onRunInConsole }) 
       statusText: 'Entrées de démarrage standard validées sans binaire masqué',
       remediationCmd: 'scan --deep',
     },
+    {
+      id: 'r5',
+      name: 'Clés de Persistance Winlogon',
+      area: 'Registry',
+      targetPath: 'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\Userinit',
+      riskLevel: 'NOMINAL',
+      riskScore: 8,
+      mitreTechnique: 'T1547.004 - Winlogon Helper DLL & Userinit',
+      statusText: 'Chaîne Userinit et Shell standard conformes (C:\\Windows\\System32\\userinit.exe)',
+      remediationCmd: 'scan --deep',
+    },
 
     // 3. STARTUP & SERVICES
     {
