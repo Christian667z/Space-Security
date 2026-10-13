@@ -24,6 +24,11 @@ import {
   TrendingUp,
   Flame,
   Search,
+  CheckSquare,
+  Square,
+  MinusSquare,
+  EyeOff,
+  X,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -43,11 +48,17 @@ import {
   EntropyMetric,
   SuspiciousApiCall,
   ThreatConfidenceItem,
+  ThreatItem,
 } from '../types/cyberdefense';
+import { SharedCommandModal } from './SharedCommandModal';
 
 interface HeuristicEngineProps {
   onRunInConsole: (command: string) => void;
   onNavigateTab?: (tab: TabId) => void;
+  threats?: ThreatItem[];
+  onBulkMutateThreatStatus?: (threatIds: string[], status: ThreatItem['status'], command?: string) => void;
+  onMassDismissThreats?: (threatIds: string[]) => void;
+  onRestoreThreats?: (threatIds: string[]) => void;
 }
 
 interface ConfidenceHistoryPoint {
@@ -321,6 +332,10 @@ const INITIAL_THREAT_CONFIDENCE: ThreatConfidenceItem[] = [
 export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
   onRunInConsole,
   onNavigateTab,
+  threats,
+  onBulkMutateThreatStatus,
+  onMassDismissThreats,
+  onRestoreThreats,
 }) => {
   // Main telemetry states
   const [isStreaming, setIsStreaming] = useState<boolean>(true);
@@ -332,6 +347,13 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
   const [entropyMetrics, setEntropyMetrics] = useState<EntropyMetric[]>(INITIAL_ENTROPY_METRICS);
   const [suspiciousApis, setSuspiciousApis] = useState<SuspiciousApiCall[]>(INITIAL_SUSPICIOUS_APIS);
   const [threatConfidenceList, setThreatConfidenceList] = useState<ThreatConfidenceItem[]>(INITIAL_THREAT_CONFIDENCE);
+
+  // Bulk selection states for Heuristic Confidence Matrix
+  const [selectedConfidenceIds, setSelectedConfidenceIds] = useState<Set<string>>(new Set());
+  const [dismissedConfidenceIds, setDismissedConfidenceIds] = useState<Set<string>>(new Set());
+  const [showDismissedConfidence, setShowDismissedConfidence] = useState<boolean>(false);
+  const [isSharedCommandModalOpen, setIsSharedCommandModalOpen] = useState<boolean>(false);
+  const [bulkFeedbackMessage, setBulkFeedbackMessage] = useState<string | null>(null);
   
   // Weights calibration state
   const [weights, setWeights] = useState({
@@ -395,6 +417,118 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
     } else if (newPreset === 'API_FOCUSED') {
       setWeights({ entropy: 0.20, api: 0.55, behavior: 0.15, mitre: 0.10 });
     }
+  };
+
+  // Bulk Selection Logic for Threat Confidence Items
+  const displayedConfidenceThreats = useMemo(() => {
+    return threatConfidenceList.filter(t => {
+      if (!showDismissedConfidence && dismissedConfidenceIds.has(t.id)) return false;
+      return true;
+    });
+  }, [threatConfidenceList, showDismissedConfidence, dismissedConfidenceIds]);
+
+  const toggleSelectConfidence = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedConfidenceIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllConfidence = () => {
+    if (selectedConfidenceIds.size === displayedConfidenceThreats.length && displayedConfidenceThreats.length > 0) {
+      setSelectedConfidenceIds(new Set());
+    } else {
+      setSelectedConfidenceIds(new Set(displayedConfidenceThreats.map(t => t.id)));
+    }
+  };
+
+  const handleSelectHighConfidenceOnly = () => {
+    const high = displayedConfidenceThreats
+      .filter(t => {
+        const dynConf = (
+          t.entropyScore * weights.entropy +
+          t.apiScore * weights.api +
+          t.behaviorScore * weights.behavior +
+          t.mitreAlignment * weights.mitre
+        );
+        return dynConf >= 85;
+      })
+      .map(t => t.id);
+    setSelectedConfidenceIds(new Set(high));
+  };
+
+  const handleClearConfidenceSelection = () => {
+    setSelectedConfidenceIds(new Set());
+  };
+
+  const handleMassDismissConfidence = () => {
+    if (selectedConfidenceIds.size === 0) return;
+    const ids = Array.from(selectedConfidenceIds);
+    setDismissedConfidenceIds(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => next.add(id));
+      return next;
+    });
+    if (onMassDismissThreats) {
+      onMassDismissThreats(ids);
+    }
+    onRunInConsole(`bulk-dismiss-heuristic ${ids.join(',')}`);
+    setBulkFeedbackMessage(`${ids.length} menace(s) heuristique(s) rejetée(s) et archivée(s).`);
+    setTimeout(() => setBulkFeedbackMessage(null), 4000);
+    handleClearConfidenceSelection();
+  };
+
+  const handleBulkRemediateConfidence = () => {
+    if (selectedConfidenceIds.size === 0) return;
+    const targets = threatConfidenceList.filter(t => selectedConfidenceIds.has(t.id));
+    targets.forEach((t, idx) => {
+      setTimeout(() => {
+        onRunInConsole(t.remediationCmd);
+      }, idx * 400);
+    });
+    setBulkFeedbackMessage(`Éradication programmée sur ${targets.length} menace(s) heuristique(s).`);
+    setTimeout(() => setBulkFeedbackMessage(null), 4000);
+    handleClearConfidenceSelection();
+  };
+
+  const selectedThreatsForModal: ThreatItem[] = useMemo(() => {
+    return threatConfidenceList
+      .filter(t => selectedConfidenceIds.has(t.id))
+      .map(t => ({
+        id: t.id,
+        name: t.threatName,
+        category: (t.targetPath.includes('.sys') ? 'Rootkit' : t.targetPath.includes('updater') ? 'Trojan' : 'Memory') as ThreatItem['category'],
+        severity: t.confidence > 90 ? 'CRITICAL' : 'HIGH',
+        targetPath: t.targetPath,
+        mitreTechnique: t.primaryTechnique,
+        lockedBySystem: true,
+        trustedInstallerLocked: t.targetPath.includes('.sys'),
+        status: 'ACTIVE',
+        description: t.recommendedAction,
+      }));
+  }, [threatConfidenceList, selectedConfidenceIds]);
+
+  const handleExecuteSharedCommandConfidence = (template: string, targets: ThreatItem[]) => {
+    targets.forEach((threat, idx) => {
+      const fileName = threat.targetPath.split('\\').pop() || threat.name;
+      const baseName = fileName.replace(/\.[^/.]+$/, '');
+      const instantiated = template
+        .replace(/{path}/g, threat.targetPath)
+        .replace(/{name}/g, baseName)
+        .replace(/{id}/g, threat.id)
+        .replace(/{category}/g, threat.category);
+
+      setTimeout(() => {
+        onRunInConsole(instantiated);
+      }, idx * 350);
+    });
+
+    setBulkFeedbackMessage(`Commande partagée exécutée sur ${targets.length} menace(s).`);
+    setTimeout(() => setBulkFeedbackMessage(null), 4000);
+    handleClearConfidenceSelection();
   };
 
   // Real-time telemetry simulation interval
@@ -1359,6 +1493,16 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
       {/* ========================================================================= */}
       {activeView === 'CONFIDENCE_MATRIX' && (
         <div className="space-y-6">
+          {/* Bulk Action Feedback Message */}
+          {bulkFeedbackMessage && (
+            <div className="p-3 bg-cyan-950/80 border border-cyan-800 rounded-xl flex items-center justify-between text-xs text-cyan-200 animate-in fade-in duration-200">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span>{bulkFeedbackMessage}</span>
+              </div>
+            </div>
+          )}
+
           <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
@@ -1372,18 +1516,140 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
                 </p>
               </div>
 
-              {/* Weight sliders trigger */}
+              {/* Controls */}
               <div className="flex items-center gap-2 text-xs font-mono">
-                <span className="text-slate-400">Pondération active :</span>
-                <span className="text-cyan-300 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800">
-                  {preset}
-                </span>
+                <button
+                  onClick={() => setShowDismissedConfidence(!showDismissedConfidence)}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border transition-colors ${
+                    showDismissedConfidence
+                      ? 'bg-slate-800 text-cyan-300 border-cyan-800'
+                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                  }`}
+                >
+                  <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Ignorées ({dismissedConfidenceIds.size})</span>
+                </button>
+
+                <div className="flex items-center gap-1.5 pl-2 border-l border-slate-800">
+                  <span className="text-slate-400">Pondération :</span>
+                  <span className="text-cyan-300 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800">
+                    {preset}
+                  </span>
+                </div>
               </div>
             </div>
 
+            {/* Selection Toolbar */}
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-800 flex-wrap text-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={handleToggleSelectAllConfidence}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-mono bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors"
+                >
+                  {selectedConfidenceIds.size > 0 && selectedConfidenceIds.size === displayedConfidenceThreats.length ? (
+                    <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
+                  ) : selectedConfidenceIds.size > 0 ? (
+                    <MinusSquare className="w-3.5 h-3.5 text-cyan-400" />
+                  ) : (
+                    <Square className="w-3.5 h-3.5 text-slate-500" />
+                  )}
+                  <span>Tout ({displayedConfidenceThreats.length})</span>
+                </button>
+
+                <button
+                  onClick={handleSelectHighConfidenceOnly}
+                  className="px-2.5 py-1.5 rounded-lg font-mono bg-slate-950 hover:bg-slate-800 text-rose-400 border border-slate-800 transition-colors"
+                >
+                  Forte Confiance (&ge;85%)
+                </button>
+
+                {selectedConfidenceIds.size > 0 && (
+                  <button
+                    onClick={handleClearConfidenceSelection}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-mono text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>Effacer</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="text-xs text-slate-500 font-mono">
+                {selectedConfidenceIds.size} sélectionnée(s) sur {displayedConfidenceThreats.length}
+              </div>
+            </div>
+
+            {/* Sticky Bulk Action Command Bar */}
+            {selectedConfidenceIds.size > 0 && (
+              <div className="p-3 bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-950/40 rounded-xl border border-cyan-800/80 shadow-lg shadow-cyan-950/30 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-800">
+                      <Layers className="w-4 h-4 text-cyan-400" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <span>Actions Groupées sur Menaces Heuristiques</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                          {selectedConfidenceIds.size} cible{selectedConfidenceIds.size > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Exécutez un modèle de commande partagé ou marquez comme ignorées en masse.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Bulk Remediate */}
+                    <button
+                      onClick={handleBulkRemediateConfidence}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold font-mono text-slate-950 bg-cyan-400 hover:bg-cyan-300 shadow-md transition-all"
+                      title="Exécute les commandes d'éradication pour toutes les menaces sélectionnées"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Éradication Groupée ({selectedConfidenceIds.size})</span>
+                    </button>
+
+                    {/* Shared Command Runner */}
+                    <button
+                      onClick={() => setIsSharedCommandModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold font-mono text-cyan-200 bg-cyan-950 hover:bg-cyan-900 border border-cyan-700 shadow-sm shadow-cyan-950 transition-all"
+                      title="Exécute un modèle de commande unifié sur les menaces sélectionnées"
+                    >
+                      <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Commande Partagée...</span>
+                    </button>
+
+                    {/* Mass Dismiss */}
+                    <button
+                      onClick={handleMassDismissConfidence}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-slate-100 border border-slate-700 transition-colors"
+                      title="Rejeter et marquer comme traitées/fausses alertes en masse"
+                    >
+                      <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Rejet en Masse</span>
+                    </button>
+
+                    {/* Cancel Selection */}
+                    <button
+                      onClick={handleClearConfidenceSelection}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                      title="Annuler la sélection"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Threat Confidence Cards */}
             <div className="space-y-4">
-              {threatConfidenceList.map(threat => {
+              {displayedConfidenceThreats.map(threat => {
+                const isSelected = selectedConfidenceIds.has(threat.id);
+                const isDismissed = dismissedConfidenceIds.has(threat.id);
+
                 // Dynamically recompute confidence based on active user weights
                 const dynamicConfidence = Math.round((
                   threat.entropyScore * weights.entropy +
@@ -1395,21 +1661,51 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
                 return (
                   <div
                     key={threat.id}
-                    className="p-4 bg-slate-950/90 border border-slate-800 rounded-xl space-y-3"
+                    className={`p-4 rounded-xl space-y-3 transition-all border ${
+                      isSelected
+                        ? 'bg-slate-950/95 border-cyan-500 ring-1 ring-cyan-500/50 shadow-md shadow-cyan-950/40'
+                        : isDismissed
+                        ? 'bg-slate-950/40 border-slate-800/60 opacity-60'
+                        : 'bg-slate-950/90 border-slate-800 hover:border-slate-700'
+                    }`}
                   >
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="text-sm font-bold text-white font-['Plus_Jakarta_Sans']">
-                            {threat.threatName}
-                          </h4>
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded border text-rose-300 bg-rose-950/80 border-rose-800">
-                            {threat.verdict}
-                          </span>
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={(e) => toggleSelectConfidence(threat.id, e)}
+                          className={`p-1 rounded-md transition-colors ${
+                            isSelected
+                              ? 'text-cyan-400 bg-cyan-950/80 border border-cyan-700'
+                              : 'text-slate-500 hover:text-slate-300 bg-slate-900 border border-slate-800'
+                          }`}
+                          title={isSelected ? 'Désélectionner' : 'Sélectionner'}
+                        >
+                          {isSelected ? (
+                            <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
+                          ) : (
+                            <Square className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className={`text-sm font-bold font-['Plus_Jakarta_Sans'] ${isDismissed ? 'line-through text-slate-500' : 'text-white'}`}>
+                              {threat.threatName}
+                            </h4>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded border text-rose-300 bg-rose-950/80 border-rose-800">
+                              {threat.verdict}
+                            </span>
+                            {isDismissed && (
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded border text-slate-400 bg-slate-900 border-slate-700">
+                                REJETÉE
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-400 font-mono mt-0.5 truncate max-w-xl">
+                            {threat.targetPath}
+                          </p>
                         </div>
-                        <p className="text-xs text-slate-400 font-mono mt-0.5 truncate max-w-xl">
-                          {threat.targetPath}
-                        </p>
                       </div>
 
                       {/* Overall Confidence Display */}
@@ -1420,12 +1716,30 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
                             {dynamicConfidence.toFixed(1)}%
                           </div>
                         </div>
-                        <button
-                          onClick={() => onRunInConsole(threat.remediationCmd)}
-                          className="px-3 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold rounded-lg text-xs transition-colors shrink-0 shadow-sm"
-                        >
-                          Éradiquer la Menace
-                        </button>
+
+                        {isDismissed ? (
+                          <button
+                            onClick={() => {
+                              setDismissedConfidenceIds(prev => {
+                                const next = new Set(prev);
+                                next.delete(threat.id);
+                                return next;
+                              });
+                              setBulkFeedbackMessage(`Menace réactivée dans la liste active.`);
+                              setTimeout(() => setBulkFeedbackMessage(null), 3000);
+                            }}
+                            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-lg text-xs transition-colors shrink-0 border border-slate-700"
+                          >
+                            Restaurer
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => onRunInConsole(threat.remediationCmd)}
+                            className="px-3 py-2 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold rounded-lg text-xs transition-colors shrink-0 shadow-sm"
+                          >
+                            Éradiquer la Menace
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -1489,6 +1803,14 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
           </div>
         </div>
       )}
+
+      {/* Shared Command Modal for Heuristic Threats */}
+      <SharedCommandModal
+        isOpen={isSharedCommandModalOpen}
+        onClose={() => setIsSharedCommandModalOpen(false)}
+        selectedThreats={selectedThreatsForModal}
+        onExecuteSharedCommand={handleExecuteSharedCommandConfidence}
+      />
     </div>
   );
 };

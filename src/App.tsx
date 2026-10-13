@@ -20,6 +20,7 @@ import { ThreatToastContainer } from './components/ThreatToast';
 import { PdfReportModal } from './components/PdfReportModal';
 import { HeuristicEngine } from './components/HeuristicEngine';
 import { CollabSyncModal } from './components/CollabSyncModal';
+import { IpLocatorPanel } from './components/IpLocatorPanel';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { TabId, ConsoleLogMessage, ThreatItem, ThreatNotification } from './types/cyberdefense';
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
@@ -28,6 +29,7 @@ import { generateAndDownloadPdfReport } from './utils/pdfReportGenerator';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [targetIpToLocate, setTargetIpToLocate] = useState<string>('185.220.101.4');
   const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
   const [isCollabModalOpen, setIsCollabModalOpen] = useState<boolean>(false);
 
@@ -234,6 +236,7 @@ export default function App() {
         addLog('INFO', '  heuristic         : Affiche le score d\'entropie et la confiance de détection');
         addLog('INFO', '  entropy           : Calcule l\'entropie de Shannon sur les sections mémoires/PE');
         addLog('INFO', '  wifi / wifiscan   : Scanne les réseaux WiFi environnants et détecte les Evil Twins');
+        addLog('INFO', '  geolocate <ip>    : Géolocalise le pays, la ville et l\'endroit physique exact de l\'IP');
         addLog('INFO', '  export-report     : Génère et télécharge le rapport PDF détaillé avec graphiques de score');
         addLog('INFO', '  pdf / export-pdf  : Raccourci pour générer le rapport PDF d\'audit forensique');
         break;
@@ -567,10 +570,28 @@ export default function App() {
         setTimeout(() => addLog('OK', 'Traitement par lots terminé avec succès.', 'SCRIPT'), 600);
         break;
 
+      case 'geolocate':
+      case 'locate':
+      case 'geoip':
+      case 'traceroute': {
+        const queryIp = parts[1] || '185.220.101.4';
+        setTargetIpToLocate(queryIp);
+        setActiveTab('ip-locator');
+        addLog('INFO', `Lancement du traçage physique et de la géolocalisation pour l'IP ${queryIp}...`, 'GEOLOC');
+        break;
+      }
+
       default:
         addLog('WARN', `Commande "${trimmed}" non reconnue. Tapez "help" pour voir la liste.`);
         break;
     }
+  };
+
+  const handleLocateIp = (ip: string) => {
+    const cleanIp = ip.split(':')[0].trim();
+    setTargetIpToLocate(cleanIp);
+    setActiveTab('ip-locator');
+    addLog('INFO', `Recherche de l'emplacement géographique et du quartier de connexion pour l'IP ${cleanIp}`, 'GEOLOC');
   };
 
   const handleDownloadZip = async () => {
@@ -641,6 +662,7 @@ export default function App() {
             onRunInConsole={handleExecuteCommand}
             threats={threats}
             onDownloadZip={handleDownloadZip}
+            onDownloadScript={handleDownloadScript}
             onOpenPdfReport={() => setIsPdfModalOpen(true)}
             onMutateThreatStatus={mutateThreatStatus}
             onBulkMutateThreatStatus={mutateBulkThreatStatus}
@@ -668,6 +690,10 @@ export default function App() {
           <HeuristicEngine
             onRunInConsole={handleExecuteCommand}
             onNavigateTab={setActiveTab}
+            threats={threats}
+            onBulkMutateThreatStatus={mutateBulkThreatStatus}
+            onMassDismissThreats={massDismissThreats}
+            onRestoreThreats={restoreThreats}
           />
         )}
 
@@ -696,7 +722,13 @@ export default function App() {
         )}
 
         {activeTab === 'deep-excision' && (
-          <DeepExcisionPanel onRunInConsole={handleExecuteCommand} />
+          <DeepExcisionPanel
+            onRunInConsole={handleExecuteCommand}
+            threats={threats}
+            onBulkMutateThreatStatus={mutateBulkThreatStatus}
+            onMassDismissThreats={massDismissThreats}
+            onRestoreThreats={restoreThreats}
+          />
         )}
 
         {activeTab === 'forensics' && (
@@ -704,7 +736,10 @@ export default function App() {
         )}
 
         {activeTab === 'network' && (
-          <NetworkC2Panel onRunInConsole={handleExecuteCommand} />
+          <NetworkC2Panel
+            onRunInConsole={handleExecuteCommand}
+            onLocateIp={handleLocateIp}
+          />
         )}
 
         {activeTab === 'hardening' && (
@@ -713,6 +748,14 @@ export default function App() {
 
         {activeTab === 'script-hub' && (
           <ScriptWorkshop onDownloadZip={handleDownloadZip} />
+        )}
+
+        {activeTab === 'ip-locator' && (
+          <IpLocatorPanel
+            initialIp={targetIpToLocate}
+            onRunInConsole={handleExecuteCommand}
+            onNavigateTab={setActiveTab}
+          />
         )}
       </main>
 

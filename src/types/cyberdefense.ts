@@ -9,7 +9,8 @@ export type TabId =
   | 'forensics'
   | 'network'
   | 'hardening'
-  | 'script-hub';
+  | 'script-hub'
+  | 'ip-locator';
 
 export interface EntropyMetric {
   id: string;
@@ -116,6 +117,7 @@ export interface ThreatItem {
   lockedBySystem: boolean;
   trustedInstallerLocked: boolean;
   status: 'ACTIVE' | 'QUARANTINED' | 'SCHEDULED_BOOT_DELETE' | 'NEUTRALIZED' | 'DISMISSED';
+  description?: string;
 }
 
 export type BulkThreatActionType =
@@ -219,5 +221,54 @@ export interface SharedSyncState {
   activeUsersCount: number;
   lastModified: string;
   activeOperators: OperatorSession[];
+}
+
+export interface TracerouteHop {
+  hop: number;
+  ip: string;
+  host: string;
+  latency: string;
+  location: string;
+  org: string;
+}
+
+export interface IpLocationReport {
+  success: boolean;
+  ip: string;
+  isLocal: boolean;
+  country: string;
+  countryCode: string;
+  continent: string;
+  city: string;
+  district: string;
+  regionName: string;
+  zip: string;
+  latitude: number;
+  longitude: number;
+  timezone: string;
+  isp: string;
+  org: string;
+  as: string;
+  asname: string;
+  reverseDns: string;
+  isProxy: boolean;
+  isHosting: boolean;
+  isTor: boolean;
+  threatScore: number;
+  placeFacility: string;
+  placeAddress: string;
+  placeRoad?: string;
+  placeQuarter?: string;
+  placeIntel: string;
+  distanceKm: number;
+  estLatencyMs: number;
+  hops: TracerouteHop[];
+  firewallRulePs1: string;
+  googleMapsUrl: string;
+  googleMapsPlaceUrl: string;
+  googleStreetViewUrl: string;
+  openStreetMapUrl: string;
+  groundingUrls?: Array<{ uri: string; title: string }>;
+  error?: string;
 }
 

@@ -1,8 +1,40 @@
-import React, { useState } from 'react';
-import { Cpu, ShieldAlert, Key, Unlock, Trash2, CheckCircle2, AlertTriangle, Terminal, Copy, Check, RefreshCw, Radio, ArrowDownLeft, ArrowUpRight, Ban, Zap } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import {
+  Cpu,
+  ShieldAlert,
+  Key,
+  Unlock,
+  Trash2,
+  CheckCircle2,
+  AlertTriangle,
+  Terminal,
+  Copy,
+  Check,
+  RefreshCw,
+  Radio,
+  ArrowDownLeft,
+  ArrowUpRight,
+  Ban,
+  Zap,
+  CheckSquare,
+  Square,
+  MinusSquare,
+  Layers,
+  EyeOff,
+  RotateCcw,
+  X,
+  Flame,
+  Search,
+} from 'lucide-react';
+import { ThreatItem } from '../types/cyberdefense';
+import { SharedCommandModal } from './SharedCommandModal';
 
 interface DeepExcisionPanelProps {
   onRunInConsole: (command: string) => void;
+  threats?: ThreatItem[];
+  onBulkMutateThreatStatus?: (threatIds: string[], status: ThreatItem['status'], command?: string) => void;
+  onMassDismissThreats?: (threatIds: string[]) => void;
+  onRestoreThreats?: (threatIds: string[]) => void;
 }
 
 interface BITSJobItem {
@@ -18,10 +50,237 @@ interface BITSJobItem {
   threatDetails?: string;
 }
 
-export const DeepExcisionPanel: React.FC<DeepExcisionPanelProps> = ({ onRunInConsole }) => {
+const DEFAULT_KERNEL_THREATS: ThreatItem[] = [
+  {
+    id: 't1',
+    name: 'Rootkit Driver Hook (Inaccessible aux Admins)',
+    category: 'Rootkit',
+    severity: 'CRITICAL',
+    targetPath: 'C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys',
+    mitreTechnique: 'T1014 - Rootkit Kernel Driver',
+    lockedBySystem: true,
+    trustedInstallerLocked: true,
+    description: 'Hook noyau IRP_MJ_CREATE interceptant les ouvertures de fichiers et bloquant toute suppression.',
+    status: 'ACTIVE',
+  },
+  {
+    id: 't2',
+    name: 'Trojan Swisyn Watchdog (Double Processus Verrouillé)',
+    category: 'Trojan',
+    severity: 'HIGH',
+    targetPath: 'C:\\Users\\User\\AppData\\Local\\Temp\\svch0st_updater.exe',
+    mitreTechnique: 'T1059.001 - PowerShell / T1071.001 C2',
+    lockedBySystem: true,
+    trustedInstallerLocked: false,
+    description: 'Processus mimant le service hôte Windows, communicant vers 185.220.101.4 avec surveillance mutuelle.',
+    status: 'ACTIVE',
+  },
+  {
+    id: 't4',
+    name: 'Piège IFEO Debugger sur Taskmgr & Defender',
+    category: 'Privilege',
+    severity: 'CRITICAL',
+    targetPath: 'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\taskmgr.exe',
+    mitreTechnique: 'T1546.012 - IFEO Debugger Trap',
+    lockedBySystem: false,
+    trustedInstallerLocked: true,
+    description: 'Détournement du Gestionnaire des Tâches via clé Debugger malveillante interdisant l\'inspection de la mémoire.',
+    status: 'ACTIVE',
+  },
+  {
+    id: 't6',
+    name: 'Flux NTFS Alternatif Caché (Zone.Identifier ADS)',
+    category: 'Memory',
+    severity: 'MEDIUM',
+    targetPath: 'C:\\Users\\Public\\payload.dll:hidden_stream',
+    mitreTechnique: 'T1564.004 - Alternate Data Streams',
+    lockedBySystem: false,
+    trustedInstallerLocked: false,
+    description: 'Binaire DLL dissimulé derrière un flux de données alternatif NTFS pour contourner les contrôles antiviraux superficiels.',
+    status: 'ACTIVE',
+  },
+];
+
+export const DeepExcisionPanel: React.FC<DeepExcisionPanelProps> = ({
+  onRunInConsole,
+  threats,
+  onBulkMutateThreatStatus,
+  onMassDismissThreats,
+  onRestoreThreats,
+}) => {
   const [customPath, setCustomPath] = useState('C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys');
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [activeStage, setActiveStage] = useState<number | null>(null);
+
+  // Bulk Selection States
+  const [selectedThreatIds, setSelectedThreatIds] = useState<Set<string>>(new Set());
+  const [isSharedCommandModalOpen, setIsSharedCommandModalOpen] = useState(false);
+  const [showDismissed, setShowDismissed] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [bulkFeedbackMessage, setBulkFeedbackMessage] = useState<string | null>(null);
+  const [recentlyDismissedIds, setRecentlyDismissedIds] = useState<string[]>([]);
+
+  const allThreats = threats && threats.length > 0 ? threats : DEFAULT_KERNEL_THREATS;
+
+  const kernelThreats = useMemo(() => {
+    return allThreats.filter(t => {
+      const isKernelRelated =
+        t.category === 'Rootkit' ||
+        t.category === 'Trojan' ||
+        t.category === 'Privilege' ||
+        t.trustedInstallerLocked ||
+        t.lockedBySystem;
+      if (!isKernelRelated) return false;
+      if (!showDismissed && t.status === 'DISMISSED') return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          t.name.toLowerCase().includes(q) ||
+          Boolean(t.description && t.description.toLowerCase().includes(q)) ||
+          t.targetPath.toLowerCase().includes(q) ||
+          t.mitreTechnique.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [allThreats, showDismissed, searchQuery]);
+
+  const selectedThreatsList = useMemo(() => {
+    return allThreats.filter(t => selectedThreatIds.has(t.id));
+  }, [allThreats, selectedThreatIds]);
+
+  const dismissedCount = useMemo(() => {
+    return allThreats.filter(t => t.status === 'DISMISSED').length;
+  }, [allThreats]);
+
+  // Bulk Selection Handlers
+  const toggleSelectThreat = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedThreatIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedThreatIds.size === kernelThreats.length && kernelThreats.length > 0) {
+      setSelectedThreatIds(new Set());
+    } else {
+      setSelectedThreatIds(new Set(kernelThreats.map(t => t.id)));
+    }
+  };
+
+  const handleSelectActiveOnly = () => {
+    const active = kernelThreats.filter(t => t.status === 'ACTIVE').map(t => t.id);
+    setSelectedThreatIds(new Set(active));
+  };
+
+  const handleSelectCriticalOnly = () => {
+    const crit = kernelThreats.filter(t => t.severity === 'CRITICAL' && t.status === 'ACTIVE').map(t => t.id);
+    setSelectedThreatIds(new Set(crit));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedThreatIds(new Set());
+  };
+
+  // Bulk Action Handlers
+  const handleBulkKernelUnlock = () => {
+    if (selectedThreatIds.size === 0) return;
+    const targetThreats = allThreats.filter(t => selectedThreatIds.has(t.id));
+    const ids = targetThreats.map(t => t.id);
+
+    targetThreats.forEach((threat, idx) => {
+      setTimeout(() => {
+        onRunInConsole(`unlock "${threat.targetPath}"`);
+      }, idx * 300);
+    });
+
+    if (onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(ids, 'SCHEDULED_BOOT_DELETE', 'Éradication Kernel');
+    }
+    setBulkFeedbackMessage(`Éradication noyau programmée sur ${ids.length} menace(s).`);
+    setTimeout(() => setBulkFeedbackMessage(null), 4000);
+    handleClearSelection();
+  };
+
+  const handleBulkQuarantine = () => {
+    if (selectedThreatIds.size === 0) return;
+    const ids = Array.from(selectedThreatIds);
+    onRunInConsole(`bulk-quarantine ${ids.join(',')}`);
+    if (onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(ids, 'QUARANTINED', 'Quarantaine Chiffrée');
+    }
+    setBulkFeedbackMessage(`${ids.length} menace(s) verrouillée(s) en quarantaine chiffrée.`);
+    setTimeout(() => setBulkFeedbackMessage(null), 4000);
+    handleClearSelection();
+  };
+
+  const handleMassDismiss = () => {
+    if (selectedThreatIds.size === 0) return;
+    const ids = Array.from(selectedThreatIds);
+    setRecentlyDismissedIds(ids);
+    if (onMassDismissThreats) {
+      onMassDismissThreats(ids);
+    } else if (onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(ids, 'DISMISSED', 'Rejet en masse');
+    }
+    onRunInConsole(`bulk-dismiss ${ids.join(',')}`);
+    setBulkFeedbackMessage(`${ids.length} menace(s) rejetée(s) et archivée(s) de la surveillance.`);
+    setTimeout(() => setBulkFeedbackMessage(null), 5000);
+    handleClearSelection();
+  };
+
+  const handleUndoDismiss = () => {
+    if (recentlyDismissedIds.length === 0) return;
+    if (onRestoreThreats) {
+      onRestoreThreats(recentlyDismissedIds);
+    } else if (onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(recentlyDismissedIds, 'ACTIVE', 'Restauration');
+    }
+    setBulkFeedbackMessage(`${recentlyDismissedIds.length} menace(s) restaurée(s) dans la liste active.`);
+    setRecentlyDismissedIds([]);
+    setTimeout(() => setBulkFeedbackMessage(null), 3000);
+  };
+
+  const handleRestoreSingle = (threatId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (onRestoreThreats) {
+      onRestoreThreats([threatId]);
+    }
+    setBulkFeedbackMessage(`Menace réactivée dans la liste active.`);
+    setTimeout(() => setBulkFeedbackMessage(null), 3000);
+  };
+
+  const handleExecuteSharedCommand = (template: string, targets: ThreatItem[]) => {
+    targets.forEach((threat, idx) => {
+      const fileName = threat.targetPath.split('\\').pop() || threat.name;
+      const baseName = fileName.replace(/\.[^/.]+$/, '');
+      const instantiated = template
+        .replace(/{path}/g, threat.targetPath)
+        .replace(/{name}/g, baseName)
+        .replace(/{id}/g, threat.id)
+        .replace(/{category}/g, threat.category);
+
+      setTimeout(() => {
+        onRunInConsole(instantiated);
+      }, idx * 350);
+    });
+
+    const isUnlock = template.toLowerCase().includes('unlock') || template.toLowerCase().includes('pendingfile');
+    const isStop = template.toLowerCase().includes('stop-process') || template.toLowerCase().includes('taskkill');
+    if (isUnlock && onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(targets.map(t => t.id), 'SCHEDULED_BOOT_DELETE', template);
+    } else if (isStop && onBulkMutateThreatStatus) {
+      onBulkMutateThreatStatus(targets.map(t => t.id), 'NEUTRALIZED', template);
+    }
+
+    setBulkFeedbackMessage(`Commande partagée exécutée sur ${targets.length} cibles.`);
+    setTimeout(() => setBulkFeedbackMessage(null), 4000);
+    handleClearSelection();
+  };
 
   // BITS Jobs State
   const [bitsJobs, setBitsJobs] = useState<BITSJobItem[]>([
@@ -158,6 +417,299 @@ if (Test-Path $target) {
             Ce module brise ces verrous, prend le contrôle via les privilèges <code className="text-amber-300 font-mono text-xs">SeTakeOwnershipPrivilege</code>,
             et programme la destruction définitive au niveau du gestionnaire de session Windows (<code className="text-amber-300 font-mono text-xs">PendingFileRenameOperations</code>).
           </p>
+        </div>
+      </div>
+
+      {/* Feedback Toast Notification Banner */}
+      {bulkFeedbackMessage && (
+        <div className="p-3 bg-cyan-950/80 border border-cyan-800 rounded-xl flex items-center justify-between text-xs text-cyan-200 animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+            <span>{bulkFeedbackMessage}</span>
+          </div>
+          {recentlyDismissedIds.length > 0 && (
+            <button
+              onClick={handleUndoDismiss}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-cyan-300 hover:text-white bg-cyan-900/60 hover:bg-cyan-800 rounded transition-colors"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Annuler</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* TACTICAL KERNEL THREATS & BULK SELECTION SECTION */}
+      <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-4 shadow-lg">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Key className="w-4 h-4 text-cyan-400" />
+              <h3 className="text-base font-bold text-white tracking-tight">
+                Menaces Kernel & Fichiers Système Verrouillés
+              </h3>
+              <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-rose-950 text-rose-300 border border-rose-800">
+                {kernelThreats.filter(t => t.status === 'ACTIVE').length} Active(s)
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              Sélectionnez plusieurs menaces pour exécuter un modèle de commande unifié ou les rejeter en masse.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Filtrer menaces..."
+                className="bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono w-48"
+              />
+            </div>
+
+            <button
+              onClick={() => setShowDismissed(!showDismissed)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-colors border ${
+                showDismissed
+                  ? 'bg-slate-800 text-cyan-300 border-cyan-800 font-semibold'
+                  : 'bg-slate-950 text-slate-400 hover:text-slate-300 border-slate-800'
+              }`}
+              title="Afficher ou masquer les menaces rejetées"
+            >
+              <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+              <span>Ignorées ({dismissedCount})</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Selection Preset Selectors */}
+        <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-800 flex-wrap text-xs">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleToggleSelectAll}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-mono bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors"
+            >
+              {selectedThreatIds.size > 0 && selectedThreatIds.size === kernelThreats.length ? (
+                <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
+              ) : selectedThreatIds.size > 0 ? (
+                <MinusSquare className="w-3.5 h-3.5 text-cyan-400" />
+              ) : (
+                <Square className="w-3.5 h-3.5 text-slate-500" />
+              )}
+              <span>Tout ({kernelThreats.length})</span>
+            </button>
+
+            <button
+              onClick={handleSelectActiveOnly}
+              className="px-2.5 py-1.5 rounded-lg font-mono bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors"
+            >
+              Actives ({kernelThreats.filter(t => t.status === 'ACTIVE').length})
+            </button>
+
+            <button
+              onClick={handleSelectCriticalOnly}
+              className="px-2.5 py-1.5 rounded-lg font-mono bg-slate-950 hover:bg-slate-800 text-rose-400 border border-slate-800 transition-colors"
+            >
+              Critiques ({kernelThreats.filter(t => t.severity === 'CRITICAL' && t.status === 'ACTIVE').length})
+            </button>
+
+            {selectedThreatIds.size > 0 && (
+              <button
+                onClick={handleClearSelection}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-mono text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-3 h-3" />
+                <span>Effacer</span>
+              </button>
+            )}
+          </div>
+
+          <div className="text-xs text-slate-500 font-mono">
+            {selectedThreatIds.size} sélectionnée(s) sur {kernelThreats.length}
+          </div>
+        </div>
+
+        {/* ACTIVE STICKY BULK ACTIONS COMMAND BAR */}
+        {selectedThreatIds.size > 0 && (
+          <div className="p-3 bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-950/40 rounded-xl border border-cyan-800/80 shadow-lg shadow-cyan-950/30 space-y-2 animate-in slide-in-from-top-2 duration-200">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-800">
+                  <Layers className="w-4 h-4 text-cyan-400" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>Actions Groupées sur la Sélection</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                      {selectedThreatIds.size} cible{selectedThreatIds.size > 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Application synchronisée à travers tous les postes d'analyse connectés.
+                  </p>
+                </div>
+              </div>
+
+              {/* Bulk Action Buttons */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Bulk Kernel Unlock */}
+                <button
+                  onClick={handleBulkKernelUnlock}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold font-mono text-white bg-rose-600 hover:bg-rose-500 shadow-md shadow-rose-950 transition-all"
+                  title="Exécute takeown, icacls et programme la suppression au boot pour toutes les menaces sélectionnées"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>Éradication Noyau ({selectedThreatIds.size})</span>
+                </button>
+
+                {/* Shared Command Runner */}
+                <button
+                  onClick={() => setIsSharedCommandModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold font-mono text-cyan-200 bg-cyan-950 hover:bg-cyan-900 border border-cyan-700 shadow-sm shadow-cyan-950 transition-all"
+                  title="Exécute un modèle de commande partagé (SHA256, kill, takeown, etc.) sur toutes les cibles"
+                >
+                  <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Commande Partagée...</span>
+                </button>
+
+                {/* Bulk Quarantine */}
+                <button
+                  onClick={handleBulkQuarantine}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-amber-300 bg-amber-950/80 hover:bg-amber-900/80 border border-amber-800 transition-colors"
+                  title="Place les menaces sélectionnées dans le conteneur chiffré de quarantaine"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Quarantaine</span>
+                </button>
+
+                {/* Mass Dismiss */}
+                <button
+                  onClick={handleMassDismiss}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-slate-100 border border-slate-700 transition-colors"
+                  title="Rejeter et marquer comme traitées/fausses alertes en masse"
+                >
+                  <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Rejet en Masse</span>
+                </button>
+
+                {/* Cancel Selection */}
+                <button
+                  onClick={handleClearSelection}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                  title="Annuler la sélection"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Threat Cards Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {kernelThreats.map(threat => {
+            const isSelected = selectedThreatIds.has(threat.id);
+            const isDismissed = threat.status === 'DISMISSED';
+            const isScheduledDelete = threat.status === 'SCHEDULED_BOOT_DELETE';
+            const isCritical = threat.severity === 'CRITICAL';
+
+            return (
+              <div
+                key={threat.id}
+                onClick={() => setCustomPath(threat.targetPath)}
+                className={`p-3.5 rounded-xl border transition-all cursor-pointer space-y-2.5 ${
+                  isSelected
+                    ? 'bg-slate-950/90 border-cyan-500 ring-1 ring-cyan-500/50 shadow-md shadow-cyan-950/40'
+                    : isDismissed
+                    ? 'bg-slate-950/40 border-slate-800/60 opacity-60'
+                    : isCritical
+                    ? 'bg-slate-950/80 border-rose-900/60 hover:border-rose-700'
+                    : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => toggleSelectThreat(threat.id, e)}
+                      className={`p-1 rounded-md transition-colors ${
+                        isSelected
+                          ? 'text-cyan-400 bg-cyan-950/80 border border-cyan-700'
+                          : 'text-slate-500 hover:text-slate-300 bg-slate-900 border border-slate-800'
+                      }`}
+                      title={isSelected ? 'Désélectionner' : 'Sélectionner'}
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
+                      ) : (
+                        <Square className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-xs font-bold ${isDismissed ? 'line-through text-slate-500' : 'text-slate-100'}`}>
+                        {threat.name}
+                      </span>
+                      {threat.trustedInstallerLocked && (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-purple-950 text-purple-300 border border-purple-800">
+                          TrustedInstaller
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                    isCritical ? 'bg-rose-950 text-rose-300 border border-rose-800' : 'bg-amber-950 text-amber-300 border border-amber-800'
+                  }`}>
+                    {threat.severity}
+                  </span>
+                </div>
+
+                <div className="text-[11px] font-mono text-slate-400 truncate bg-slate-900/60 p-1.5 rounded border border-slate-800/60">
+                  {threat.targetPath}
+                </div>
+
+                <div className="text-[11px] text-slate-400 leading-relaxed">
+                  {threat.description || threat.mitreTechnique}
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-slate-900 text-xs">
+                  <span className="text-[10px] font-mono text-cyan-400">
+                    {threat.mitreTechnique}
+                  </span>
+
+                  <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                    {isDismissed ? (
+                      <button
+                        onClick={(e) => handleRestoreSingle(threat.id, e)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-cyan-300 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-800 font-semibold rounded text-[11px] transition-colors"
+                      >
+                        <RotateCcw className="w-3 h-3 text-cyan-400" />
+                        <span>Restaurer</span>
+                      </button>
+                    ) : isScheduledDelete ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        Boot Delete (0B)
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setCustomPath(threat.targetPath);
+                          simulateExcision();
+                        }}
+                        className="px-2 py-0.5 bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 rounded text-[11px] font-mono font-semibold transition-colors"
+                      >
+                        Éradiquer
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -544,6 +1096,14 @@ if (Test-Path $target) {
           </div>
         </div>
       </div>
+
+      {/* Shared Command Runner Modal */}
+      <SharedCommandModal
+        isOpen={isSharedCommandModalOpen}
+        onClose={() => setIsSharedCommandModalOpen(false)}
+        selectedThreats={selectedThreatsList}
+        onExecuteSharedCommand={handleExecuteSharedCommand}
+      />
     </div>
   );
 };

@@ -23,6 +23,8 @@ import {
   FileText,
   Binary,
   Users,
+  Globe,
+  MapPin,
 } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
@@ -229,12 +231,21 @@ export const TopNav: React.FC<TopNavProps> = ({
         },
         {
           id: 'script-hub',
-          title: 'Script Hub (.ps1)',
-          category: 'Automatisation PowerShell',
-          shortDesc: 'Bibliothèque de scripts d\'assainissement complets et recettes d\'intervention.',
+          title: 'Script PowerShell (.ps1)',
+          category: 'Automatisation & Scripts',
+          shortDesc: 'Script SpaceSecurity_ULTRA_v3_Kernel.ps1, lanceurs batch élévateurs & guides d\'intervention.',
           icon: FileCode,
-          tag: 'AUTOMATION',
+          tag: 'SCRIPT PS1',
           tagClass: 'text-amber-400 bg-amber-950/70 border-amber-800/50',
+        },
+        {
+          id: 'ip-locator',
+          title: 'Géolocalisation & Traçeur IP',
+          category: 'Localisation Précise & C2',
+          shortDesc: 'Localiser le pays, la ville, la rue, le bâtiment, coordonnées GPS, FAI & C2 pour toute IP.',
+          icon: Globe,
+          tag: 'GÉO-TRACKER',
+          tagClass: 'text-sky-400 bg-sky-950/70 border-sky-800/50',
         },
       ],
     },
@@ -339,6 +350,19 @@ export const TopNav: React.FC<TopNavProps> = ({
               <span>Console</span>
             </button>
 
+            {/* Direct Quick Link 4: Géolocalisation & Traçeur IP */}
+            <button
+              onClick={() => handleSelectTab('ip-locator')}
+              className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'ip-locator'
+                  ? 'bg-sky-950/70 text-sky-300 border border-sky-600/70 shadow-sm shadow-sky-950/50'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent'
+              }`}
+            >
+              <Globe className="w-3.5 h-3.5 text-sky-400" />
+              <span>Traçeur IP</span>
+            </button>
+
             {/* MEGA MENU TRIGGER BUTTON */}
             <div className="relative">
               <button
@@ -357,7 +381,7 @@ export const TopNav: React.FC<TopNavProps> = ({
                   Modules & Outils
                 </span>
                 <span className="hidden sm:inline-block px-1.5 py-0.2 font-mono text-[10px] rounded bg-slate-800 text-slate-300 border border-slate-700">
-                  11
+                  12
                 </span>
                 <ChevronDown
                   className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
@@ -408,29 +432,6 @@ export const TopNav: React.FC<TopNavProps> = ({
               <Users className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             </button>
 
-            {/* Forensic PDF Report Button */}
-            <button
-              onClick={onOpenPdfReport}
-              title="Générer et télécharger un rapport PDF détaillé avec graphiques de score de sécurité"
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-200 bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800/70 hover:border-rose-600 rounded-lg transition-all shadow-sm"
-            >
-              <FileText className="w-3.5 h-3.5 text-rose-400" />
-              <span className="font-semibold text-rose-200">Rapport PDF</span>
-              <span className="hidden lg:inline-block text-[9px] font-mono px-1 py-0.2 bg-rose-900/80 text-rose-300 rounded border border-rose-700/60">
-                PRO
-              </span>
-            </button>
-
-            {/* Download Script Button */}
-            <button
-              onClick={onDownloadScript}
-              title="Télécharger le script PowerShell SpaceSecurity_ULTRA_v3_Kernel.ps1"
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-200 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 hover:border-slate-600 rounded-lg transition-all"
-            >
-              <Download className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Script (.ps1)</span>
-            </button>
-
             {/* Primary Action: Download ZIP */}
             <button
               onClick={onDownloadZip}
@@ -448,11 +449,23 @@ export const TopNav: React.FC<TopNavProps> = ({
       {/* 2-COLUMN MEGA MENU DROPDOWN PANEL */}
       {/* ========================================================================= */}
       {isMegaMenuOpen && (
-        <div
-          ref={megaMenuRef}
-          className="absolute top-full left-0 right-0 bg-slate-950/95 backdrop-blur-xl border-b border-cyan-900/40 shadow-2xl shadow-black/80 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-        >
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <>
+          {/* Backdrop overlay for focus and outside-click dismissal */}
+          <div
+            className="fixed inset-0 top-16 bg-slate-950/75 backdrop-blur-xs z-40 transition-opacity"
+            onClick={() => setIsMegaMenuOpen(false)}
+            aria-hidden="true"
+          />
+
+          {/* Scrollable mega menu container with overflow-y: auto */}
+          <div
+            ref={megaMenuRef}
+            className="absolute top-full left-0 right-0 bg-slate-950/98 backdrop-blur-2xl border-b border-cyan-900/40 shadow-2xl shadow-black/90 z-50 animate-in fade-in slide-in-from-top-2 duration-150 max-h-[calc(100vh-4rem)] max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain"
+            style={{
+              WebkitOverflowScrolling: 'touch',
+            }}
+          >
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-14">
             
             {/* Header of Mega Menu: Title & Quick Search Filter */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 mb-5 border-b border-slate-800/80">
@@ -584,6 +597,19 @@ export const TopNav: React.FC<TopNavProps> = ({
                                     >
                                       {item.tag}
                                     </span>
+                                    {item.id === 'script-hub' && (
+                                      <span
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onDownloadScript();
+                                        }}
+                                        title="Télécharger directement le script SpaceSecurity_ULTRA_v3_Kernel.ps1"
+                                        className="text-[9px] font-mono font-bold text-amber-300 hover:text-white bg-amber-950/80 hover:bg-amber-900 border border-amber-700/70 px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
+                                      >
+                                        <Download className="w-2.5 h-2.5" />
+                                        Télécharger .ps1
+                                      </span>
+                                    )}
                                     {isActive && (
                                       <span className="text-[9px] font-mono font-bold text-cyan-400 bg-cyan-950 border border-cyan-700/60 px-1 py-0.5 rounded flex items-center gap-1">
                                         <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
@@ -656,7 +682,8 @@ export const TopNav: React.FC<TopNavProps> = ({
 
           </div>
         </div>
-      )}
+      </>
+    )}
     </header>
   );
 };

@@ -402,6 +402,11 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
     [sendMutation]
   );
 
+  const resetThreats = useCallback(() => {
+    setThreats(prev => prev.map(t => ({ ...t, status: 'ACTIVE' })));
+    sendMutation('RESET_THREATS', {});
+  }, [sendMutation]);
+
   return {
     threats,
     setThreats,

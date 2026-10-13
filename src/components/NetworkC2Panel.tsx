@@ -7,6 +7,7 @@ import { WiFiScanner } from './WiFiScanner';
 
 interface NetworkC2PanelProps {
   onRunInConsole: (command: string) => void;
+  onLocateIp?: (ip: string) => void;
 }
 
 interface TrafficDataPoint {
@@ -19,7 +20,7 @@ interface TrafficDataPoint {
   isSpike: boolean;
 }
 
-export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole }) => {
+export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, onLocateIp }) => {
   const [connections] = useState<NetworkConnectionItem[]>([
     {
       local: '192.168.1.42:52110',
@@ -516,16 +517,31 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole }
                     )}
                   </td>
                   <td className="py-3 px-4 text-right">
-                    {conn.isSuspicious ? (
-                      <button
-                        onClick={() => onRunInConsole(`kill ${conn.pid}`)}
-                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded text-[11px] font-semibold transition-colors"
-                      >
-                        Couper Socket
-                      </button>
-                    ) : (
-                      <span className="text-slate-500 text-[11px] font-sans">Normal</span>
-                    )}
+                    <div className="flex items-center justify-end gap-1.5">
+                      {onLocateIp && conn.remote && !conn.remote.startsWith('0.0.0.0') && (
+                        <button
+                          onClick={() => {
+                            const raw = conn.remote.split(':')[0];
+                            onLocateIp(raw);
+                          }}
+                          className="px-2 py-1 bg-sky-950/70 hover:bg-sky-900/80 text-sky-300 border border-sky-800/60 rounded text-[11px] font-medium transition-colors flex items-center gap-1 shadow-sm"
+                          title="Localiser le pays, la ville et l'adresse physique de cette IP"
+                        >
+                          <Globe className="w-3 h-3 text-sky-400" />
+                          <span>Localiser</span>
+                        </button>
+                      )}
+                      {conn.isSuspicious ? (
+                        <button
+                          onClick={() => onRunInConsole(`kill ${conn.pid}`)}
+                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded text-[11px] font-semibold transition-colors shadow-sm"
+                        >
+                          Couper Socket
+                        </button>
+                      ) : (
+                        <span className="text-slate-500 text-[11px] font-sans">Normal</span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

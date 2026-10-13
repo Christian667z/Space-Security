@@ -22,6 +22,7 @@ import {
   Info,
   FileText,
   Binary,
+  FileCode,
   CheckSquare,
   Square,
   MinusSquare,
@@ -36,6 +37,7 @@ import {
 import { TabId, ThreatItem } from '../types/cyberdefense';
 import { ThreatHeatmap } from './ThreatHeatmap';
 import { ThreatIntensityMap } from './ThreatIntensityMap';
+import { ThreatCategoryDonutChart } from './ThreatCategoryDonutChart';
 import { SharedCommandModal } from './SharedCommandModal';
 import { calculateSecurityScore } from '../utils/pdfReportGenerator';
 
@@ -44,6 +46,7 @@ interface OverviewDashboardProps {
   onRunInConsole: (command: string) => void;
   threats: ThreatItem[];
   onDownloadZip: () => void;
+  onDownloadScript?: () => void;
   onOpenPdfReport?: () => void;
   onMutateThreatStatus?: (threatId: string, targetPath: string, status: ThreatItem['status']) => void;
   onBulkMutateThreatStatus?: (threatIds: string[], status: ThreatItem['status'], command?: string) => void;
@@ -56,6 +59,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
   onRunInConsole,
   threats,
   onDownloadZip,
+  onDownloadScript,
   onOpenPdfReport,
   onMutateThreatStatus,
   onBulkMutateThreatStatus,
@@ -63,6 +67,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
   onRestoreThreats,
 }) => {
   const [severityFilter, setSeverityFilter] = useState<'ALL' | 'CRITICAL' | 'HIGH' | 'MEDIUM'>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [searchThreatQuery, setSearchThreatQuery] = useState<string>('');
   const [sortBySeverity, setSortBySeverity] = useState<boolean>(true);
   const [selectedThreatIds, setSelectedThreatIds] = useState<Set<string>>(new Set());
@@ -97,11 +102,17 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
         if (severityFilter !== 'ALL' && threat.severity !== severityFilter) {
           return false;
         }
+        if (categoryFilter !== 'ALL') {
+          const normThreatCat = threat.category === 'Rootkit' ? 'Kernel' : threat.category;
+          if (normThreatCat !== categoryFilter && threat.category !== categoryFilter) {
+            return false;
+          }
+        }
         if (searchThreatQuery.trim()) {
           const q = searchThreatQuery.toLowerCase();
           const matches =
             threat.name.toLowerCase().includes(q) ||
-            threat.description.toLowerCase().includes(q) ||
+            Boolean(threat.description && threat.description.toLowerCase().includes(q)) ||
             threat.targetPath.toLowerCase().includes(q) ||
             threat.mitreTechnique.toLowerCase().includes(q) ||
             threat.category.toLowerCase().includes(q);
@@ -115,7 +126,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
         }
         return 0;
       });
-  }, [threats, severityFilter, searchThreatQuery, sortBySeverity, showDismissedThreats]);
+  }, [threats, severityFilter, categoryFilter, searchThreatQuery, sortBySeverity, showDismissedThreats]);
 
   const selectedThreatsList = useMemo(() => {
     return threats.filter(t => selectedThreatIds.has(t.id));
@@ -472,6 +483,13 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
         </div>
       </div>
 
+      {/* Threat Distribution Donut Chart (Recharts) */}
+      <ThreatCategoryDonutChart
+        threats={threats}
+        selectedCategory={categoryFilter}
+        onSelectCategory={setCategoryFilter}
+      />
+
       {/* Threat Heatmap: System Areas Visualizer (Kernel, Registry, Startup, Filesystem) */}
       <ThreatHeatmap onRunInConsole={onRunInConsole} />
 
@@ -687,6 +705,20 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                     {mediumCount}
                   </span>
                 </button>
+
+                {categoryFilter !== 'ALL' && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono bg-cyan-950 text-cyan-300 border border-cyan-700 shadow-sm animate-fadeIn">
+                    <span className="text-[10px] text-cyan-400 uppercase font-semibold">Catégorie :</span>
+                    <span className="font-bold">{categoryFilter}</span>
+                    <button
+                      onClick={() => setCategoryFilter('ALL')}
+                      className="ml-1 text-cyan-400 hover:text-white font-bold p-0.5"
+                      title="Réinitialiser le filtre de catégorie"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Quick Search Input */}
@@ -1031,7 +1063,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                     </div>
 
                     <div className={`text-xs leading-relaxed font-sans ${isDismissed ? 'text-slate-500' : 'text-slate-300'}`}>
-                      {threat.description}
+                      {threat.description || threat.name}
                     </div>
 
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-900 text-xs">
@@ -1241,16 +1273,33 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
 
             <div
               onClick={() => onNavigateTab('script-hub')}
-              className="p-3.5 bg-slate-950 border border-slate-800 hover:border-cyan-800 rounded-xl cursor-pointer transition-colors group"
+              className="p-3.5 bg-amber-950/20 border border-amber-900/50 hover:border-amber-600/80 rounded-xl cursor-pointer transition-colors group"
             >
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-xs text-cyan-300 group-hover:text-cyan-200">
-                  Script Workshop (.ps1 & .bat)
+                <span className="font-semibold text-xs text-amber-300 group-hover:text-amber-200 flex items-center gap-1.5">
+                  <FileCode className="w-3.5 h-3.5 text-amber-400" />
+                  Script PowerShell (.ps1 & .bat)
                 </span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-cyan-300 transition-transform group-hover:translate-x-1" />
+                <div className="flex items-center gap-2">
+                  {onDownloadScript && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDownloadScript();
+                      }}
+                      title="Télécharger directement le script SpaceSecurity_ULTRA_v3_Kernel.ps1"
+                      className="px-2 py-0.5 text-[10px] font-mono text-amber-200 bg-amber-950/80 hover:bg-amber-900 border border-amber-700/70 rounded flex items-center gap-1 transition-colors"
+                    >
+                      <Download className="w-2.5 h-2.5 text-amber-400" />
+                      <span>Télécharger .ps1</span>
+                    </button>
+                  )}
+                  <ArrowRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-amber-300 transition-transform group-hover:translate-x-1" />
+                </div>
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
-                Visualisez et téléchargez les scripts complets pour vos machines Windows.
+                Visualisez le code source et téléchargez le script autonome <code className="text-amber-300 font-mono">.ps1</code> d'assainissement noyau.
               </p>
             </div>
           </div>

@@ -604,7 +604,7 @@ export async function generateAndDownloadPdfReport(
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(6.8);
     doc.setTextColor(3, 105, 161);
-    doc.text(`Action : ${threat.description.slice(0, 68)}...`, margin + 3, curY + 15);
+    doc.text(`Action : ${(threat.description || threat.name).slice(0, 68)}...`, margin + 3, curY + 15);
 
     // Severity Badge
     let sevBg = [239, 68, 68];

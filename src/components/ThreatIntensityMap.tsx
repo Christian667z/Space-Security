@@ -976,6 +976,19 @@ export const ThreatIntensityMap: React.FC<ThreatIntensityMapProps> = ({
                 </button>
               )}
 
+              {onNavigateTab && (
+                <button
+                  onClick={() => {
+                    onRunInConsole(`geolocate ${selectedThreat.ip}`);
+                    onNavigateTab('ip-locator');
+                  }}
+                  className="w-full py-2 bg-sky-950/80 hover:bg-sky-900/80 border border-sky-700/60 text-sky-200 font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 font-mono shadow-sm"
+                >
+                  <Globe className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Localiser l'Endroit Précis ({selectedThreat.city})</span>
+                </button>
+              )}
+
               <button
                 onClick={() => onRunInConsole(`sockets`)}
                 className="w-full py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-mono text-xs rounded-lg transition-colors"
