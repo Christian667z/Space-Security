@@ -40,6 +40,9 @@ async function runBuild() {
     format: 'cjs',
     outfile: 'dist-electron/server.cjs',
     external: ['vite', 'fsevents'],
+    define: {
+      'import.meta.url': '""',
+    },
     sourcemap: false,
   });
 

@@ -1,14 +1,20 @@
 {
   "name": "spacesec-cyberdefense-suite",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "main": "dist-electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build",
+    "build:ui": "vite build",
+    "build:electron": "node build-electron.js",
+    "build": "npm run build:ui && npm run build:electron",
+    "dist": "npm run build && electron-builder --win",
+    "dist:portable": "npm run build && electron-builder --win portable --x64",
+    "dist:nsis": "npm run build && electron-builder --win nsis --x64",
     "start": "node server.ts",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "node -e \"try{fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('dist-electron',{recursive:true,force:true})}catch(e){}\"",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
@@ -40,6 +46,8 @@
     "@types/topojson-client": "^3.1.5",
     "@types/ws": "^8.18.2",
     "autoprefixer": "^10.4.21",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.28.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",

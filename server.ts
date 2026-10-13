@@ -10,8 +10,7 @@ import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 
 const execAsync = promisify(exec);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const appDir = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 const ai = new GoogleGenAI();
 
 // Helper for CPU calculation across ticks
@@ -1209,11 +1208,11 @@ Précise l'endroit exact (bâtiment, centre de données, rue ou quartier), les s
   } else {
     const candidates = [
       process.env.DIST_PATH,
-      path.join(__dirname, 'dist'),
-      path.join(__dirname, '..', 'dist'),
+      path.join(appDir, 'dist'),
+      path.join(appDir, '..', 'dist'),
       path.join(process.cwd(), 'dist'),
     ].filter(Boolean) as string[];
-    const distPath = candidates.find(p => fs.existsSync(p)) || path.join(__dirname, 'dist');
+    const distPath = candidates.find(p => fs.existsSync(p)) || path.join(appDir, 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
