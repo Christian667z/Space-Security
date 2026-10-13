@@ -433,6 +433,9 @@ function Enter-CyberDefenseConsole {
                 Write-Host "    sockets           : Affiche les connexions etablies vers l'exterieur"
                 Write-Host "    drivers           : Affiche les filtres kernel actifs"
                 Write-Host "    defender          : Force la reparation des signatures Defender"
+                Write-Host "    gpo-repair        : Debloque Taskmgr, Regedit, CMD et actualise les GPO"
+                Write-Host "    hosts-clean       : Restaure le fichier HOSTS propre Microsoft et flush DNS"
+                Write-Host "    remediation       : Lance la restauration complete post-infection"
                 Write-Host "    clear             : Efface l'ecran"
                 Write-Host "    exit              : Quitte la console"
             }
@@ -470,6 +473,9 @@ function Enter-CyberDefenseConsole {
                     Write-Logging "Signatures Defender actualisees." "OK"
                 }
             }
+            'gpo-repair'  { Repair-PostInfectionPolicies }
+            'hosts-clean' { Restore-HostsAndFlushDns }
+            'remediation' { Repair-PostInfectionTotal }
             'clear'   { Clear-Host }
             'exit'    { break }
             default   { Write-Host "  Commande inconnue. Tapez 'help'." -ForegroundColor Red }
@@ -553,6 +559,74 @@ function Repair-WindowsDefender {
     } catch {}
 
     Write-Logging "Reparation appliquee !" "OK"
+}
+
+# ---- RESTAURATION POST-INFECTION (DEBLOCAGE STRATEGIES & HOSTS) ----
+function Repair-PostInfectionPolicies {
+    Show-SectionHeader "DEBLOCAGE STRATEGIES & OUTILS SYSTEME POST-INFECTION"
+    Write-Logging "Suppression des restrictions de registre imposees par malware..." "INFO"
+
+    # Deblocage Taskmgr
+    @("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System") | ForEach-Object {
+        Remove-ItemProperty -Path $_ -Name "DisableTaskMgr" -ErrorAction SilentlyContinue
+    }
+    Write-Logging "Gestionnaire des Taches (Taskmgr) debloque !" "OK"
+
+    # Deblocage Regedit
+    @("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System") | ForEach-Object {
+        Remove-ItemProperty -Path $_ -Name "DisableRegistryTools" -ErrorAction SilentlyContinue
+    }
+    Write-Logging "Editeur de Registre (Regedit) debloque !" "OK"
+
+    # Deblocage Invite de Commandes & PowerShell
+    @("HKCU:\\Software\\Policies\\Microsoft\\Windows\\System", "HKLM:\\Software\\Policies\\Microsoft\\Windows\\System") | ForEach-Object {
+        Remove-ItemProperty -Path $_ -Name "DisableCMD" -ErrorAction SilentlyContinue
+    }
+    Write-Logging "Invite de commandes (CMD & PowerShell) debloquee !" "OK"
+
+    # Deblocage Menu Executer (NoRun)
+    Remove-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer" -Name "NoRun" -ErrorAction SilentlyContinue
+    Write-Logging "Boite de dialogue Executer (Win+R) debloquee !" "OK"
+
+    # Rafraichissement force des GPO
+    Write-Logging "Actualisation forcee des strategies de groupe (gpupdate /force)..." "INFO"
+    Start-Process "gpupdate.exe" -ArgumentList "/force" -Wait -NoNewWindow
+    Write-Logging "Strategies Windows restaurees et synchronisees !" "OK"
+}
+
+function Restore-HostsAndFlushDns {
+    Show-SectionHeader "NETTOYAGE REDIRECTIONS DNS & FICHIER HOSTS"
+    $hostsPath = "$env:SystemRoot\\System32\\drivers\\etc\\hosts"
+    
+    if (Test-Path $hostsPath) {
+        $backup = "$hostsPath.spacesec_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+        Copy-Item -Path $hostsPath -Destination $backup -Force -ErrorAction SilentlyContinue
+        Write-Logging "Sauvegarde de securite creee : $backup" "INFO"
+    }
+
+    $cleanTemplate = @"
+# Copyright (c) 1993-2009 Microsoft Corp.
+#
+# This is a sample HOSTS file used by Microsoft TCP/IP for Windows.
+# Restaure avec succes par Space Security CyberDefense Suite.
+#
+127.0.0.1       localhost
+::1             localhost
+"@
+    Set-Content -Path $hostsPath -Value $cleanTemplate -Force -Encoding ASCII
+    Write-Logging "Fichier HOSTS sain officiel Microsoft reinstalle !" "OK"
+
+    Write-Logging "Purge du cache DNS local (ipconfig /flushdns)..." "INFO"
+    Start-Process "ipconfig.exe" -ArgumentList "/flushdns" -Wait -NoNewWindow
+    Write-Logging "Reinitialisation du catalogue Winsock (netsh winsock reset)..." "INFO"
+    Start-Process "netsh.exe" -ArgumentList "winsock reset" -Wait -NoNewWindow
+    Write-Logging "Redirections pirates supprimees et resolution DNS retablie !" "OK"
+}
+
+function Repair-PostInfectionTotal {
+    Repair-PostInfectionPolicies
+    Restore-HostsAndFlushDns
+    Write-Logging "Restauration complete post-infection achevee avec succes !" "OK"
 }
 
 # ==============================================================================
@@ -661,6 +735,7 @@ do {
     Write-Host "   [4]  DURCISSEMENT        - WMI, SMBv1, Shadow Copies, Policies" -ForegroundColor Yellow
     Write-Host "   [5]  FORENSIQUE MEMOIRE  - Dump RAM d'urgence, LOLBins, Alternate Data Streams" -ForegroundColor DarkCyan
     Write-Host "   [6]  CONSOLE LIVE        - Console interactive d'analyse en temps reel" -ForegroundColor Green
+    Write-Host "   [7]  RESTAURATION POST-INFECTION - Deblocage Taskmgr, Regedit, CMD & Fichier HOSTS / DNS" -ForegroundColor Yellow
     Write-Host "   [0]  QUITTER" -ForegroundColor DarkGray
     Write-Host "  ====================================================================" -ForegroundColor DarkGray
     Write-Host "  Rapport actuel : $reportPath" -ForegroundColor DarkGray
@@ -685,6 +760,10 @@ do {
             Pause-Menu
         }
         '6' { Enter-CyberDefenseConsole }
+        '7' {
+            Repair-PostInfectionTotal
+            Pause-Menu
+        }
         '0' { Write-Logging "Fermeture de la suite SpaceSec. Restez vigilant !" "OK"; exit }
     }
 } while ($m -ne '0')

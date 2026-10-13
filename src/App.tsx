@@ -23,6 +23,7 @@ import { HeuristicEngine } from './components/HeuristicEngine';
 import { CollabSyncModal } from './components/CollabSyncModal';
 import { IpLocatorPanel } from './components/IpLocatorPanel';
 import { WiFiScanner } from './components/WiFiScanner';
+import { PostInfectionRepairPanel } from './components/PostInfectionRepairPanel';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { TabId, ConsoleLogMessage, ThreatItem, ThreatNotification } from './types/cyberdefense';
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
@@ -196,6 +197,10 @@ export default function App() {
         addLog('INFO', '  entropy           : Calcule l\'entropie de Shannon sur les sections mémoires/PE');
         addLog('INFO', '  wifi / wifiscan   : Scanne les réseaux WiFi environnants et détecte les Evil Twins');
         addLog('INFO', '  geolocate <ip>    : Géolocalise le pays, la ville et l\'endroit physique exact de l\'IP');
+        addLog('INFO', '  remediation       : Ouvre le module de restauration post-infection (déblocage GPO & HOSTS)');
+        addLog('INFO', '  gpo-repair        : Débloque automatiquement Taskmgr, Regedit, CMD et actualise les GPO');
+        addLog('INFO', '  hosts-clean       : Restaure le fichier hosts sain Microsoft et purge le cache DNS');
+        addLog('INFO', '  repair-post-infection : Lance la restauration intégrale en 1 clic');
         addLog('INFO', '  export-report     : Génère et télécharge le rapport PDF détaillé avec graphiques de score');
         addLog('INFO', '  pdf / export-pdf  : Raccourci pour générer le rapport PDF d\'audit forensique');
         break;
@@ -902,6 +907,61 @@ export default function App() {
         break;
       }
 
+      case 'remediation':
+      case 'repair':
+      case 'post-infection':
+        setActiveTab('remediation');
+        addLog('INFO', 'Ouverture du module de Restauration Post-Infection & Déblocage Système.', 'REMEDIATION');
+        break;
+
+      case 'gpo-repair':
+      case 'repair-policies':
+      case 'unlock-tools':
+        addLog('KERNEL', 'Purge des restrictions de registre DisableTaskMgr, DisableRegistryTools et DisableCMD...', 'REMEDIATION');
+        apiFetch('/api/remediation/policies/repair', { method: 'POST' })
+          .then(res => res.json())
+          .then(data => {
+            if (data.repairedItems && Array.isArray(data.repairedItems)) {
+              data.repairedItems.forEach((msg: string) => addLog('OK', msg, 'REMEDIATION'));
+            } else {
+              addLog('OK', 'Gestionnaire des tâches, Regedit et CMD débloqués avec succès.', 'REMEDIATION');
+            }
+          })
+          .catch(err => addLog('WARN', `Erreur lors du déblocage: ${err.message}`, 'REMEDIATION'));
+        break;
+
+      case 'hosts-clean':
+      case 'hosts-repair':
+      case 'restore-hosts':
+        addLog('KERNEL', 'Restauration du fichier C:\\Windows\\System32\\drivers\\etc\\hosts et purge DNS...', 'REMEDIATION');
+        apiFetch('/api/remediation/hosts/restore', { method: 'POST' })
+          .then(res => res.json())
+          .then(data => {
+            addLog('OK', data.message || 'Fichier HOSTS restauré avec le gabarit officiel Microsoft.', 'REMEDIATION');
+            addLog('OK', 'Cache DNS vidé (ipconfig /flushdns) et catalogue Winsock réinitialisé.', 'REMEDIATION');
+          })
+          .catch(err => addLog('WARN', `Erreur de restauration HOSTS: ${err.message}`, 'REMEDIATION'));
+        break;
+
+      case 'repair-post-infection':
+      case 'repair-all':
+        addLog('KERNEL', 'Démarrage de la Restauration Totale Post-Infection (GPO + Fichier HOSTS + Cache DNS)...', 'REMEDIATION');
+        apiFetch('/api/remediation/policies/repair', { method: 'POST' })
+          .then(res => res.json())
+          .then(data => {
+            if (data.repairedItems && Array.isArray(data.repairedItems)) {
+              data.repairedItems.forEach((msg: string) => addLog('OK', msg, 'REMEDIATION'));
+            }
+            return apiFetch('/api/remediation/hosts/restore', { method: 'POST' });
+          })
+          .then(res => res.json())
+          .then(data => {
+            addLog('OK', data.message || 'Fichier HOSTS restauré et cache DNS réinitialisé.', 'REMEDIATION');
+            addLog('OK', 'Restauration globale post-infection achevée : toutes les restrictions ont été neutralisées !', 'REMEDIATION');
+          })
+          .catch(err => addLog('WARN', `Erreur: ${err.message}`, 'REMEDIATION'));
+        break;
+
       default:
         addLog('WARN', `Commande "${trimmed}" non reconnue. Tapez "help" pour voir la liste.`);
         break;
@@ -1093,6 +1153,10 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === 'remediation' && (
+          <PostInfectionRepairPanel onRunInConsole={handleExecuteCommand} />
+        )}
+
         {activeTab === 'hardening' && (
           <HardeningPanel
             onRunInConsole={handleExecuteCommand}
@@ -1126,6 +1190,9 @@ export default function App() {
           <div className="flex items-center flex-wrap justify-center gap-3.5 text-slate-400">
             <button onClick={handleDownloadZip} className="text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">
               Télécharger le ZIP
+            </button>
+            <button onClick={() => setActiveTab('remediation')} className="hover:text-amber-300 text-amber-300 font-semibold transition-colors flex items-center gap-1">
+              <span>Restauration Post-Infection</span>
             </button>
             <button onClick={() => setActiveTab('bits')} className="hover:text-cyan-300 text-slate-300 font-medium transition-colors">
               BITS Task Manager

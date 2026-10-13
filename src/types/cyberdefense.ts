@@ -9,6 +9,7 @@ export type TabId =
   | 'forensics'
   | 'network'
   | 'wifi'
+  | 'remediation'
   | 'hardening'
   | 'script-hub'
   | 'ip-locator';

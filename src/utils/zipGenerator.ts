@@ -19,6 +19,8 @@ CONTENU DE CE PACK ZIP :
       - Purge des pieges de debogueur IFEO (Image File Execution Options)
       - Traque des connexions C2 (Metasploit 4444, Cobalt Strike Named Pipes)
       - Detection des LOLBins (certutil, bitsadmin, mshta) et flux NTFS alternatifs (ADS)
+      - Restauration Post-Infection : deblocage Taskmgr, Regedit, CMD et strategies GPO
+      - Nettoyage du fichier HOSTS pirate, vidage du cache DNS et reinitialisation Winsock
       - Desactivation SMBv1, purge abonnements WMI et creation de Shadow Copies VSS
       - Mode Console Interactive en temps reel integre directement dans PowerShell
 

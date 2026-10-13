@@ -26,6 +26,7 @@ import {
   Globe,
   MapPin,
   Wifi,
+  Wrench,
 } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
@@ -231,6 +232,15 @@ export const TopNav: React.FC<TopNavProps> = ({
           icon: Wifi,
           tag: 'SCAN WIFI',
           tagClass: 'text-indigo-400 bg-indigo-950/70 border-indigo-800/50',
+        },
+        {
+          id: 'remediation',
+          title: 'Restauration Post-Infection',
+          category: 'Déblocage GPO & Fichier HOSTS',
+          shortDesc: 'Déblocage Taskmgr, Regedit, CMD après attaque virale, assainissement du fichier HOSTS et flush DNS.',
+          icon: Wrench,
+          tag: 'RESTAURATION GPO',
+          tagClass: 'text-amber-400 bg-amber-950/70 border-amber-800/50',
         },
         {
           id: 'hardening',
