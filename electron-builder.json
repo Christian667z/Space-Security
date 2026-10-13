@@ -9,6 +9,8 @@
     "dist-electron/**/*",
     "package.json"
   ],
+  "nodeGypRebuild": false,
+  "npmRebuild": false,
   "win": {
     "target": [
       {
