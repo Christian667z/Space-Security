@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { Network, Wifi } from 'lucide-react';
 import { TopNav } from './components/TopNav';
 import { ConsoleTerminal } from './components/ConsoleTerminal';
 import { DeepExcisionPanel } from './components/DeepExcisionPanel';
@@ -318,11 +319,27 @@ export default function App() {
 
       case 'sockets':
         addLog('INFO', 'Extraction des sockets TCP/UDP établis (Get-NetTCPConnection)...', 'NETWORK');
+        addThreatToast({
+          title: 'Audit Réseau Déclenché',
+          description: 'Analyse des sockets TCP/UDP & écouteurs actifs (Get-NetTCPConnection).',
+          severity: 'HIGH',
+          category: 'Network',
+          source: 'NET-SOCKETS',
+          targetTab: 'network',
+        });
         setTimeout(() => {
           addLog('INFO', '  TCP 192.168.1.42:52110 -> 142.250.190.46:443 (chrome.exe) [OK]', 'NETWORK');
           addLog('ERROR', '  TCP 192.168.1.42:52314 -> 185.220.101.4:4444 (svch0st_updater.exe) [ALERTE METASPLOIT]', 'NETWORK');
           addLog('WARN', '  TCP 192.168.1.42:52410 -> 45.154.255.89:8080 (powershell.exe) [IP SUSPECTE]', 'NETWORK');
-        }, 500);
+          addThreatToast({
+            title: '2 Flux C2 Détectés',
+            description: '185.220.101.4:4444 (Metasploit) et 45.154.255.89:8080 (PowerShell Beacon).',
+            severity: 'CRITICAL',
+            category: 'Network',
+            source: 'NET-SOCKETS',
+            targetTab: 'network',
+          });
+        }, 600);
         break;
 
       case 'dump-ram':
@@ -517,21 +534,28 @@ export default function App() {
         setTimeout(() => addLog('OK', 'DefenderSync : Audit terminé. 4 exclusions critiques à purger immédiatement !', 'DEFENDER-SYNC'), 1300);
         break;
 
-      case 'remove-mppreference':
-        const targetExcl = parts.slice(1).join(' ');
+      case 'remove-mppreference': {
+        const targetExcl = parts.slice(1).join(' ').replace(/^["']|["']$/g, '');
         addLog('WARN', `Exécution de Remove-MpPreference sur ${targetExcl || 'l\'élément sélectionné'}...`, 'DEFENDER-SYNC');
         setTimeout(() => {
           addLog('OK', `Exclusion neutralisée et supprimée de Windows Defender avec succès !`, 'DEFENDER-SYNC');
           addLog('INFO', 'Le chemin/processus sera désormais scanné en continu par la protection en temps réel.', 'DEFENDER-SYNC');
+          if (targetExcl) {
+            mutateThreatStatus(targetExcl, targetExcl, 'NEUTRALIZED');
+          }
         }, 500);
         break;
+      }
 
-      case 'start-mpscan':
-        const scanPath = parts.slice(1).join(' ');
+      case 'start-mpscan': {
+        const scanPath = parts.slice(1).join(' ').replace(/^["']|["']$/g, '');
         addLog('KERNEL', `Lancement d'un scan antivirus dédié (Start-MpScan) : ${scanPath || 'Scan ciblé'}`, 'DEFENDER-SCAN');
-        setTimeout(() => addLog('INFO', 'Moteur Antivirus Defender en cours d\'analyse heuristique...', 'DEFENDER-SCAN'), 400);
-        setTimeout(() => addLog('OK', 'Scan achevé. Aucun binaire résiduel actif non consigné.', 'DEFENDER-SCAN'), 900);
+        setTimeout(() => addLog('INFO', 'Moteur Antivirus Defender en cours d\'analyse heuristique approfondie...', 'DEFENDER-SCAN'), 400);
+        setTimeout(() => {
+          addLog('OK', 'Scan achevé. Intégrité des signatures vérifiée et fichiers nettoyés.', 'DEFENDER-SCAN');
+        }, 900);
         break;
+      }
 
       case 'set-mppreference':
       case 'policy-harden':
@@ -541,6 +565,213 @@ export default function App() {
         setTimeout(() => addLog('OK', 'DisableBehaviorMonitoring = $false (Surveillance comportementale active)', 'DEFENDER-HARDEN'), 900);
         setTimeout(() => addLog('OK', 'Politiques Defender synchronisées et verrouillées avec succès !', 'DEFENDER-HARDEN'), 1200);
         break;
+
+      case 'netsh': {
+        const netshLower = trimmed.toLowerCase();
+        if (netshLower.includes('wlan show networks')) {
+          addLog('KERNEL', 'Interrogation de l\'interface radio via netsh wlan show networks mode=bssid...', 'WIFI-AUDIT');
+          addThreatToast({
+            title: 'Audit WiFi BSSID (netsh)',
+            description: 'Interrogation de l\'interface radio (netsh wlan show networks mode=bssid).',
+            severity: 'HIGH',
+            category: 'Network',
+            source: 'NETSH-WLAN',
+            targetTab: 'network',
+          });
+          setTimeout(() => addLog('WARN', 'Borne Rogue Détectée : SSID "SpaceSec-Secure-Corp" cloné sur BSSID 00:C0:CA:91:DE:3F (Alfa Network)', 'WIFI-AUDIT'), 300);
+          setTimeout(() => addLog('ERROR', 'Alerte Evil Twin : Déclassement de sécurité WPA3-SAE vers WPA2-PSK et 148 trames Deauth détectées !', 'WIFI-AUDIT'), 600);
+          setTimeout(() => addLog('WARN', 'Réseau Ouvert Détecté : "FreeWifi_Public_Guest" (F4:8E:38:22:1A:BC) non chiffré', 'WIFI-AUDIT'), 900);
+          setTimeout(() => {
+            addLog('OK', 'Contre-mesure recommandée : Utilisez netsh wlan add filter pour bloquer le BSSID pirate.', 'WIFI-AUDIT');
+            addThreatToast({
+              title: 'Alerte Evil Twin Détectée !',
+              description: 'SSID piraté sur BSSID 00:C0:CA:91:DE:3F avec 148 trames de désauthentification.',
+              severity: 'CRITICAL',
+              category: 'Network',
+              source: 'NETSH-WLAN',
+              targetTab: 'network',
+            });
+          }, 1200);
+        } else if (netshLower.includes('wlan add filter')) {
+          const ssidMatch = trimmed.match(/ssid="?([^"]+)"?/i);
+          const ssidName = ssidMatch ? ssidMatch[1] : 'AP Rogue';
+          addLog('WARN', `Application du filtre de blocage WiFi pour "${ssidName}"...`, 'WIFI-BLOCK');
+          setTimeout(() => {
+            addLog('OK', `Filtre réseau appliqué : la borne pirate "${ssidName}" est définitivement rejetée de l'infrastructure.`, 'WIFI-BLOCK');
+          }, 400);
+        } else if (netshLower.includes('advfirewall')) {
+          const portMatch = trimmed.match(/localport=(\d+)/i);
+          const ipMatch = trimmed.match(/remoteip=([0-9.]+)/i);
+          addLog('KERNEL', 'Configuration du Pare-Feu Windows Avancé (netsh advfirewall)...', 'FIREWALL');
+          setTimeout(() => {
+            if (portMatch) {
+              addLog('OK', `Règle de blocage pare-feu active : Port ${portMatch[1]} (TCP entrant) immédiatement verrouillé.`, 'FIREWALL');
+            } else if (ipMatch) {
+              addLog('OK', `Règle de blocage pare-feu active : IP C2 ${ipMatch[1]} rejetée et bannie de tout échange réseau.`, 'FIREWALL');
+            } else {
+              addLog('OK', 'Règle de filtrage pare-feu appliquée avec succès. Trafic non autorisé rejeté.', 'FIREWALL');
+            }
+          }, 400);
+        } else {
+          addLog('INFO', `Exécution netsh : ${trimmed}`, 'NETSH');
+          setTimeout(() => addLog('OK', 'Configuration de l\'interface réseau validée.', 'NETSH'), 400);
+        }
+        break;
+      }
+
+      case 'bitsadmin': {
+        const bitsSubAction = parts[1] ? parts[1].toLowerCase() : '';
+        const bitsTargetJob = parts.slice(2).join(' ');
+        if (bitsSubAction.includes('cancel')) {
+          addLog('WARN', `Annulation de la tâche BITS ${bitsTargetJob || 'sélectionnée'} via bitsadmin /cancel...`, 'BITS');
+          setTimeout(() => {
+            addLog('OK', `Tâche BITS ${bitsTargetJob || ''} annulée et purgée de la file d'attente système !`, 'BITS');
+          }, 400);
+        } else if (bitsSubAction.includes('suspend')) {
+          addLog('INFO', `Suspension de la tâche BITS ${bitsTargetJob}...`, 'BITS');
+          setTimeout(() => addLog('OK', `Transfert BITS gelé en mémoire.`, 'BITS'), 300);
+        } else if (bitsSubAction.includes('resume')) {
+          addLog('INFO', `Reprise de la tâche BITS ${bitsTargetJob}...`, 'BITS');
+          setTimeout(() => addLog('OK', `Transfert BITS réactivé en arrière-plan.`, 'BITS'), 300);
+        } else if (bitsSubAction.includes('complete')) {
+          addLog('OK', `Tâche BITS acquittée et finalisée.`, 'BITS');
+        } else {
+          addLog('INFO', `Interrogation bitsadmin : ${trimmed}`, 'BITS');
+          setTimeout(() => addLog('OK', 'Liste des transferts BITS actualisée.', 'BITS'), 400);
+        }
+        break;
+      }
+
+      case 'test-netconnection': {
+        const portParam = trimmed.match(/-port\s+(\d+)/i);
+        addLog('INFO', `Test de connectivité réseau (Test-NetConnection) : ${trimmed}`, 'PORTS');
+        setTimeout(() => {
+          if (portParam) {
+            const p = portParam[1];
+            const isDanger = ['4444', '5555', '8080'].includes(p);
+            if (isDanger) {
+              addLog('ERROR', `TcpTestSucceeded : True -> Port ${p} OUVERT et SUSPECT (Service C2 / Reverse Shell actif) !`, 'PORTS');
+            } else {
+              addLog('OK', `TcpTestSucceeded : False -> Port ${p} fermé / filtré (Sécurisé).`, 'PORTS');
+            }
+          } else {
+            addLog('OK', 'Audit des ports TCP standards localhost achevé : Port 4444 suspect détecté en écoute.', 'PORTS');
+          }
+        }, 500);
+        break;
+      }
+
+      case 'stop-service':
+      case 'set-service':
+      case 'start-service':
+      case 'restart-service':
+      case 'get-service': {
+        addLog('KERNEL', `Gestion du service Windows (${action}) : ${trimmed}`, 'SERVICES');
+        setTimeout(() => {
+          if (trimmed.toLowerCase().includes('spooler')) {
+            addLog('OK', 'Service Spooler d\'impression arrêté et désactivé (StartupType: Disabled). Faille PrintNightmare neutralisée.', 'SERVICES');
+          } else if (trimmed.toLowerCase().includes('remoteregistry')) {
+            addLog('OK', 'Service RemoteRegistry arrêté et verrouillé sur Désactivé. Surface d\'attaque registre à distance fermée.', 'SERVICES');
+          } else if (trimmed.toLowerCase().includes('seclogon')) {
+            addLog('OK', 'Service Secondary Logon désactivé avec succès. Vecteur de fuite de tokens LSASS bloqué.', 'SERVICES');
+          } else if (trimmed.toLowerCase().includes('windefend')) {
+            addLog('OK', 'Service Microsoft Defender (WinDefend) démarré et opérationnel à 100%.', 'SERVICES');
+          } else {
+            addLog('OK', `Politique de service appliquée avec succès : ${trimmed}`, 'SERVICES');
+          }
+        }, 500);
+        break;
+      }
+
+      case 'vss-create':
+        addLog('KERNEL', 'Création d\'un nouveau cliché instantané Volume Shadow Copy sur C:...', 'VSS');
+        setTimeout(() => {
+          addLog('OK', 'wmic shadowcopy call create Volume="C:\\" exécuté avec succès.', 'VSS');
+          addLog('OK', 'Point de restauration système intègre créé. Protection anti-ransomware prête.', 'VSS');
+        }, 600);
+        break;
+
+      case 'psv2-disable':
+        addLog('KERNEL', 'Désactivation du composant déprécié MicrosoftWindowsPowerShellV2...', 'HARDENING');
+        setTimeout(() => {
+          addLog('OK', 'PowerShell v2.0 désactivé. Les attaques par rétrogradation (downgrade attacks sans logging) sont bloquées.', 'HARDENING');
+        }, 500);
+        break;
+
+      case 'ads-scan':
+        addLog('KERNEL', 'Scan des flux NTFS alternatifs (Alternate Data Streams) sur %TEMP% et Bureau...', 'ADS');
+        setTimeout(() => {
+          addLog('WARN', 'Flux caché détecté : C:\\Users\\Public\\payload.dll:hidden_stream (128 Ko)', 'ADS');
+          addLog('INFO', 'Flux Zone.Identifier identifié sur les exécutables téléchargés du Web.', 'ADS');
+          addLog('OK', 'Scan ADS achevé : 1 flux suspect nécessitant une purge.', 'ADS');
+        }, 600);
+        break;
+
+      case 'inspect': {
+        const inspectPid = parts[1] || '';
+        addLog('INFO', `Inspection détaillée de la mémoire et des modules pour le PID ${inspectPid}...`, 'FORENSICS');
+        setTimeout(() => {
+          addLog('OK', `PID ${inspectPid} analysé : Signature numérique vérifiée, intégrité des sections PE conforme.`, 'FORENSICS');
+        }, 400);
+        break;
+      }
+
+      case 'inspect-event': {
+        const eventId = parts[1] || '';
+        addLog('INFO', `Audit approfondi de l'événement Windows Event ID ${eventId}...`, 'EVENTLOG');
+        setTimeout(() => {
+          addLog('OK', `Événement ${eventId} isolé : Données XML et contexte de sécurité validés.`, 'EVENTLOG');
+        }, 400);
+        break;
+      }
+
+      case 'takeown':
+      case 'takeown.exe': {
+        const target = parts.slice(1).join(' ').replace(/^["']|["']$/g, '');
+        addLog('KERNEL', `Appropriation de propriété (takeown.exe /F ${target} /A)...`, 'TAKEOWN');
+        setTimeout(() => {
+          addLog('OK', `Propriétaire assigné à Administrateurs. Verrou TrustedInstaller brisé.`, 'TAKEOWN');
+        }, 400);
+        break;
+      }
+
+      case 'icacls':
+      case 'icacls.exe': {
+        const target = parts.slice(1).join(' ');
+        addLog('KERNEL', `Attribution des privilèges ACL : icacls.exe ${target}`, 'ICACLS');
+        setTimeout(() => {
+          addLog('OK', `Droits Contrôle Total (*S-1-5-32-544:F) accordés aux administrateurs.`, 'ICACLS');
+        }, 400);
+        break;
+      }
+
+      case 'get-filehash': {
+        const pathPart = parts.slice(1).join(' ');
+        addLog('INFO', `Calcul de l'empreinte cryptographique (Get-FileHash SHA256) : ${pathPart}`, 'FORENSICS');
+        setTimeout(() => {
+          addLog('OK', `SHA-256 : E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855 [Corrélation Threat Intel OK]`, 'FORENSICS');
+        }, 500);
+        break;
+      }
+
+      case 'set-itemproperty': {
+        const propTarget = parts.slice(1).join(' ');
+        addLog('INFO', `Réinitialisation des attributs de fichier (Normal) : ${propTarget}`, 'ATTRIBUTES');
+        setTimeout(() => {
+          addLog('OK', `Attributs système, masqué et lecture seule réinitialisés.`, 'ATTRIBUTES');
+        }, 400);
+        break;
+      }
+
+      case 'stop-process':
+      case 'taskkill': {
+        const procTarget = parts.slice(1).join(' ');
+        addLog('WARN', `Arrêt forcé du processus (${action}) : ${procTarget}`, 'KILL');
+        setTimeout(() => {
+          addLog('OK', `Processus et threads associés neutralisés avec succès.`, 'KILL');
+        }, 400);
+        break;
+      }
 
       case 'heuristic':
       case 'heuristics':
@@ -743,7 +974,10 @@ export default function App() {
         )}
 
         {activeTab === 'hardening' && (
-          <HardeningPanel onRunInConsole={handleExecuteCommand} />
+          <HardeningPanel
+            onRunInConsole={handleExecuteCommand}
+            onMutateThreatStatus={mutateThreatStatus}
+          />
         )}
 
         {activeTab === 'script-hub' && (
@@ -761,7 +995,7 @@ export default function App() {
 
       {/* Quiet Clean Footer */}
       <footer className="border-t border-slate-900 bg-slate-950 py-6 px-6 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-300">SpaceSec CyberDefense Suite</span>
             <span aria-hidden="true">·</span>
@@ -769,7 +1003,34 @@ export default function App() {
             <span aria-hidden="true">·</span>
             <span>Développé pour Space [Goat Asta]</span>
           </div>
-          <div className="flex items-center gap-4 text-slate-400">
+          <div className="flex items-center flex-wrap justify-center gap-3.5 text-slate-400">
+            {/* Section Scan Réseau (Accès Rapide Sockets & Netsh WLAN BSSID) */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-900/90 border border-cyan-800/60 rounded-xl shadow-lg shadow-cyan-950/30">
+              <button
+                onClick={() => {
+                  setActiveTab('network');
+                  handleExecuteCommand('sockets');
+                }}
+                className="px-3 py-1.5 bg-gradient-to-r from-cyan-950/90 to-blue-950/90 hover:from-cyan-900 hover:to-blue-900 text-cyan-200 hover:text-white border border-cyan-600/70 hover:border-cyan-400 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
+                title="Exécuter automatiquement la commande 'sockets' et basculer vers l'onglet 'network'"
+              >
+                <Network className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>Scan Réseau</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveTab('network');
+                  handleExecuteCommand('netsh wlan show networks mode=bssid');
+                }}
+                className="px-3 py-1.5 bg-gradient-to-r from-indigo-950/90 to-purple-950/90 hover:from-indigo-900 hover:to-purple-900 text-indigo-200 hover:text-white border border-indigo-600/70 hover:border-indigo-400 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
+                title="Exécuter automatiquement la commande 'netsh wlan show networks mode=bssid' et basculer vers l'onglet 'network'"
+              >
+                <Wifi className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span>Scan WiFi (BSSID)</span>
+              </button>
+            </div>
+
             <button onClick={handleDownloadZip} className="text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">
               Télécharger le ZIP
             </button>

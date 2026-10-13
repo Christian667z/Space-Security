@@ -23,8 +23,11 @@ import {
   Shield
 } from 'lucide-react';
 
+import { ThreatItem } from '../types/cyberdefense';
+
 interface DefenderSyncProps {
   onRunInConsole: (command: string) => void;
+  onMutateThreatStatus?: (threatId: string, targetPath: string, status: ThreatItem['status']) => void;
 }
 
 export type ExclusionType = 'PATH' | 'PROCESS' | 'EXTENSION';
@@ -42,7 +45,7 @@ export interface DefenderExclusionItem {
   status: 'ACTIVE' | 'PURGED' | 'SCANNED';
 }
 
-export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole }) => {
+export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole, onMutateThreatStatus }) => {
   const [isAuditing, setIsAuditing] = useState<boolean>(false);
   const [auditProgress, setAuditProgress] = useState<number>(100);
   const [filterType, setFilterType] = useState<'ALL' | 'PATH' | 'PROCESS' | 'EXTENSION' | 'MALICIOUS_ONLY'>('ALL');
@@ -51,6 +54,15 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole }) =>
   // New check input
   const [customInput, setCustomInput] = useState<string>('');
   const [customCheckResult, setCustomCheckResult] = useState<string | null>(null);
+
+  // Live scan feedback state
+  const [scanningItemId, setScanningItemId] = useState<string | null>(null);
+  const [activeScanDialog, setActiveScanDialog] = useState<{
+    item: DefenderExclusionItem;
+    stage: number;
+    completed: boolean;
+    logs: string[];
+  } | null>(null);
 
   // Initial exclusions data representing realistic malware hijacking scenarios
   const [exclusions, setExclusions] = useState<DefenderExclusionItem[]>([
@@ -137,7 +149,7 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole }) =>
   const handleStartAudit = () => {
     setIsAuditing(true);
     setAuditProgress(15);
-    onRunInConsole('Get-MpPreference | Select-Object -ExpandProperty ExclusionPath; Get-MpPreference | Select-Object -ExpandProperty ExclusionProcess; Get-MpPreference | Select-Object -ExpandProperty ExclusionExtension');
+    onRunInConsole('defender-audit');
 
     setTimeout(() => setAuditProgress(45), 350);
     setTimeout(() => setAuditProgress(80), 750);
@@ -159,18 +171,72 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole }) =>
     setExclusions(prev =>
       prev.map(ex => ex.id === item.id ? { ...ex, status: 'PURGED' } : ex)
     );
+
+    if (onMutateThreatStatus) {
+      onMutateThreatStatus(item.id, item.value, 'NEUTRALIZED');
+    }
   };
 
-  // Trigger custom scan of excluded path
+  // Trigger custom scan of excluded path with animated progression
   const handleScanPath = (item: DefenderExclusionItem) => {
     const cmd = item.type === 'PATH'
       ? `Start-MpScan -ScanType CustomScan -ScanPath "${item.value}"`
       : `Start-MpScan -ScanType QuickScan`;
 
+    setScanningItemId(item.id);
+    setActiveScanDialog({
+      item,
+      stage: 1,
+      completed: false,
+      logs: [
+        `[1/4] Initialisation du moteur d'analyse Microsoft Defender...`,
+        `> ${cmd}`,
+      ],
+    });
+
     onRunInConsole(cmd);
-    setExclusions(prev =>
-      prev.map(ex => ex.id === item.id ? { ...ex, status: 'SCANNED' } : ex)
-    );
+
+    setTimeout(() => {
+      setActiveScanDialog(prev => prev ? {
+        ...prev,
+        stage: 2,
+        logs: [
+          ...prev.logs,
+          `[2/4] Vérification des signatures virales & exclusion dans ${item.registryKey}...`,
+        ],
+      } : null);
+    }, 450);
+
+    setTimeout(() => {
+      setActiveScanDialog(prev => prev ? {
+        ...prev,
+        stage: 3,
+        logs: [
+          ...prev.logs,
+          `[3/4] Analyse heuristique & calcul d'entropie sur la cible "${item.value}"...`,
+        ],
+      } : null);
+    }, 900);
+
+    setTimeout(() => {
+      setScanningItemId(null);
+      setExclusions(prev =>
+        prev.map(ex => ex.id === item.id ? { ...ex, status: 'SCANNED' } : ex)
+      );
+      setActiveScanDialog(prev => prev ? {
+        ...prev,
+        stage: 4,
+        completed: true,
+        logs: [
+          ...prev.logs,
+          item.threatLevel === 'MALICIOUS'
+            ? `[4/4] ⚠️ MENACE CONFIRMÉE : L'élément est exclu illicitement et nécessite une PURGE immédiate.`
+            : item.threatLevel === 'SUSPICIOUS'
+            ? `[4/4] ⚠️ ÉLÉMENT SUSPECT : Risque potentiel de masquage de dropper dans les exclusions.`
+            : `[4/4] ✅ CONFORME : Aucun artefact malveillant détecté pour cette exclusion.`,
+        ],
+      } : null);
+    }, 1400);
   };
 
   // Purge all malicious and suspicious exclusions
@@ -178,24 +244,22 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole }) =>
     const maliciousItems = exclusions.filter(e => e.status === 'ACTIVE' && (e.threatLevel === 'MALICIOUS' || e.threatLevel === 'SUSPICIOUS'));
     if (maliciousItems.length === 0) return;
 
-    onRunInConsole(
-      '# Purge de toutes les exclusions frauduleuses Defender\n' +
-      maliciousItems.map(item => {
-        if (item.type === 'PATH') return `Remove-MpPreference -ExclusionPath "${item.value}"`;
-        if (item.type === 'PROCESS') return `Remove-MpPreference -ExclusionProcess "${item.value}"`;
-        return `Remove-MpPreference -ExclusionExtension "${item.value}"`;
-      }).join('; ')
-    );
+    onRunInConsole('remove-mppreference all');
 
     setExclusions(prev =>
       prev.map(ex => (ex.threatLevel === 'MALICIOUS' || ex.threatLevel === 'SUSPICIOUS') ? { ...ex, status: 'PURGED' } : ex)
     );
+
+    if (onMutateThreatStatus) {
+      maliciousItems.forEach(item => {
+        onMutateThreatStatus(item.id, item.value, 'NEUTRALIZED');
+      });
+    }
   };
 
   // Resynchronize and lock Defender policies
   const handleSyncDefenderPolicies = () => {
-    const syncCmd = 'Set-MpPreference -DisableRealtimeMonitoring $false; Set-MpPreference -DisableScriptScanning $false; Set-MpPreference -DisableBehaviorMonitoring $false; Set-MpPreference -DisableIOAVProtection $false; Update-MpSignature';
-    onRunInConsole(syncCmd);
+    onRunInConsole('policy-harden');
   };
 
   // Copy powershell command helper
@@ -504,7 +568,12 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole }) =>
                       {isPurged ? (
                         <span className="flex items-center gap-1 text-emerald-400 font-sans font-semibold">
                           <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>P квадраt (Plein Scan)</span>
+                          <span>Purgé & Supprimé</span>
+                        </span>
+                      ) : item.status === 'SCANNED' ? (
+                        <span className="flex items-center gap-1 text-cyan-400 font-sans font-semibold">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Scanné & Audité</span>
                         </span>
                       ) : isMalicious ? (
                         <span className="flex items-center gap-1 text-rose-400 font-bold">
@@ -543,16 +612,23 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole }) =>
                     <td className="py-2.5 px-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         {isPurged ? (
-                          <span className="text-[11px] text-emerald-400 font-sans">Neutralisé</span>
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-emerald-400 bg-emerald-950/70 border border-emerald-800/80 rounded font-sans">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            <span>Neutralisé</span>
+                          </span>
                         ) : (
                           <>
                             <button
                               onClick={() => handleScanPath(item)}
                               title="Déclencher un scan antivirus sur ce chemin"
-                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded text-[11px] transition-colors flex items-center gap-1"
+                              className={`px-2 py-1 rounded text-[11px] transition-colors flex items-center gap-1 ${
+                                item.status === 'SCANNED'
+                                  ? 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+                                  : 'bg-slate-800 hover:bg-slate-700 text-cyan-300'
+                              }`}
                             >
                               <FileSearch className="w-3 h-3" />
-                              <span>Scanner</span>
+                              <span>{item.status === 'SCANNED' ? 'Re-scanner' : 'Scanner'}</span>
                             </button>
 
                             <button

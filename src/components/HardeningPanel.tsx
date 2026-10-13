@@ -1,14 +1,15 @@
 import React from 'react';
 import { Lock, ShieldCheck, ShieldAlert, RefreshCw, AlertTriangle, Key, Terminal, Database } from 'lucide-react';
-import { HardeningMetric } from '../types/cyberdefense';
+import { HardeningMetric, ThreatItem } from '../types/cyberdefense';
 import { VulnerabilityScanner } from './VulnerabilityScanner';
 import { DefenderSync } from './DefenderSync';
 
 interface HardeningPanelProps {
   onRunInConsole: (command: string) => void;
+  onMutateThreatStatus?: (threatId: string, targetPath: string, status: ThreatItem['status']) => void;
 }
 
-export const HardeningPanel: React.FC<HardeningPanelProps> = ({ onRunInConsole }) => {
+export const HardeningPanel: React.FC<HardeningPanelProps> = ({ onRunInConsole, onMutateThreatStatus }) => {
   const hardeningMetrics: HardeningMetric[] = [
     {
       title: 'Windows Defender & Protection en Temps Réel',
@@ -129,7 +130,7 @@ export const HardeningPanel: React.FC<HardeningPanelProps> = ({ onRunInConsole }
       </div>
 
       {/* DefenderSync Module: Audit and Clean Malware Exclusions in Microsoft Defender */}
-      <DefenderSync onRunInConsole={onRunInConsole} />
+      <DefenderSync onRunInConsole={onRunInConsole} onMutateThreatStatus={onMutateThreatStatus} />
 
       {/* VulnerabilityScanner Module: Obsolete Windows Services & Missing Hotfixes (Get-HotFix / Get-Service) */}
       <VulnerabilityScanner onRunInConsole={onRunInConsole} />
