@@ -8,6 +8,7 @@ export type TabId =
   | 'deep-excision'
   | 'forensics'
   | 'network'
+  | 'wifi'
   | 'hardening'
   | 'script-hub'
   | 'ip-locator';

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, ShieldCheck, Play, RefreshCw, AlertTriangle, Terminal, Lock, Search, CheckCircle2, XCircle, Ban, Zap } from 'lucide-react';
+import { apiFetch } from '../utils/api';
 
 interface PortScannerProps {
   onRunInConsole: (command: string) => void;
@@ -33,7 +34,7 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onRunInConsole }) => {
     onRunInConsole(`netstat -ano | findstr LISTENING`);
 
     setScanProgress(30);
-    fetch('http://localhost:3001/api/system/listening-ports')
+    apiFetch('/api/system/listening-ports')
       .then(res => res.json())
       .then((data: { ports?: Array<{ port: number; protocol: string; pid: number; processName: string; address: string }> }) => {
         setScanProgress(70);

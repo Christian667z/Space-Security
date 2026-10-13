@@ -25,6 +25,7 @@ import {
   Users,
   Globe,
   MapPin,
+  Wifi,
 } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
@@ -37,6 +38,7 @@ interface TopNavProps {
   activeUsersCount?: number;
   connectionStatus?: 'connected' | 'connecting' | 'disconnected';
   onOpenCollabModal?: () => void;
+  onRunInConsole?: (command: string) => void;
 }
 
 interface NavItem {
@@ -68,6 +70,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   activeUsersCount = 1,
   connectionStatus = 'connected',
   onOpenCollabModal,
+  onRunInConsole,
 }) => {
   const [isMegaMenuOpen, setIsMegaMenuOpen] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
@@ -213,12 +216,21 @@ export const TopNav: React.FC<TopNavProps> = ({
         },
         {
           id: 'network',
-          title: 'Réseau C2 & Sockets',
-          category: 'Trafic Sortant',
-          shortDesc: 'Cartographie des sockets furtifs, balises C2 persistantes & adresses IP suspectes.',
+          title: 'Scan Réseau (Sockets & C2)',
+          category: 'Trafic Sortant & Sockets',
+          shortDesc: 'Audit des sockets actifs, détection des balises C2 persistantes, ports d\'écoute & flux hostiles.',
           icon: Network,
-          tag: 'SOCKETS',
+          tag: 'SCAN RÉSEAU',
           tagClass: 'text-cyan-400 bg-cyan-950/70 border-cyan-800/50',
+        },
+        {
+          id: 'wifi',
+          title: 'Scan WiFi (BSSID)',
+          category: 'Audit Réseaux Sans-Fil',
+          shortDesc: 'Scan des bornes 802.11 environnantes, détection Evil Twin, trames Deauth & points d\'accès ouverts.',
+          icon: Wifi,
+          tag: 'SCAN WIFI',
+          tagClass: 'text-indigo-400 bg-indigo-950/70 border-indigo-800/50',
         },
         {
           id: 'hardening',
@@ -363,6 +375,41 @@ export const TopNav: React.FC<TopNavProps> = ({
               <span>Traçeur IP</span>
             </button>
 
+            {/* Direct Modules: Scan Réseau & Scan WiFi (BSSID) */}
+            <div className="hidden xl:flex items-center gap-1.5 p-1 bg-slate-900/90 border border-cyan-800/60 rounded-xl shadow-md">
+              <button
+                onClick={() => {
+                  handleSelectTab('network');
+                  onRunInConsole?.('sockets');
+                }}
+                className={`px-2.5 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer ${
+                  activeTab === 'network'
+                    ? 'bg-gradient-to-r from-cyan-900 to-blue-900 text-white border border-cyan-400 shadow-cyan-950/50'
+                    : 'bg-gradient-to-r from-cyan-950/80 to-blue-950/80 hover:from-cyan-900 hover:to-blue-900 text-cyan-200 hover:text-white border border-cyan-700/60'
+                }`}
+                title="Module Scan Réseau : Audit des sockets et ports ouverts"
+              >
+                <Network className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>Scan Réseau</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  handleSelectTab('wifi');
+                  onRunInConsole?.('netsh wlan show networks mode=bssid');
+                }}
+                className={`px-2.5 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer ${
+                  activeTab === 'wifi'
+                    ? 'bg-gradient-to-r from-indigo-900 to-purple-900 text-white border border-indigo-400 shadow-indigo-950/50'
+                    : 'bg-gradient-to-r from-indigo-950/80 to-purple-950/80 hover:from-indigo-900 hover:to-purple-900 text-indigo-200 hover:text-white border border-indigo-700/60'
+                }`}
+                title="Module Scan WiFi (BSSID) : Audit des bornes 802.11 et Evil Twin"
+              >
+                <Wifi className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span>Scan WiFi (BSSID)</span>
+              </button>
+            </div>
+
             {/* MEGA MENU TRIGGER BUTTON */}
             <div className="relative">
               <button
@@ -381,7 +428,7 @@ export const TopNav: React.FC<TopNavProps> = ({
                   Modules & Outils
                 </span>
                 <span className="hidden sm:inline-block px-1.5 py-0.2 font-mono text-[10px] rounded bg-slate-800 text-slate-300 border border-slate-700">
-                  12
+                  {allItems.length}
                 </span>
                 <ChevronDown
                   className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
@@ -512,6 +559,50 @@ export const TopNav: React.FC<TopNavProps> = ({
                   title="Fermer (Échap)"
                 >
                   <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Featured Scanner Quick Launch in Mega Menu */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 mb-6 bg-gradient-to-r from-slate-900 via-cyan-950/40 to-indigo-950/40 border border-cyan-800/70 rounded-xl shadow-lg shadow-black/50">
+              <div className="flex items-center gap-3">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-400"></span>
+                </span>
+                <div>
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">
+                    Scanners Réseau & Sans-Fil Haute Précision
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    Détection instantanée des flux C2, sockets réseau & analyse des bornes Wi-Fi BSSID environnantes.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5 shrink-0 w-full sm:w-auto justify-end">
+                <button
+                  onClick={() => {
+                    handleSelectTab('network');
+                    onRunInConsole?.('sockets');
+                  }}
+                  className="flex-1 sm:flex-none px-3.5 py-2 bg-gradient-to-r from-cyan-950/90 to-blue-950/90 hover:from-cyan-900 hover:to-blue-900 text-cyan-200 hover:text-white border border-cyan-600/70 hover:border-cyan-400 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 cursor-pointer"
+                  title="Ouvrir le module Scan Réseau et auditer les sockets"
+                >
+                  <Network className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <span>Scan Réseau</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    handleSelectTab('wifi');
+                    onRunInConsole?.('netsh wlan show networks mode=bssid');
+                  }}
+                  className="flex-1 sm:flex-none px-3.5 py-2 bg-gradient-to-r from-indigo-950/90 to-purple-950/90 hover:from-indigo-900 hover:to-purple-900 text-indigo-200 hover:text-white border border-indigo-600/70 hover:border-indigo-400 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 cursor-pointer"
+                  title="Ouvrir le module Scan WiFi (BSSID) et auditer les réseaux sans-fil"
+                >
+                  <Wifi className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <span>Scan WiFi (BSSID)</span>
                 </button>
               </div>
             </div>

@@ -22,6 +22,7 @@ import { PdfReportModal } from './components/PdfReportModal';
 import { HeuristicEngine } from './components/HeuristicEngine';
 import { CollabSyncModal } from './components/CollabSyncModal';
 import { IpLocatorPanel } from './components/IpLocatorPanel';
+import { WiFiScanner } from './components/WiFiScanner';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { TabId, ConsoleLogMessage, ThreatItem, ThreatNotification } from './types/cyberdefense';
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
@@ -273,7 +274,7 @@ export default function App() {
           return;
         }
         addLog('WARN', `Exécution de l'arrêt forcé sur le PID ${targetPid}...`, 'KILL');
-        fetch('http://localhost:3001/api/system/kill', {
+        apiFetch('/api/system/kill', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pid: parseInt(parts[1]) }),
@@ -862,13 +863,14 @@ export default function App() {
       case 'wifi-scan':
       case 'eviltwin':
       case 'evil-twin':
+        setActiveTab('wifi');
         addLog('KERNEL', 'Interrogation de l\'interface radio via netsh wlan show networks mode=bssid...', 'WIFI-AUDIT');
-        fetch('http://localhost:3001/api/system/wifi')
+        apiFetch('/api/system/wifi')
           .then(res => res.json())
           .then(data => {
             if (data.networks && data.networks.length > 0) {
-              data.networks.forEach((net: { ssid: string; bssid: string; signal: string; auth: string }, i: number) => {
-                setTimeout(() => addLog('INFO', `SSID: "${net.ssid}" | BSSID: ${net.bssid} | Signal: ${net.signal} | Auth: ${net.auth}`, 'WIFI-AUDIT'), (i + 1) * 200);
+              data.networks.forEach((net: { ssid: string; bssid: string; signalPercent?: number; signal?: string; security?: string; auth?: string }, i: number) => {
+                setTimeout(() => addLog('INFO', `SSID: "${net.ssid}" | BSSID: ${net.bssid} | Signal: ${net.signalPercent || net.signal || 70}% | Auth: ${net.security || net.auth || 'WPA2'}`, 'WIFI-AUDIT'), (i + 1) * 200);
               });
               setTimeout(() => addLog('OK', `${data.networks.length} réseau(x) Wi-Fi détecté(s). Aucune anomalie Evil Twin.`, 'WIFI-AUDIT'), data.networks.length * 200 + 300);
             } else {
@@ -971,6 +973,7 @@ export default function App() {
         activeUsersCount={activeUsersCount}
         connectionStatus={connectionStatus}
         onOpenCollabModal={() => setIsCollabModalOpen(true)}
+        onRunInConsole={handleExecuteCommand}
       />
 
       {/* Main Container Viewport */}
@@ -1061,6 +1064,35 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'wifi' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-1">
+              <div>
+                <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                  <Wifi className="w-5 h-5 text-indigo-400" />
+                  <span>Scanner Wi-Fi & Analyse BSSID 802.11</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Détection des points d'accès sans-fil environnants, audit des BSSID, détection Evil Twin & trames de désauthentification.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setActiveTab('network');
+                    handleExecuteCommand('sockets');
+                  }}
+                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700 hover:border-cyan-500 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                >
+                  <Network className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Basculer vers Scan Réseau</span>
+                </button>
+              </div>
+            </div>
+            <WiFiScanner onRunInConsole={handleExecuteCommand} />
+          </div>
+        )}
+
         {activeTab === 'hardening' && (
           <HardeningPanel
             onRunInConsole={handleExecuteCommand}
@@ -1092,33 +1124,6 @@ export default function App() {
             <span>Développé pour Space [Goat Asta]</span>
           </div>
           <div className="flex items-center flex-wrap justify-center gap-3.5 text-slate-400">
-            {/* Section Scan Réseau (Accès Rapide Sockets & Netsh WLAN BSSID) */}
-            <div className="flex items-center gap-1.5 p-1 bg-slate-900/90 border border-cyan-800/60 rounded-xl shadow-lg shadow-cyan-950/30">
-              <button
-                onClick={() => {
-                  setActiveTab('network');
-                  handleExecuteCommand('sockets');
-                }}
-                className="px-3 py-1.5 bg-gradient-to-r from-cyan-950/90 to-blue-950/90 hover:from-cyan-900 hover:to-blue-900 text-cyan-200 hover:text-white border border-cyan-600/70 hover:border-cyan-400 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
-                title="Exécuter automatiquement la commande 'sockets' et basculer vers l'onglet 'network'"
-              >
-                <Network className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                <span>Scan Réseau</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setActiveTab('network');
-                  handleExecuteCommand('netsh wlan show networks mode=bssid');
-                }}
-                className="px-3 py-1.5 bg-gradient-to-r from-indigo-950/90 to-purple-950/90 hover:from-indigo-900 hover:to-purple-900 text-indigo-200 hover:text-white border border-indigo-600/70 hover:border-indigo-400 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
-                title="Exécuter automatiquement la commande 'netsh wlan show networks mode=bssid' et basculer vers l'onglet 'network'"
-              >
-                <Wifi className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                <span>Scan WiFi (BSSID)</span>
-              </button>
-            </div>
-
             <button onClick={handleDownloadZip} className="text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">
               Télécharger le ZIP
             </button>
