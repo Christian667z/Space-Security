@@ -6,33 +6,37 @@
 import React, { useState } from 'react';
 import { Network, Wifi } from 'lucide-react';
 import { TopNav } from './components/TopNav';
-import { ConsoleTerminal } from './components/ConsoleTerminal';
-import { DeepExcisionPanel } from './components/DeepExcisionPanel';
-import { MemoryForensicsPanel } from './components/MemoryForensicsPanel';
-import { NetworkC2Panel } from './components/NetworkC2Panel';
-import { HardeningPanel } from './components/HardeningPanel';
-import { ScriptWorkshop } from './components/ScriptWorkshop';
-import { OverviewDashboard } from './components/OverviewDashboard';
-import { LogAnalyzer } from './components/LogAnalyzer';
-import { TaskManagerLive } from './components/TaskManagerLive';
-import { BITSTaskManager } from './components/BITSTaskManager';
-import { ThreatTimeline } from './components/ThreatTimeline';
 import { ThreatToastContainer } from './components/ThreatToast';
-import { PdfReportModal } from './components/PdfReportModal';
-import { HeuristicEngine } from './components/HeuristicEngine';
-import { CollabSyncModal } from './components/CollabSyncModal';
-import { IpLocatorPanel } from './components/IpLocatorPanel';
-import { WiFiScanner } from './components/WiFiScanner';
-import { PostInfectionRepairPanel } from './components/PostInfectionRepairPanel';
-import { DeepDetectionPanel } from './components/DeepDetectionPanel';
-import { SandboxIsolationPanel } from './components/SandboxIsolationPanel';
-import { ThemesMalwareHunter } from './components/ThemesMalwareHunter';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { TabLoadingSkeleton } from './components/TabLoadingSkeleton';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { TabId, ConsoleLogMessage, ThreatItem, ThreatNotification } from './types/cyberdefense';
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
 import { generateAndDownloadZip } from './utils/zipGenerator';
 import { generateAndDownloadPdfReport } from './utils/pdfReportGenerator';
 import { apiFetch } from './utils/api';
+
+// Code-Splitting: Lazy load all 18 tab panels & modals to drastically reduce startup bundle size
+const OverviewDashboard = React.lazy(() => import('./components/OverviewDashboard').then(m => ({ default: m.OverviewDashboard })));
+const ThreatTimeline = React.lazy(() => import('./components/ThreatTimeline').then(m => ({ default: m.ThreatTimeline })));
+const TaskManagerLive = React.lazy(() => import('./components/TaskManagerLive').then(m => ({ default: m.TaskManagerLive })));
+const BITSTaskManager = React.lazy(() => import('./components/BITSTaskManager').then(m => ({ default: m.BITSTaskManager })));
+const HeuristicEngine = React.lazy(() => import('./components/HeuristicEngine').then(m => ({ default: m.HeuristicEngine })));
+const ConsoleTerminal = React.lazy(() => import('./components/ConsoleTerminal').then(m => ({ default: m.ConsoleTerminal })));
+const LogAnalyzer = React.lazy(() => import('./components/LogAnalyzer').then(m => ({ default: m.LogAnalyzer })));
+const DeepExcisionPanel = React.lazy(() => import('./components/DeepExcisionPanel').then(m => ({ default: m.DeepExcisionPanel })));
+const MemoryForensicsPanel = React.lazy(() => import('./components/MemoryForensicsPanel').then(m => ({ default: m.MemoryForensicsPanel })));
+const NetworkC2Panel = React.lazy(() => import('./components/NetworkC2Panel').then(m => ({ default: m.NetworkC2Panel })));
+const WiFiScanner = React.lazy(() => import('./components/WiFiScanner').then(m => ({ default: m.WiFiScanner })));
+const DeepDetectionPanel = React.lazy(() => import('./components/DeepDetectionPanel').then(m => ({ default: m.DeepDetectionPanel })));
+const ThemesMalwareHunter = React.lazy(() => import('./components/ThemesMalwareHunter').then(m => ({ default: m.ThemesMalwareHunter })));
+const SandboxIsolationPanel = React.lazy(() => import('./components/SandboxIsolationPanel').then(m => ({ default: m.SandboxIsolationPanel })));
+const PostInfectionRepairPanel = React.lazy(() => import('./components/PostInfectionRepairPanel').then(m => ({ default: m.PostInfectionRepairPanel })));
+const HardeningPanel = React.lazy(() => import('./components/HardeningPanel').then(m => ({ default: m.HardeningPanel })));
+const ScriptWorkshop = React.lazy(() => import('./components/ScriptWorkshop').then(m => ({ default: m.ScriptWorkshop })));
+const IpLocatorPanel = React.lazy(() => import('./components/IpLocatorPanel').then(m => ({ default: m.IpLocatorPanel })));
+const PdfReportModal = React.lazy(() => import('./components/PdfReportModal').then(m => ({ default: m.PdfReportModal })));
+const CollabSyncModal = React.lazy(() => import('./components/CollabSyncModal').then(m => ({ default: m.CollabSyncModal })));
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
@@ -1197,156 +1201,168 @@ export default function App() {
         onRunInConsole={handleExecuteCommand}
       />
 
-      {/* Main Container Viewport */}
+      {/* Main Container Viewport with Code-Splitting Suspense & Module Error Isolation */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {activeTab === 'overview' && (
-          <OverviewDashboard
-            onNavigateTab={setActiveTab}
-            onRunInConsole={handleExecuteCommand}
-            threats={threats}
-            onDownloadZip={handleDownloadZip}
-            onDownloadScript={handleDownloadScript}
-            onOpenPdfReport={() => setIsPdfModalOpen(true)}
-            onMutateThreatStatus={mutateThreatStatus}
-            onBulkMutateThreatStatus={mutateBulkThreatStatus}
-            onMassDismissThreats={massDismissThreats}
-            onRestoreThreats={restoreThreats}
-          />
-        )}
+        <ErrorBoundary
+          key={activeTab}
+          moduleName={activeTab}
+          onReset={() => setActiveTab('overview')}
+        >
+          <React.Suspense fallback={<TabLoadingSkeleton tabName={activeTab} />}>
+            {activeTab === 'overview' && (
+              <OverviewDashboard
+                onNavigateTab={setActiveTab}
+                onRunInConsole={handleExecuteCommand}
+                threats={threats}
+                onDownloadZip={handleDownloadZip}
+                onDownloadScript={handleDownloadScript}
+                onOpenPdfReport={() => setIsPdfModalOpen(true)}
+                onMutateThreatStatus={mutateThreatStatus}
+                onBulkMutateThreatStatus={mutateBulkThreatStatus}
+                onMassDismissThreats={massDismissThreats}
+                onRestoreThreats={restoreThreats}
+              />
+            )}
 
-        {activeTab === 'timeline' && (
-          <ThreatTimeline
-            onRunInConsole={handleExecuteCommand}
-            onNavigateTab={setActiveTab}
-          />
-        )}
+            {activeTab === 'timeline' && (
+              <ThreatTimeline
+                onRunInConsole={handleExecuteCommand}
+                onNavigateTab={setActiveTab}
+              />
+            )}
 
-        {activeTab === 'task-manager' && (
-          <TaskManagerLive onRunInConsole={handleExecuteCommand} />
-        )}
+            {activeTab === 'task-manager' && (
+              <TaskManagerLive onRunInConsole={handleExecuteCommand} />
+            )}
 
-        {activeTab === 'bits' && (
-          <BITSTaskManager onRunInConsole={handleExecuteCommand} />
-        )}
+            {activeTab === 'bits' && (
+              <BITSTaskManager onRunInConsole={handleExecuteCommand} />
+            )}
 
-        {activeTab === 'heuristic' && (
-          <HeuristicEngine
-            onRunInConsole={handleExecuteCommand}
-            onNavigateTab={setActiveTab}
-            threats={threats}
-            onBulkMutateThreatStatus={mutateBulkThreatStatus}
-            onMassDismissThreats={massDismissThreats}
-            onRestoreThreats={restoreThreats}
-          />
-        )}
+            {activeTab === 'heuristic' && (
+              <HeuristicEngine
+                onRunInConsole={handleExecuteCommand}
+                onNavigateTab={setActiveTab}
+                threats={threats}
+                onBulkMutateThreatStatus={mutateBulkThreatStatus}
+                onMassDismissThreats={massDismissThreats}
+                onRestoreThreats={restoreThreats}
+              />
+            )}
 
-        {activeTab === 'console' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-white tracking-tight">
-                  Console d'Analyse en Temps Réel
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Interagissez directement avec le moteur de détection et déclenchez des protocoles de neutralisation.
-                </p>
+            {activeTab === 'console' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-bold text-white tracking-tight">
+                      Console d'Analyse en Temps Réel
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Interagissez directement avec le moteur de détection et déclenchez des protocoles de neutralisation.
+                    </p>
+                  </div>
+                </div>
+                <ConsoleTerminal
+                  logs={logs}
+                  onExecuteCommand={handleExecuteCommand}
+                  onClearLogs={clearSharedLogs}
+                  onExportReport={handleDownloadReport}
+                />
+
+                {/* Automated Windows EventLog Threat Parser */}
+                <LogAnalyzer onRunInConsole={handleExecuteCommand} />
               </div>
-            </div>
-            <ConsoleTerminal
-              logs={logs}
-              onExecuteCommand={handleExecuteCommand}
-              onClearLogs={clearSharedLogs}
-              onExportReport={handleDownloadReport}
-            />
+            )}
 
-            {/* Automated Windows EventLog Threat Parser */}
-            <LogAnalyzer onRunInConsole={handleExecuteCommand} />
-          </div>
-        )}
+            {activeTab === 'deep-excision' && (
+              <DeepExcisionPanel
+                onRunInConsole={handleExecuteCommand}
+                threats={threats}
+                onBulkMutateThreatStatus={mutateBulkThreatStatus}
+                onMassDismissThreats={massDismissThreats}
+                onRestoreThreats={restoreThreats}
+              />
+            )}
 
-        {activeTab === 'deep-excision' && (
-          <DeepExcisionPanel
-            onRunInConsole={handleExecuteCommand}
-            threats={threats}
-            onBulkMutateThreatStatus={mutateBulkThreatStatus}
-            onMassDismissThreats={massDismissThreats}
-            onRestoreThreats={restoreThreats}
-          />
-        )}
+            {activeTab === 'forensics' && (
+              <MemoryForensicsPanel onRunInConsole={handleExecuteCommand} />
+            )}
 
-        {activeTab === 'forensics' && (
-          <MemoryForensicsPanel onRunInConsole={handleExecuteCommand} />
-        )}
+            {activeTab === 'network' && (
+              <NetworkC2Panel
+                onRunInConsole={handleExecuteCommand}
+                onLocateIp={handleLocateIp}
+              />
+            )}
 
-        {activeTab === 'network' && (
-          <NetworkC2Panel
-            onRunInConsole={handleExecuteCommand}
-            onLocateIp={handleLocateIp}
-          />
-        )}
-
-        {activeTab === 'wifi' && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-1">
-              <div>
-                <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-                  <Wifi className="w-5 h-5 text-indigo-400" />
-                  <span>Scanner Wi-Fi & Analyse BSSID 802.11</span>
-                </h2>
-                <p className="text-xs text-slate-400 mt-1">
-                  Détection des points d'accès sans-fil environnants, audit des BSSID, détection Evil Twin & trames de désauthentification.
-                </p>
+            {activeTab === 'wifi' && (
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-1">
+                  <div>
+                    <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                      <Wifi className="w-5 h-5 text-indigo-400" />
+                      <span>Scanner Wi-Fi & Analyse BSSID 802.11</span>
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Détection des points d'accès sans-fil environnants, audit des BSSID, détection Evil Twin & trames de désauthentification.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setActiveTab('network');
+                        handleExecuteCommand('sockets');
+                      }}
+                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700 hover:border-cyan-500 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                    >
+                      <Network className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Basculer vers Scan Réseau</span>
+                    </button>
+                  </div>
+                </div>
+                <WiFiScanner onRunInConsole={handleExecuteCommand} />
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    setActiveTab('network');
-                    handleExecuteCommand('sockets');
-                  }}
-                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700 hover:border-cyan-500 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
-                >
-                  <Network className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Basculer vers Scan Réseau</span>
-                </button>
-              </div>
-            </div>
-            <WiFiScanner onRunInConsole={handleExecuteCommand} />
-          </div>
-        )}
+            )}
 
-        {activeTab === 'deep-detection' && (
-          <DeepDetectionPanel onRunInConsole={handleExecuteCommand} />
-        )}
+            {activeTab === 'deep-detection' && (
+              <DeepDetectionPanel onRunInConsole={handleExecuteCommand} />
+            )}
 
-        {activeTab === 'themes-hunter' && (
-          <ThemesMalwareHunter
-            onRunInConsole={handleExecuteCommand}
-            onNavigateTab={setActiveTab}
-          />
-        )}
+            {activeTab === 'themes-hunter' && (
+              <ThemesMalwareHunter
+                onRunInConsole={handleExecuteCommand}
+                onNavigateTab={setActiveTab}
+              />
+            )}
 
-        {activeTab === 'remediation' && (
-          <PostInfectionRepairPanel onRunInConsole={handleExecuteCommand} />
-        )}
+            {activeTab === 'sandbox-isolation' && (
+              <SandboxIsolationPanel onRunInConsole={handleExecuteCommand} />
+            )}
 
-        {activeTab === 'hardening' && (
-          <HardeningPanel
-            onRunInConsole={handleExecuteCommand}
-            onMutateThreatStatus={mutateThreatStatus}
-          />
-        )}
+            {activeTab === 'remediation' && (
+              <PostInfectionRepairPanel onRunInConsole={handleExecuteCommand} />
+            )}
 
-        {activeTab === 'script-hub' && (
-          <ScriptWorkshop onDownloadZip={handleDownloadZip} />
-        )}
+            {activeTab === 'hardening' && (
+              <HardeningPanel
+                onRunInConsole={handleExecuteCommand}
+                onMutateThreatStatus={mutateThreatStatus}
+              />
+            )}
 
-        {activeTab === 'ip-locator' && (
-          <IpLocatorPanel
-            initialIp={targetIpToLocate}
-            onRunInConsole={handleExecuteCommand}
-            onNavigateTab={setActiveTab}
-          />
-        )}
+            {activeTab === 'script-hub' && (
+              <ScriptWorkshop onDownloadZip={handleDownloadZip} />
+            )}
+
+            {activeTab === 'ip-locator' && (
+              <IpLocatorPanel
+                initialIp={targetIpToLocate}
+                onRunInConsole={handleExecuteCommand}
+                onNavigateTab={setActiveTab}
+              />
+            )}
+          </React.Suspense>
+        </ErrorBoundary>
       </main>
 
       {/* Quiet Clean Footer */}
@@ -1401,32 +1417,40 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Multi-User Collaboration & Real-Time Sync Modal */}
-      <CollabSyncModal
-        isOpen={isCollabModalOpen}
-        onClose={() => setIsCollabModalOpen(false)}
-        activeUsersCount={activeUsersCount}
-        activeOperators={activeOperators}
-        currentOperator={currentOperator}
-        connectionStatus={connectionStatus}
-        lastSyncTime={lastSyncTime}
-        onResetThreats={() => {
-          resetThreats();
-          addLog('OK', 'Les menaces ont été réinitialisées sur le serveur pour tous les analystes connectés.', 'COLLAB');
-        }}
-        onTestBroadcast={() => {
-          addLog('WARN', `Alerte test émise par ${currentOperator?.name || 'votre session'} vers tous les opérateurs connectés !`, 'TEST-BROADCAST');
-        }}
-      />
+      {/* Multi-User Collaboration & Real-Time Sync Modal (Code-Split) */}
+      {isCollabModalOpen && (
+        <React.Suspense fallback={null}>
+          <CollabSyncModal
+            isOpen={isCollabModalOpen}
+            onClose={() => setIsCollabModalOpen(false)}
+            activeUsersCount={activeUsersCount}
+            activeOperators={activeOperators}
+            currentOperator={currentOperator}
+            connectionStatus={connectionStatus}
+            lastSyncTime={lastSyncTime}
+            onResetThreats={() => {
+              resetThreats();
+              addLog('OK', 'Les menaces ont été réinitialisées sur le serveur pour tous les analystes connectés.', 'COLLAB');
+            }}
+            onTestBroadcast={() => {
+              addLog('WARN', `Alerte test émise par ${currentOperator?.name || 'votre session'} vers tous les opérateurs connectés !`, 'TEST-BROADCAST');
+            }}
+          />
+        </React.Suspense>
+      )}
 
-      {/* Forensic PDF Report Modal */}
-      <PdfReportModal
-        isOpen={isPdfModalOpen}
-        onClose={() => setIsPdfModalOpen(false)}
-        threats={threats}
-        logs={logs}
-        onNotifySuccess={(msg) => addLog('OK', msg, 'PDF-REPORT')}
-      />
+      {/* Forensic PDF Report Modal (Code-Split) */}
+      {isPdfModalOpen && (
+        <React.Suspense fallback={null}>
+          <PdfReportModal
+            isOpen={isPdfModalOpen}
+            onClose={() => setIsPdfModalOpen(false)}
+            threats={threats}
+            logs={logs}
+            onNotifySuccess={(msg) => addLog('OK', msg, 'PDF-REPORT')}
+          />
+        </React.Suspense>
+      )}
 
       {/* Persistent Threat Toast Notification Sentinel (Bottom-Right) */}
       <ThreatToastContainer

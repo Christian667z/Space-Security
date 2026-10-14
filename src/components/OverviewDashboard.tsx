@@ -42,6 +42,7 @@ import { VulnerabilityRadarChart } from './VulnerabilityRadarChart';
 import { HealthScoreEvolutionChart } from './HealthScoreEvolutionChart';
 import { SharedCommandModal } from './SharedCommandModal';
 import { calculateSecurityScore } from '../utils/pdfReportGenerator';
+import { ErrorBoundary } from './ErrorBoundary';
 
 interface OverviewDashboardProps {
   onNavigateTab: (tab: TabId) => void;
@@ -486,31 +487,41 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
       </div>
 
       {/* Security HealthScore 30-Day Evolution Chart (Recharts) */}
-      <HealthScoreEvolutionChart
-        threats={threats}
-        onRunInConsole={onRunInConsole}
-        onNavigateTab={onNavigateTab}
-      />
+      <ErrorBoundary moduleName="Évolution du Score de Santé (Recharts)">
+        <HealthScoreEvolutionChart
+          threats={threats}
+          onRunInConsole={onRunInConsole}
+          onNavigateTab={onNavigateTab}
+        />
+      </ErrorBoundary>
 
       {/* Machine Vulnerability Radar Chart (Recharts: Services, Patchs, Ports Audits) */}
-      <VulnerabilityRadarChart
-        threats={threats}
-        onNavigateTab={onNavigateTab}
-        onRunInConsole={onRunInConsole}
-      />
+      <ErrorBoundary moduleName="Radar des Vulnérabilités (Recharts)">
+        <VulnerabilityRadarChart
+          threats={threats}
+          onNavigateTab={onNavigateTab}
+          onRunInConsole={onRunInConsole}
+        />
+      </ErrorBoundary>
 
       {/* Threat Distribution Donut Chart (Recharts) */}
-      <ThreatCategoryDonutChart
-        threats={threats}
-        selectedCategory={categoryFilter}
-        onSelectCategory={setCategoryFilter}
-      />
+      <ErrorBoundary moduleName="Distribution des Menaces (Donut Recharts)">
+        <ThreatCategoryDonutChart
+          threats={threats}
+          selectedCategory={categoryFilter}
+          onSelectCategory={setCategoryFilter}
+        />
+      </ErrorBoundary>
 
       {/* Threat Heatmap: System Areas Visualizer (Kernel, Registry, Startup, Filesystem) */}
-      <ThreatHeatmap onRunInConsole={onRunInConsole} />
+      <ErrorBoundary moduleName="Heatmap des Zones Système">
+        <ThreatHeatmap onRunInConsole={onRunInConsole} />
+      </ErrorBoundary>
 
       {/* Threat Intensity Map: D3-based Heatmap Visualizing Geographical Origin of Malicious C2 Connections */}
-      <ThreatIntensityMap onRunInConsole={onRunInConsole} onNavigateTab={onNavigateTab} />
+      <ErrorBoundary moduleName="Cartographie Forensique C2 (D3 / TopoJSON)">
+        <ThreatIntensityMap onRunInConsole={onRunInConsole} onNavigateTab={onNavigateTab} />
+      </ErrorBoundary>
 
       {/* Visual Threat Timeline Mini Preview & Gateway */}
       <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
