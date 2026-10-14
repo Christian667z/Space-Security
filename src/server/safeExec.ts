@@ -1,4 +1,4 @@
-import { execFile, ExecFileOptions } from 'child_process';
+import { execFile, type ExecFileOptions } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
 import { logger } from './logger.ts';

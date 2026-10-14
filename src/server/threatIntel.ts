@@ -1,5 +1,5 @@
-import { dbManager } from './db';
-import { logger } from './logger';
+import { dbManager } from './db.ts';
+import { logger } from './logger.ts';
 
 export interface ThreatIntelResult {
   target: string;

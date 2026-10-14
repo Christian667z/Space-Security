@@ -1,9 +1,9 @@
-import cron, { ScheduledTask } from 'node-cron';
+import cron, { type ScheduledTask } from 'node-cron';
 import os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { dbManager } from './db';
-import { logger } from './logger';
+import { dbManager } from './db.ts';
+import { logger } from './logger.ts';
 
 const execAsync = promisify(exec);
 

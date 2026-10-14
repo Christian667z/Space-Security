@@ -30,6 +30,7 @@ import {
   Wrench,
   ShieldAlert,
   Flame,
+  Keyboard,
 } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
@@ -43,6 +44,7 @@ interface TopNavProps {
   connectionStatus?: 'connected' | 'connecting' | 'disconnected';
   onOpenCollabModal?: () => void;
   onRunInConsole?: (command: string) => void;
+  onOpenShortcutsModal?: () => void;
 }
 
 interface NavItem {
@@ -75,6 +77,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   connectionStatus = 'connected',
   onOpenCollabModal,
   onRunInConsole,
+  onOpenShortcutsModal,
 }) => {
   const [isMegaMenuOpen, setIsMegaMenuOpen] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
@@ -519,10 +522,21 @@ export const TopNav: React.FC<TopNavProps> = ({
               <Users className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             </button>
 
+            {/* Keyboard Shortcuts Trigger Button */}
+            <button
+              onClick={onOpenShortcutsModal}
+              title="Gestionnaire de Raccourcis Clavier (Appuyez sur ? ou F1) : Actions instantanées scan, clear, export-report"
+              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono transition-all border shadow-xs bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border-slate-800 hover:border-cyan-600/60 cursor-pointer"
+            >
+              <Keyboard className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Raccourcis</span>
+              <kbd className="px-1 py-0.2 text-[9px] rounded bg-slate-800 text-cyan-400 border border-slate-700 font-bold">?</kbd>
+            </button>
+
             {/* Kill-Switch Quick Action Shortcut */}
             <button
               onClick={() => onSelectTab('sandbox-isolation')}
-              title="Isolateur & Kill-Switch Réseau d'Urgence : Couper le trafic sortant/entrant tout en maintenant localhost"
+              title="Isolateur & Kill-Switch Réseau d'Urgence : Couper le trafic sortant/entrant tout en maintenant localhost (Alt+K)"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all border shadow-sm bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/80 hover:border-rose-500"
             >
               <WifiOff className="w-3.5 h-3.5 text-rose-400" />

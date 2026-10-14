@@ -15,6 +15,8 @@ import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
 import { generateAndDownloadZip } from './utils/zipGenerator';
 import { generateAndDownloadPdfReport } from './utils/pdfReportGenerator';
 import { apiFetch } from './utils/api';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 
 // Code-Splitting: Lazy load all 18 tab panels & modals to drastically reduce startup bundle size
 const OverviewDashboard = React.lazy(() => import('./components/OverviewDashboard').then(m => ({ default: m.OverviewDashboard })));
@@ -1186,6 +1188,38 @@ export default function App() {
     addLog('OK', 'Script PowerShell v3.0 téléchargé : SpaceSecurity_ULTRA_v3_Kernel.ps1', 'DOWNLOAD');
   };
 
+  // Global Keyboard Shortcut Manager ('keydown' events: scan, clear, export-report, navigation, etc.)
+  const {
+    shortcuts,
+    isHelpOpen: isShortcutsModalOpen,
+    setIsHelpOpen: setIsShortcutsModalOpen,
+    lastExecutedShortcut,
+    triggerShortcutById,
+  } = useKeyboardShortcuts({
+    onScan: (deep) => handleExecuteCommand(deep ? 'scan --deep' : 'scan'),
+    onClearLogs: () => {
+      clearSharedLogs();
+      addLog('INFO', 'Affichage de la console effacé via raccourci clavier (Alt+C / C).', 'CLEAR');
+    },
+    onExportReport: () => handleDownloadReport(),
+    onNavigateTab: (tab) => setActiveTab(tab),
+    onCloseModals: () => {
+      setIsPdfModalOpen(false);
+      setIsCollabModalOpen(false);
+      setIsShortcutsModalOpen(false);
+    },
+    onNotify: (title, description) => {
+      addThreatToast({
+        title,
+        description,
+        severity: 'LOW',
+        category: 'Defender',
+        source: 'KEYBOARD-MANAGER',
+        targetTab: activeTab,
+      });
+    },
+  });
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Plus_Jakarta_Sans'] selection:bg-cyan-500/30 selection:text-cyan-200">
       {/* Universal 3-Zone Top Bar */}
@@ -1199,6 +1233,7 @@ export default function App() {
         connectionStatus={connectionStatus}
         onOpenCollabModal={() => setIsCollabModalOpen(true)}
         onRunInConsole={handleExecuteCommand}
+        onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
       />
 
       {/* Main Container Viewport with Code-Splitting Suspense & Module Error Isolation */}
@@ -1413,9 +1448,25 @@ export default function App() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span>Synchro Multi-Opérateur ({activeUsersCount})</span>
             </button>
+            <button
+              onClick={() => setIsShortcutsModalOpen(true)}
+              className="hover:text-cyan-300 text-cyan-400 font-semibold transition-colors flex items-center gap-1"
+              title="Gestionnaire de raccourcis clavier globaux"
+            >
+              <span>Raccourcis Clavier (?)</span>
+            </button>
           </div>
         </div>
       </footer>
+
+      {/* Global Keyboard Shortcut Manager Modal */}
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
+        shortcuts={shortcuts}
+        onTriggerShortcut={triggerShortcutById}
+        lastExecutedShortcut={lastExecutedShortcut}
+      />
 
       {/* Multi-User Collaboration & Real-Time Sync Modal (Code-Split) */}
       {isCollabModalOpen && (

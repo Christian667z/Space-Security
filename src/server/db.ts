@@ -1,8 +1,8 @@
-import initSqlJs, { Database, SqlValue } from 'sql.js';
+import initSqlJs, { type Database, type SqlValue } from 'sql.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { logger } from './logger';
+import { logger } from './logger.ts';
 
 const currentDir = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(currentDir, '..', '..');

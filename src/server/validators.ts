@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 
 // Zod schemas for system, malware, threat, settings operations
 export const killProcessSchema = z.object({
