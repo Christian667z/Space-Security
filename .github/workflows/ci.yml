@@ -1,0 +1,34 @@
+name: CI / Security Suite Verification
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  verification:
+    name: Typecheck, Lint & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Clean Dependencies
+        run: npm ci
+
+      - name: Run Linter & Typecheck
+        run: npm run lint
+
+      - name: Build Web Client (Vite)
+        run: npm run build:ui
+
+      - name: Build Backend & Electron Bundle
+        run: npm run build:electron

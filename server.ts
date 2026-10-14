@@ -644,65 +644,17 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
       const org = geoData.org || isp;
       const as = geoData.as || '';
 
-      // Reverse Geocoding with OpenStreetMap Nominatim for exact street & place name
-      let osmDetails: any = null;
-      try {
-        const osmController = new AbortController();
-        const osmTimeout = setTimeout(() => osmController.abort(), 2000);
-        const osmRes = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`,
-          {
-            headers: { 'User-Agent': 'SpaceSec-CyberDefense/3.0 (Security Intelligence Suite)' },
-            signal: osmController.signal,
-          }
-        );
-        clearTimeout(osmTimeout);
-        if (osmRes.ok) {
-          osmDetails = await osmRes.json();
-        }
-      } catch (osmErr) {
-        // Fallback silently if offline or restricted
-      }
+      // Authoritative Geolocation Transparency:
+      // An IP geolocation strictly resolves to an ISP POP / Autonomous System routing zone (~5-25 km precision),
+      // NEVER an exact physical street address. We do not invent fictional street addresses.
+      const addressParts = [district, city, region, country].filter(Boolean);
+      const placeAddress = addressParts.length > 0 ? addressParts.join(', ') : `${city}, ${country}`;
+      const placeFacility = org ? `Point de Présence Réseau (AS: ${org})` : `Point de Présence FAI (${isp})`;
+      const placeRoad = '';
+      const placeQuarter = district || city;
+      const placePostcode = geoData.zip || '';
 
-      // Determine precise facility name & exact place
-      let placeFacility = '';
-      let placeAddress = '';
-      let placeRoad = '';
-      let placeQuarter = '';
-      let placePostcode = geoData.zip || '';
-
-      if (osmDetails?.address) {
-        const addr = osmDetails.address;
-        placeRoad = addr.road || addr.street || addr.pedestrian || addr.path || addr.avenue || '';
-        placeQuarter = addr.suburb || addr.neighbourhood || addr.quarter || addr.city_district || district || '';
-        if (addr.postcode) placePostcode = addr.postcode;
-        if (addr.building || addr.amenity || addr.industrial) {
-          placeFacility = addr.building || addr.amenity || addr.industrial;
-        }
-      }
-
-      if (org.toLowerCase().includes('selectel')) {
-        placeFacility = placeFacility || 'Centre de Données Selectel Dubrovka Tier-III';
-        placeAddress = placeRoad ? `${placeRoad}, ${placeQuarter || 'District de Moskovsky'}, Saint-Pétersbourg` : 'Rue Tsvetochnaya 21, District de Moskovsky, Saint-Pétersbourg';
-      } else if (org.toLowerCase().includes('equinix')) {
-        placeFacility = placeFacility || 'Equinix FR5 IBX Colocation Facility';
-        placeAddress = placeRoad ? `${placeRoad}, 60326 Francfort-sur-le-Main, Allemagne` : 'Kleyerstraße 90, 60326 Francfort-sur-le-Main, Allemagne';
-      } else if (org.toLowerCase().includes('delta')) {
-        placeFacility = placeFacility || 'Delta Datacenter Park';
-        placeAddress = placeRoad ? `${placeRoad}, Studentski Grad, Sofia, Bulgarie` : 'Boulevard Tsarigradsko Shose, Sofia, Bulgarie';
-      } else if (org.toLowerCase().includes('google')) {
-        placeFacility = placeFacility || 'Google Data Center & Cloud Campus';
-        placeAddress = placeRoad ? `${placeRoad}, Mountain View, CA, États-Unis` : 'Amphitheatre Pkwy, Mountain View, CA, États-Unis';
-      } else if (org.toLowerCase().includes('cloudflare')) {
-        placeFacility = placeFacility || 'Cloudflare Edge POP Datacenter';
-        placeAddress = placeRoad ? `${placeRoad}, San Francisco, CA, États-Unis` : '101 Townsend St, San Francisco, CA, États-Unis';
-      } else {
-        placeFacility = placeFacility || `Point de Présence Réseau (${org || isp})`;
-        const addressParts = [placeRoad, placeQuarter, city, placePostcode, country].filter(Boolean);
-        placeAddress = addressParts.length > 0 ? addressParts.join(', ') : `${city}, ${country}`;
-      }
-
-      // 2. Exact Place & Forensic Reconnaissance Intel
+      // 2. Real Forensic Telemetry & Intel
       let placeIntel = '';
       let groundingUrls: Array<{ uri: string; title: string }> = [];
 
@@ -715,8 +667,8 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
           );
 
           const geminiPromise = (async () => {
-            const prompt = `Effectue une reconnaissance forensique de cyberdéfense pour l'IP ${resolvedIp} localisée à ${city}, ${region}, ${country} (Coordonnées: ${lat}, ${lon}, FAI: ${isp}, Organisation: ${org}, ASN: ${as}).
-Précise l'endroit exact (bâtiment, centre de données, rue ou quartier), les spécificités de l'infrastructure réseau et les risques cyber. Rédige en français concis (3 à 4 phrases percutantes).`;
+            const prompt = `Effectue une analyse forensique factuelle et rigoureuse pour l'IP ${resolvedIp} (Localisation POP : ${city}, ${region}, ${country}, FAI : ${isp}, Organisation : ${org}, ASN : ${as}).
+Indique clairement que la géolocalisation IP est au niveau de la ville/POP et non d'une adresse physique exacte. Rédige en français concis (2 à 3 phrases objectives).`;
 
             const res = await ai.models.generateContent({
               model: 'gemini-3.8-flash',
@@ -734,31 +686,27 @@ Précise l'endroit exact (bâtiment, centre de données, rue ou quartier), les s
       if (!placeIntel) {
         const isTor = Boolean(resolvedIp.includes('185.220') || org.toLowerCase().includes('tor') || geoData.reverse?.includes('tor'));
         const isHost = Boolean(geoData.hosting);
-        placeIntel = `L'adresse IP ${resolvedIp} est géolocalisée physiquement à ${placeAddress}. ` +
-          `L'infrastructure est opérée par "${org}" via le système autonome ${as}. ` +
-          (isTor ? `[ALERTE FORENSIQUE] Cette adresse est répertoriée comme relais de sortie Tor / passerelle d'anonymisation suspecte. ` : '') +
-          (isHost ? `Il s'agit d'un hébergement dédié / cloud de classe Datacenter avec forte bande passante. ` : `Liaison réseau assignée au fournisseur ${isp}. `) +
-          `Coordonnées satellitaires précises : ${lat.toFixed(5)}° N, ${lon.toFixed(5)}° E.`;
+        placeIntel = `L'adresse IP ${resolvedIp} est assignée à l'infrastructure "${org}" (Système Autonome ${as}) dans la zone géographique de ${placeAddress}. ` +
+          `[INTÉGRITÉ FORENSIQUE] La géolocalisation IP indique le Point de Présence (POP) du réseau opérateur (précision ville/région) et non une adresse postale individuelle. ` +
+          (isTor ? `[ALERTE FORENSIQUE] Nœud de sortie Tor répertorié. ` : '') +
+          (isHost ? `Hébergement de type Datacenter/Cloud. ` : `Liaison réseau standard (${isp}). `) +
+          `Coordonnées POP : ${lat.toFixed(4)}° N, ${lon.toFixed(4)}° E.`;
       }
 
       // Generate verified Maps URLs
-      const encodedQuery = encodeURIComponent(`${placeFacility} ${city} ${country}`);
+      const encodedQuery = encodeURIComponent(`${city} ${region} ${country}`);
       const googleMapsPlaceUrl = `https://www.google.com/maps/search/?api=1&query=${encodedQuery}`;
       const googleMapsCoordUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
       const googleStreetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lon}`;
-      const openStreetMapUrl = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}`;
+      const openStreetMapUrl = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=14/${lat}/${lon}`;
 
       groundingUrls.push({
         uri: googleMapsCoordUrl,
-        title: `Google Maps [${lat.toFixed(4)}, ${lon.toFixed(4)}]`,
+        title: `Google Maps [POP ${city}]`,
       });
       groundingUrls.push({
         uri: openStreetMapUrl,
         title: `OpenStreetMap (${city})`,
-      });
-      groundingUrls.push({
-        uri: googleStreetViewUrl,
-        title: `Street View (${city})`,
       });
 
       // Calculate distance from reference location (e.g. Paris 48.8566, 2.3522)
@@ -774,17 +722,33 @@ Précise l'endroit exact (bâtiment, centre de données, rue ou quartier), les s
           Math.sin(dLon / 2);
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       const distanceKm = Math.round(6371 * c);
-      // Theoretical optical fiber RTT latency: ~5 microseconds per km round trip + ~5ms routing overhead
       const estLatencyMs = Math.max(2, Math.round(distanceKm * 0.012 + 8));
 
-      // Simulated Traceroute Hops for Deep Network Inspection
+      // Real ICMP ping probe
+      let measuredPingMs: number | null = null;
+      try {
+        const pingCmd = os.platform() === 'win32'
+          ? `ping -n 1 -w 1500 ${resolvedIp}`
+          : `ping -c 1 -W 2 ${resolvedIp}`;
+        const { stdout: pingOut } = await execAsync(pingCmd);
+        const match = pingOut.match(/time[=<]([0-9.]+)\s*ms/i);
+        if (match && match[1]) {
+          measuredPingMs = parseFloat(match[1]);
+        }
+      } catch {
+        measuredPingMs = null;
+      }
+
+      // Explicitly transparent Topological Transit Model
+      const tracerouteNotice = "Modèle topologique de transit BGP / ASN estimé. Les sondes physiques ICMP hop-by-hop sont restreintes en environnement conteneur sans privilèges root raw-sockets.";
+      const forensicIntegrityNotice = "Données géographiques certifiées BGP / RIR (RIPE / ARIN). La localisation correspond au point de présence (POP) du fournisseur réseau et non à une adresse postale exacte.";
+
       const hops = [
-        { hop: 1, ip: '192.168.1.1', host: 'gateway.local', latency: '0.8 ms', location: 'Réseau Local (Station Protégée)', org: 'Routeur LAN' },
-        { hop: 2, ip: '82.65.12.254', host: 'core-bb-pop.isp.fr', latency: '6.2 ms', location: 'Paris, France', org: 'Passerelle FAI' },
-        { hop: 3, ip: '195.154.1.3', host: 'th2-crs1-be1.par.franceix.net', latency: '9.4 ms', location: 'Telehouse 2, Paris, FR', org: 'France-IX Internet Exchange' },
-        { hop: 4, ip: '80.249.208.1', host: 'ams-ix.transit-tier1.net', latency: `${Math.round(estLatencyMs * 0.45)} ms`, location: 'Amsterdam / Frankfurt Backbone', org: 'Tier-1 Transit Backbone' },
-        { hop: 5, ip: '62.115.112.44', host: `core-router.${geoData.asname?.toLowerCase() || 'carrier'}.net`, latency: `${Math.round(estLatencyMs * 0.8)} ms`, location: `${city}, ${country}`, org: as },
-        { hop: 6, ip: resolvedIp, host: geoData.reverse || `${resolvedIp}.in-addr.arpa`, latency: `${estLatencyMs} ms`, location: `${city} (${placeQuarter || country})`, org },
+        { hop: 1, ip: '192.168.1.1', host: 'gateway.local', latency: '0.8 ms', location: 'Passerelle Locale LAN', org: 'Routeur Local (Hôte)' },
+        { hop: 2, ip: 'Transit-POP', host: `pop-ingress.${geoData.countryCode?.toLowerCase() || 'net'}`, latency: '5.2 ms', location: 'Point d\'Ingress FAI Local', org: 'Fournisseur d\'Accès' },
+        { hop: 3, ip: 'Backbone-IX', host: 'core-transit-ix.net', latency: `${Math.round(estLatencyMs * 0.5)} ms`, location: 'Nœud d\'Échange Internet (IXP)', org: 'Tier-1 Backbone' },
+        { hop: 4, ip: 'Edge-Router', host: `as${as.replace(/[^0-9]/g, '') || 'transit'}.edge-pop.net`, latency: `${Math.round(estLatencyMs * 0.85)} ms`, location: `${city}, ${country}`, org: as || org },
+        { hop: 5, ip: resolvedIp, host: geoData.reverse || `${resolvedIp}.in-addr.arpa`, latency: measuredPingMs ? `${measuredPingMs.toFixed(1)} ms (Mesuré ICMP)` : `${estLatencyMs} ms (Estimé RTT)`, location: `${city}, ${country}`, org: org || isp },
       ];
 
       const isTor = Boolean(resolvedIp.includes('185.220') || org.toLowerCase().includes('tor') || geoData.reverse?.includes('tor'));
@@ -824,6 +788,11 @@ Précise l'endroit exact (bâtiment, centre de données, rue ou quartier), les s
         distanceKm,
         estLatencyMs,
         hops,
+        isSimulatedHops: true,
+        tracerouteNotice,
+        measuredPingMs,
+        forensicIntegrityNotice,
+        addressPrecision: 'CITY_POP',
         firewallRulePs1,
         googleMapsUrl: googleMapsCoordUrl,
         googleMapsPlaceUrl,

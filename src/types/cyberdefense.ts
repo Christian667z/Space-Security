@@ -274,6 +274,11 @@ export interface IpLocationReport {
   googleStreetViewUrl: string;
   openStreetMapUrl: string;
   groundingUrls?: Array<{ uri: string; title: string }>;
+  isSimulatedHops?: boolean;
+  tracerouteNotice?: string;
+  measuredPingMs?: number | null;
+  forensicIntegrityNotice?: string;
+  addressPrecision?: 'EXACT_COORDINATES' | 'CITY_POP' | 'REGIONAL_POP' | 'LOCAL_RFC1918';
   error?: string;
 }
 

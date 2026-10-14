@@ -17,7 +17,9 @@
     "start": "node server.ts",
     "preview": "vite preview",
     "clean": "node -e \"try{fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('dist-electron',{recursive:true,force:true})}catch(e){}\"",
-    "lint": "tsc --noEmit"
+    "lint": "eslint . && tsc --noEmit",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\""
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -40,6 +42,7 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/express": "^4.17.21",
     "@types/jszip": "^3.4.1",
     "@types/node": "^22.14.0",
@@ -51,6 +54,8 @@
     "electron": "^44.7.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.0",
+    "eslint": "^10.12.0",
+    "prettier": "^3.9.10",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"

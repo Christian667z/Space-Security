@@ -12,6 +12,7 @@
   "nodeGypRebuild": false,
   "npmRebuild": false,
   "win": {
+    "icon": "build/icon.ico",
     "target": [
       {
         "target": "nsis",
@@ -23,6 +24,10 @@
       }
     ],
     "requestedExecutionLevel": "requireAdministrator"
+  },
+  "linux": {
+    "icon": "build/icon.png",
+    "target": ["AppImage", "tar.gz"]
   },
   "nsis": {
     "oneClick": false,

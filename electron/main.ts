@@ -82,6 +82,7 @@ async function createWindow() {
     show: false,
     autoHideMenuBar: true,
     title: 'Space Security - CyberDefense Suite & Kernel Extirpator',
+    icon: path.join(__dirname, '../build/icon.png'),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
