@@ -26,6 +26,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { IpLocationReport, TracerouteHop } from '../types/cyberdefense';
+import { apiFetch } from '../utils/api';
 
 interface IpLocatorPanelProps {
   initialIp?: string;
@@ -79,8 +80,7 @@ export const IpLocatorPanel: React.FC<IpLocatorPanelProps> = ({
     setError(null);
     try {
       const trimmed = targetIp.trim();
-      const baseUrl = typeof window !== 'undefined' && window.location.protocol === 'file:' ? 'http://127.0.0.1:3000' : '';
-      const res = await fetch(`${baseUrl}/api/ip/geolocate?ip=${encodeURIComponent(trimmed)}`);
+      const res = await apiFetch(`/api/ip/geolocate?ip=${encodeURIComponent(trimmed)}`);
       if (!res.ok) {
         throw new Error(`Erreur réseau (${res.status}) lors de la résolution de l'IP`);
       }

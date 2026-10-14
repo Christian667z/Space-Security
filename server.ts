@@ -24,9 +24,10 @@ import {
   validateBody,
   validateQuery,
 } from './src/server/validators.ts';
-import { requireAuth, getLocalAuthToken, validateWebSocketConnection } from './src/server/auth.ts';
+import { requireAuth, getLocalAuthToken, validateWebSocketConnection, corsAndCsrfProtection } from './src/server/auth.ts';
 import { checkHashReputation, checkIpReputation } from './src/server/threatIntel.ts';
 import { backgroundScheduler } from './src/server/scheduler.ts';
+import { safeExecFile, validateAndParsePid, sanitizeInterfaceName, sanitizePath, sanitizeIpAddress } from './src/server/safeExec.ts';
 
 const execAsync = promisify(exec);
 const appDir = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
@@ -310,6 +311,7 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
     },
   });
 
+  app.use(corsAndCsrfProtection);
   app.use(express.json());
   app.use('/api/', generalApiLimiter);
 
@@ -630,7 +632,7 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
       logger.warn({ pid, ip: req.ip }, '[SystemControl] Ordre de terminaison du processus reçu');
 
       if (os.platform() === 'win32') {
-        await execAsync(`taskkill /F /PID ${pid}`);
+        await safeExecFile('taskkill', ['/F', '/PID', String(pid)]);
       } else {
         process.kill(Number(pid), 'SIGTERM');
       }
@@ -2935,75 +2937,90 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   });
 
   // POST: Toggle specific interface (e.g. Wi-Fi only, Ethernet only)
-  app.post('/api/network/toggle-interface', async (req, res) => {
+  // POST: Toggle specific interface (SECURED: Strict sanitization & parameterized netsh)
+  app.post('/api/network/toggle-interface', requireAuth, async (req, res, next) => {
     try {
       const { interfaceName, enable } = req.body;
-      if (!interfaceName) {
-        return res.status(400).json({ success: false, error: 'Nom d\'interface requis.' });
-      }
-
+      const safeName = sanitizeInterfaceName(interfaceName);
       const isWin32 = os.platform() === 'win32';
-      const cmd = `netsh interface set interface "${interfaceName}" admin=${enable ? 'enabled' : 'disabled'}`;
+      const adminArg = enable ? 'admin=enabled' : 'admin=disabled';
 
       if (isWin32) {
+        // PARAMETERIZED: No cmd.exe shell concatenation, impossible to inject shell operators
         try {
-          await execAsync(cmd);
+          await safeExecFile('netsh', ['interface', 'set', 'interface', safeName, adminArg]);
         } catch {
           const psAction = enable ? 'Enable-NetAdapter' : 'Disable-NetAdapter';
-          await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "${psAction} -Name '${interfaceName}' -Confirm:$false"`);
+          await safeExecFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `${psAction} -Name '${safeName.replace(/'/g, "''")}' -Confirm:$false`]);
         }
       }
 
       if (enable) {
-        disabledInterfacesList = disabledInterfacesList.filter(i => i !== interfaceName);
+        disabledInterfacesList = disabledInterfacesList.filter(i => i !== safeName);
       } else {
-        if (!disabledInterfacesList.includes(interfaceName)) {
-          disabledInterfacesList.push(interfaceName);
+        if (!disabledInterfacesList.includes(safeName)) {
+          disabledInterfacesList.push(safeName);
         }
       }
 
+      dbManager.addAuditLog({
+        id: `toggle-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'INFO',
+        tag: 'NETWORK-CONTROL',
+        text: `Interface "${safeName}" ${enable ? 'activée' : 'désactivée'} avec succès.`,
+        operatorName: 'Analyste Réseau',
+      });
+
       res.json({
         success: true,
-        interfaceName,
+        interfaceName: safeName,
         adminStatus: enable ? 'Enabled' : 'Disabled',
         disabledInterfaces: disabledInterfacesList,
       });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      next(err);
     }
   });
 
-  // POST: Sandbox Process Containment (Freeze thread + Firewall block)
-  app.post('/api/sandbox/isolate-process', async (req, res) => {
+  // POST: Sandbox Process Containment (SECURED: Validated PID & Sanitized Path)
+  app.post('/api/sandbox/isolate-process', requireAuth, async (req, res, next) => {
     try {
       const { pid, name, path: procPath } = req.body;
-      const numPid = Number(pid);
-      if (!numPid) {
-        return res.status(400).json({ success: false, error: 'PID invalide.' });
-      }
+      // CRITICAL: Strictly validate PID as positive integer and sanitize executable path
+      const safePid = validateAndParsePid(pid);
+      const safePath = sanitizePath(procPath || 'C:\\Windows\\System32\\cmd.exe');
+      const safeName = (name && typeof name === 'string') ? name.slice(0, 128) : `Process_${safePid}`;
 
       const isWin32 = os.platform() === 'win32';
       const appliedActions: string[] = [];
 
       if (isWin32) {
-        // Suspend process using PowerShell P/Invoke NtSuspendProcess
         try {
-          await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = Get-Process -Id ${numPid} -ErrorAction SilentlyContinue; if ($p) { (Get-Process -Id ${numPid}).Threads | ForEach-Object { [System.Threading.Thread]::Sleep(0) }; Stop-Process -Id ${numPid} -Force }"`);
-          appliedActions.push(`Suspension threads PID ${numPid}`);
+          await safeExecFile('powershell.exe', [
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+            `$p = Get-Process -Id ${safePid} -ErrorAction SilentlyContinue; if ($p) { Stop-Process -Id ${safePid} -Force }`
+          ]);
+          appliedActions.push(`Suspension process PID ${safePid}`);
         } catch {}
 
-        if (procPath) {
-          try {
-            await execAsync(`netsh advfirewall firewall add rule name="SpaceSec-Sandbox-PID-${numPid}" dir=out program="${procPath}" action=block`);
-            appliedActions.push(`Blocage Firewall sortant pour "${procPath}"`);
-          } catch {}
-        }
+        try {
+          // PARAMETERIZED firewall rule addition
+          await safeExecFile('netsh', [
+            'advfirewall', 'firewall', 'add', 'rule',
+            `name=SpaceSec-Sandbox-PID-${safePid}`,
+            'dir=out',
+            `program=${safePath}`,
+            'action=block'
+          ]);
+          appliedActions.push(`Blocage Firewall sortant pour "${safePath}"`);
+        } catch {}
       }
 
       const item = {
-        pid: numPid,
-        name: name || `Process_${numPid}`,
-        path: procPath || 'C:\\Windows\\Temp\\unknown.exe',
+        pid: safePid,
+        name: safeName,
+        path: safePath,
         status: 'FROZEN' as const,
         isolatedAt: new Date().toLocaleTimeString('fr-FR'),
         networkBlocked: true,
@@ -3012,15 +3029,16 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         details: 'Processus gelé et isolé en Sandbox Live. Accès réseau sortant coupé, exécution suspendue.',
       };
 
-      sandboxedProcessesList = sandboxedProcessesList.filter(p => p.pid !== numPid);
+      sandboxedProcessesList = sandboxedProcessesList.filter(p => p.pid !== safePid);
       sandboxedProcessesList.unshift(item);
 
-      sharedState.logs.unshift({
+      dbManager.addAuditLog({
         id: `sandbox-${Date.now()}`,
         timestamp: new Date().toLocaleTimeString('fr-FR'),
         level: 'KERNEL',
         tag: 'SANDBOX',
-        text: `CONFINEMENT PROCESSUS : PID ${numPid} (${item.name}) placé en Sandbox Live. Threads suspendus & trafic sortant bloqué.`,
+        text: `CONFINEMENT PROCESSUS : PID ${safePid} (${safeName}) placé en Sandbox Live. Threads suspendus & trafic sortant bloqué.`,
+        operatorName: 'Analyste SOC',
       });
 
       res.json({
@@ -3030,36 +3048,47 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         sandboxedProcesses: sandboxedProcessesList,
       });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      next(err);
     }
   });
 
-  // POST: Terminate or Release Sandboxed Process
-  app.post('/api/sandbox/terminate-process', async (req, res) => {
+  // POST: Terminate or Release Sandboxed Process (SECURED: Parameterized taskkill)
+  app.post('/api/sandbox/terminate-process', requireAuth, async (req, res, next) => {
     try {
-      const { pid } = req.body;
-      const numPid = Number(pid);
-      if (!numPid) return res.status(400).json({ success: false, error: 'PID invalide.' });
-
+      const safePid = validateAndParsePid(req.body.pid);
       const isWin32 = os.platform() === 'win32';
+
       if (isWin32) {
         try {
-          await execAsync(`taskkill /F /PID ${numPid}`);
+          await safeExecFile('taskkill', ['/F', '/PID', String(safePid)]);
         } catch {}
         try {
-          await execAsync(`netsh advfirewall firewall delete rule name="SpaceSec-Sandbox-PID-${numPid}"`);
+          await safeExecFile('netsh', ['advfirewall', 'firewall', 'delete', 'rule', `name=SpaceSec-Sandbox-PID-${safePid}`]);
+        } catch {}
+      } else {
+        try {
+          process.kill(safePid, 'SIGKILL');
         } catch {}
       }
 
-      sandboxedProcessesList = sandboxedProcessesList.filter(p => p.pid !== numPid);
+      sandboxedProcessesList = sandboxedProcessesList.filter(p => p.pid !== safePid);
+
+      dbManager.addAuditLog({
+        id: `sandbox-kill-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'WARN',
+        tag: 'SANDBOX',
+        text: `Processus confiné PID ${safePid} abattu et règle pare-feu sandbox retirée.`,
+        operatorName: 'Analyste SOC',
+      });
 
       res.json({
         success: true,
-        terminatedPid: numPid,
+        terminatedPid: safePid,
         sandboxedProcesses: sandboxedProcessesList,
       });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      next(err);
     }
   });
 

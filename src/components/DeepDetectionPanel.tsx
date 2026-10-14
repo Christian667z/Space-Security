@@ -140,7 +140,7 @@ export const DeepDetectionPanel: React.FC<DeepDetectionPanelProps> = ({ onRunInC
 
   const handleDownloadReport = async (format: 'html' | 'csv' | 'json') => {
     try {
-      const res = await fetch('/api/reports/generate', {
+      const res = await apiFetch('/api/reports/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ format }),

@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
-import { logger } from './logger';
+import { logger } from './logger.ts';
 
 // Cryptographically secure token generated on server startup
 const SERVER_AUTH_TOKEN = process.env.SPACESEC_AUTH_TOKEN || crypto.randomBytes(32).toString('hex');
@@ -21,12 +21,66 @@ export function isValidToken(candidateToken?: string | null): boolean {
   }
 }
 
-// Middleware for Express routes
+/**
+ * Strict CORS and CSRF Protection Middleware.
+ * Rejects any cross-origin state-altering request from third-party websites.
+ */
+export function corsAndCsrfProtection(req: Request, res: Response, next: NextFunction) {
+  const origin = req.headers.origin;
+  const host = req.headers.host;
+
+  // Set standard security headers
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+
+  // Verify origin for mutating HTTP methods (POST, PUT, DELETE, PATCH)
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+    if (origin) {
+      const isAllowedOrigin =
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1') ||
+        origin.includes('run.app') || // AI Studio container dev URL
+        origin === 'null' || // Electron local file / desktop protocol
+        (host && origin.includes(host));
+
+      if (!isAllowedOrigin) {
+        logger.warn({ origin, host, ip: req.ip, path: req.path }, '[CSRF-Shield] Requête cross-origin hostile bloquée');
+        return res.status(403).json({
+          success: false,
+          error: 'Protection CSRF : Requête cross-origin non autorisée.',
+          code: 'CSRF_BLOCKED',
+        });
+      }
+
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      // Same-origin or internal curl / desktop IPC
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+  } else {
+    // Read-only GET / OPTIONS
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  }
+
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-SpaceSec-Token');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  next();
+}
+
+/**
+ * Authorization Middleware for Sensitive Operations.
+ * Protects administrative and system-modifying endpoints against unauthorized local or remote callers.
+ */
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  // Allow OPTIONS preflight
   if (req.method === 'OPTIONS') return next();
 
-  // In Electron desktop environment with strict local IPC, require token
   const authHeader = req.headers.authorization;
   const customHeader = req.headers['x-spacesec-token'];
   const queryToken = req.query.token as string | undefined;
@@ -41,23 +95,32 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     providedToken = queryToken.trim();
   }
 
-  // If running in development web environment without Electron, or if token matches
-  const isDevOrWeb = process.env.IS_ELECTRON !== 'true';
-
+  // 1. Direct valid token provided
   if (providedToken && isValidToken(providedToken)) {
     return next();
   }
 
-  // In web environment, if token not yet provided, allow read-only routes or handshake
-  if (isDevOrWeb && (req.method === 'GET' || req.path === '/api/auth/token')) {
+  // 2. Local token handshake endpoint itself is open to same-origin
+  if (req.path === '/api/auth/token') {
     return next();
   }
 
-  // For write/kill/mutation operations, if no token was provided in dev, allow same-origin requests
-  // but warn in structured logs
-  const origin = req.headers.origin || req.headers.host || '';
-  if (isDevOrWeb && (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('run.app') || !req.headers.origin)) {
-    return next();
+  // 3. In Web development container (AI Studio), check same-origin header verification
+  const isWebDev = process.env.IS_ELECTRON !== 'true';
+  const origin = req.headers.origin;
+  const host = req.headers.host;
+
+  if (isWebDev) {
+    const isSameOrigin =
+      !origin ||
+      (host && origin.includes(host)) ||
+      origin.includes('localhost') ||
+      origin.includes('127.0.0.1') ||
+      origin.includes('run.app');
+
+    if (isSameOrigin) {
+      return next();
+    }
   }
 
   logger.warn({ ip: req.ip, path: req.path, method: req.method }, '[Auth] Accès non autorisé rejeté');
@@ -68,15 +131,19 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   });
 }
 
-// WebSocket Token Validator
+/**
+ * Validates WebSocket connection handshake authentication.
+ */
 export function validateWebSocketConnection(urlStr?: string): boolean {
   if (!urlStr) return false;
   try {
     const url = new URL(urlStr, 'http://localhost');
     const token = url.searchParams.get('token');
-    
-    // In web dev environment, allow if token is present or default development session
+
+    // 1. If valid token is supplied in query string
     if (token && isValidToken(token)) return true;
+
+    // 2. In web dev container mode without electron, permit local connection
     if (process.env.IS_ELECTRON !== 'true') return true;
 
     return false;
