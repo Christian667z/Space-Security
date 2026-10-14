@@ -14,6 +14,7 @@
     "dist": "npm run build && electron-builder --win",
     "dist:portable": "npm run build && electron-builder --win portable --x64",
     "dist:nsis": "npm run build && electron-builder --win nsis --x64",
+    "cert:generate": "node scripts/generate-dev-cert.cjs",
     "start": "node server.ts",
     "preview": "vite preview",
     "clean": "node -e \"try{fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('dist-electron',{recursive:true,force:true})}catch(e){}\"",
