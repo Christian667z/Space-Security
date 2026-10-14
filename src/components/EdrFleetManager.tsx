@@ -31,6 +31,7 @@ import {
   Radio,
   FileCode,
   Zap,
+  Database,
 } from 'lucide-react';
 import { EdrEndpoint, EdrTelemetryEvent, EdrCommand } from '../types/cyberdefense';
 import { apiFetch } from '../utils/api';
@@ -242,9 +243,15 @@ export const EdrFleetManager: React.FC<EdrFleetManagerProps> = ({ onRunInConsole
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900/90 to-indigo-950/40 border border-slate-800 p-6 shadow-xl">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
           <div className="space-y-2 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-mono font-medium">
-              <Radio className="w-3.5 h-3.5 animate-pulse text-cyan-400" />
-              CONSOLE DE COMMANDE EDR DISTANTE & GESTION DE FLOTTE
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-mono font-medium">
+                <Radio className="w-3.5 h-3.5 animate-pulse text-cyan-400" />
+                CONSOLE DE COMMANDE EDR DISTANTE & GESTION DE FLOTTE
+              </div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono">
+                <Database className="w-3.5 h-3.5 text-emerald-400" />
+                PERSISTANCE CLOUD HAUTE DISPONIBILITÉ (HA) ACTIVE
+              </div>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               Flotte Endpoints & Agents de Collecte

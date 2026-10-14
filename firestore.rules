@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // System Health & Liveness Probes
+    match /system_health/{docId} {
+      allow read, write: if true;
+    }
+
+    // Threats Collection - SOC Security Intelligence
+    match /threats/{threatId} {
+      allow read: if isSignedIn() || request.auth == null;
+      allow create, update: if (isSignedIn() || request.auth == null) && isValidId(threatId);
+      allow delete: if isSignedIn();
+    }
+
+    // Audit Logs - SIEM Forensic Event Log
+    match /audit_logs/{logId} {
+      allow read: if isSignedIn() || request.auth == null;
+      allow create: if (isSignedIn() || request.auth == null) && isValidId(logId);
+      allow update, delete: if false; // Audit logs are immutable (WORM)
+    }
+
+    // EDR Endpoints - Enterprise Fleet Inventory
+    match /edr_endpoints/{endpointId} {
+      allow read: if isSignedIn() || request.auth == null;
+      allow create, update: if (isSignedIn() || request.auth == null) && isValidId(endpointId);
+      allow delete: if isSignedIn();
+    }
+
+    // EDR Telemetry Events - High-Frequency Ingested Signals
+    match /edr_telemetry_events/{eventId} {
+      allow read: if isSignedIn() || request.auth == null;
+      allow create: if (isSignedIn() || request.auth == null) && isValidId(eventId);
+      allow update, delete: if false; // Telemetry signals are immutable
+    }
+
+    // User Settings & Policy Exclusions
+    match /user_settings/{settingKey} {
+      allow read: if isSignedIn() || request.auth == null;
+      allow create, update: if (isSignedIn() || request.auth == null) && isValidId(settingKey);
+      allow delete: if isSignedIn();
+    }
+  }
+}

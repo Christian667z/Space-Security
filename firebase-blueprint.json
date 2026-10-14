@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "Threat": {
+      "title": "Threat",
+      "description": "Indicateur de compromission, malware ou anomalie de sécurité détectée.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Identifiant unique de la menace" },
+        "name": { "type": "string", "description": "Nom ou intitulé de la menace" },
+        "category": { "type": "string", "description": "Catégorie (Trojan, C2, Kernel, Persistence, etc.)" },
+        "severity": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"], "description": "Niveau de sévérité" },
+        "targetPath": { "type": "string", "description": "Chemin système ou socket ciblé" },
+        "mitreTechnique": { "type": "string", "description": "Technique MITRE ATT&CK associée" },
+        "lockedBySystem": { "type": "boolean", "description": "Verrouillé par les privilèges SYSTEM" },
+        "trustedInstallerLocked": { "type": "boolean", "description": "Verrouillé par TrustedInstaller" },
+        "description": { "type": "string", "description": "Description détaillée de la menace" },
+        "status": { "type": "string", "enum": ["ACTIVE", "QUARANTINED", "SCHEDULED_BOOT_DELETE", "NEUTRALIZED", "DISMISSED"], "description": "Statut de remédiation" },
+        "detectedAt": { "type": "string", "description": "Horodatage ISO de détection" },
+        "resolvedAt": { "type": "string", "description": "Horodatage ISO de résolution" }
+      },
+      "required": ["id", "name", "category", "severity", "targetPath", "status", "detectedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Journal d'audit forensique pour corrélation SIEM.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID unique du log" },
+        "timestamp": { "type": "string", "description": "Horodatage de l'événement" },
+        "level": { "type": "string", "description": "Niveau (INFO, WARN, ERROR, OK, KERNEL)" },
+        "tag": { "type": "string", "description": "Tag de classification de l'événement" },
+        "text": { "type": "string", "description": "Message du journal" },
+        "operatorName": { "type": "string", "description": "Nom de l'analyste ou composant source" },
+        "createdAt": { "type": "string", "description": "Horodatage ISO de création" }
+      },
+      "required": ["id", "timestamp", "level", "text", "createdAt"]
+    },
+    "EdrEndpoint": {
+      "title": "EdrEndpoint",
+      "description": "Poste Windows supervisé par l'agent EDR distant.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID unique de l'endpoint" },
+        "hostname": { "type": "string", "description": "Nom d'hôte de la machine" },
+        "ipAddress": { "type": "string", "description": "Adresse IP locale" },
+        "publicIp": { "type": "string", "description": "Adresse IP WAN publique" },
+        "macAddress": { "type": "string", "description": "Adresse MAC de l'interface principale" },
+        "osVersion": { "type": "string", "description": "Version du système d'exploitation Windows" },
+        "agentVersion": { "type": "string", "description": "Version de l'agent EDR SpaceSec" },
+        "status": { "type": "string", "enum": ["ONLINE", "OFFLINE", "WARNING", "CRITICAL"], "description": "Statut de santé du poste" },
+        "lastSeen": { "type": "string", "description": "Dernier battement de cœur reçu" },
+        "registeredAt": { "type": "string", "description": "Date d'enregistrement dans la flotte" },
+        "healthScore": { "type": "number", "description": "Score d'intégrité de 0 à 100" },
+        "activeThreatsCount": { "type": "number", "description": "Nombre de menaces actives sur le poste" },
+        "networkIsolated": { "type": "boolean", "description": "Confinement réseau activé" },
+        "cpuUsagePercent": { "type": "number", "description": "Charge processeur mesurée" },
+        "ramUsagePercent": { "type": "number", "description": "Utilisation RAM mesurée" }
+      },
+      "required": ["id", "hostname", "ipAddress", "osVersion", "status", "lastSeen", "registeredAt"]
+    },
+    "EdrTelemetryEvent": {
+      "title": "EdrTelemetryEvent",
+      "description": "Événement de télémétrie ingéré depuis un agent EDR distant.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID unique de l'événement" },
+        "endpointId": { "type": "string", "description": "ID de l'endpoint émetteur" },
+        "hostname": { "type": "string", "description": "Nom de la machine" },
+        "timestamp": { "type": "string", "description": "Date et heure de l'événement" },
+        "category": { "type": "string", "enum": ["PROCESS", "REGISTRY", "NETWORK", "SERVICE", "BITS", "DEFENDER", "ANOMALY"] },
+        "severity": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] },
+        "summary": { "type": "string", "description": "Résumé factuel de l'événement" },
+        "detailsJson": { "type": "string", "description": "Payload JSON détaillé de l'anomalie" },
+        "mitreTechnique": { "type": "string", "description": "Identifiant de technique MITRE ATT&CK" }
+      },
+      "required": ["id", "endpointId", "hostname", "timestamp", "category", "severity", "summary"]
+    },
+    "UserSetting": {
+      "title": "UserSetting",
+      "description": "Préférences et exclusions système persistantes.",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "description": "Clé du paramètre" },
+        "valueJson": { "type": "string", "description": "Valeur sérialisée" },
+        "updatedAt": { "type": "string", "description": "Date de dernière mise à jour" }
+      },
+      "required": ["key", "valueJson", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/threats/{threatId}": {
+      "schema": "Threat",
+      "description": "Collection haute disponibilité des menaces et malwares détectés."
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Journal persistant d'audit et corrélation d'événements pour le SOC."
+    },
+    "/edr_endpoints/{endpointId}": {
+      "schema": "EdrEndpoint",
+      "description": "Inventaire persistant des postes et serveurs de la flotte EDR."
+    },
+    "/edr_telemetry_events/{eventId}": {
+      "schema": "EdrTelemetryEvent",
+      "description": "Historique des alertes télémétriques ingérées depuis les agents Windows."
+    },
+    "/user_settings/{settingKey}": {
+      "schema": "UserSetting",
+      "description": "Configuration, seuils d'alerte et exclusions persistantes du SOC."
+    }
+  }
+}

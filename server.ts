@@ -12,6 +12,7 @@ import crypto from 'crypto';
 
 import rateLimit from 'express-rate-limit';
 import { dbManager } from './src/server/db.ts';
+import { firestoreSync } from './src/server/firestoreSync.ts';
 import { logger, getLogFilePath } from './src/server/logger.ts';
 import {
   killProcessSchema,
@@ -119,6 +120,9 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
 
   // Initialize SQLite persistent database (sql.js / WASM)
   await dbManager.init();
+
+  // Initialize Cloud Firestore High-Availability Persistence
+  await firestoreSync.init();
 
   // Rate Limiting Middlewares (relaxed in development/reverse proxy)
   const isDev = process.env.NODE_ENV !== 'production';
@@ -385,6 +389,7 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
       };
       sharedState.threats.push(fullThreat);
       dbManager.saveThreat(fullThreat);
+      firestoreSync.syncThreat(fullThreat);
       sharedState.lastModified = new Date().toISOString();
       broadcastToAll({
         type: 'STATE_DELTA',
@@ -415,6 +420,7 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
         };
         sharedState.threats.push(fullThreat);
         dbManager.saveThreat(fullThreat);
+        firestoreSync.syncThreat(fullThreat);
         added.push(fullThreat);
       }
     }
@@ -3583,14 +3589,25 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
   app.post('/api/settings', validateBody(settingsUpdateSchema), (req, res) => {
     const updated = dbManager.updateSettings(req.body);
+    for (const [k, v] of Object.entries(req.body)) {
+      firestoreSync.syncSetting(k, v);
+    }
     if (req.body.autoScanInterval) {
       backgroundScheduler.configureInterval(req.body.autoScanInterval);
     }
-    logger.info({ settings: req.body }, '[Settings] Préférences utilisateur enregistrées dans SQLite');
+    logger.info({ settings: req.body }, '[Settings] Préférences utilisateur enregistrées dans SQLite et Cloud Firestore');
     res.json({
       success: true,
       message: 'Préférences utilisateur enregistrées avec succès.',
       settings: updated,
+    });
+  });
+
+  // Haute Disponibilité & Persistance Cloud Firestore Status
+  app.get('/api/system/ha-status', (req, res) => {
+    res.json({
+      success: true,
+      ...firestoreSync.getPersistenceStatus(),
     });
   });
 
@@ -3719,6 +3736,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         operatorName: 'EDR Ingestion Gateway',
       });
 
+      firestoreSync.syncEdrEndpoint(savedEndpoint);
+
       broadcastToAll({
         type: 'EDR_ENDPOINT_REGISTERED',
         endpoint: savedEndpoint,
@@ -3742,7 +3761,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       const { endpointId, cpuUsagePercent, ramUsagePercent, activeThreatsCount, networkIsolated } = req.body;
       const existing = dbManager.getEndpoint(endpointId);
       if (existing) {
-        dbManager.saveEndpoint({
+        const updated = dbManager.saveEndpoint({
           ...existing,
           lastSeen: new Date().toISOString(),
           status: (activeThreatsCount && activeThreatsCount > 0) ? (existing.healthScore < 50 ? 'CRITICAL' : 'WARNING') : 'ONLINE',
@@ -3751,6 +3770,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
           activeThreatsCount: activeThreatsCount !== undefined ? activeThreatsCount : existing.activeThreatsCount,
           networkIsolated: networkIsolated !== undefined ? networkIsolated : existing.networkIsolated,
         });
+        firestoreSync.syncEdrEndpoint(updated);
       }
 
       // Check for pending remediation commands
@@ -3783,6 +3803,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
           mitreTechnique: evt.mitreTechnique,
         });
         savedEvents.push(saved);
+        firestoreSync.syncEdrEvent(saved);
 
         // If high or critical severity, escalate to SOC shared threats pool
         if (evt.severity === 'CRITICAL' || evt.severity === 'HIGH') {
@@ -3932,10 +3953,11 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         payload: { reason: shouldIsolate ? 'Confinement d\'urgence déclenché par le SOC' : 'Levée de l\'isolation réseau' },
       });
 
-      dbManager.saveEndpoint({
+      const updated = dbManager.saveEndpoint({
         ...endpoint,
         networkIsolated: shouldIsolate,
       });
+      firestoreSync.syncEdrEndpoint(updated);
 
       res.json({
         success: true,
@@ -3952,6 +3974,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   app.delete('/api/edr/endpoints/:id', (req, res) => {
     try {
       dbManager.deleteEndpoint(req.params.id);
+      firestoreSync.deleteEdrEndpoint(req.params.id);
       broadcastToAll({
         type: 'EDR_ENDPOINT_DELETED',
         endpointId: req.params.id,
