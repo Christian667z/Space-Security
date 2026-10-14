@@ -2843,35 +2843,6 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   // MULTI-USER SYNCHRONIZATION & WEBSOCKET ENGINE
   // =========================================================================
 
-  interface OperatorClient {
-    id: string;
-    name: string;
-    role: string;
-    ip: string;
-    connectedAt: string;
-    status: 'ONLINE' | 'IDLE';
-  }
-
-  const clientSessions = new Map<WebSocket, OperatorClient>();
-  let operatorSequence = 1;
-
-  const connectedClients = new Set<WebSocket>();
-
-  const getActiveOperators = (): OperatorClient[] => {
-    return Array.from(clientSessions.values());
-  };
-
-  const broadcastToAll = (message: any, excludeWs?: WebSocket) => {
-    const payload = JSON.stringify(message);
-    connectedClients.forEach(client => {
-      if (client !== excludeWs && client.readyState === WebSocket.OPEN) {
-        try {
-          client.send(payload);
-        } catch {}
-      }
-    });
-  };
-
   // Start background watchdog scheduler with WebSocket broadcaster
   backgroundScheduler.start(broadcastToAll);
 
