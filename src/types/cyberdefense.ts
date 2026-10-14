@@ -340,6 +340,8 @@ export interface EdrEndpoint {
   healthScore: number;
   activeThreatsCount: number;
   networkIsolated: boolean;
+  isolationStatus?: 'NORMAL' | 'ISOLATION_PENDING' | 'ISOLATED' | 'RESTORATION_PENDING';
+  agentSecret?: string;
   cpuUsagePercent: number;
   ramUsagePercent: number;
   pendingCommandsCount?: number;
@@ -361,14 +363,16 @@ export interface EdrCommand {
   id: string;
   endpointId: string;
   hostname: string;
-  type: 'KILL_PROCESS' | 'ISOLATE_NETWORK' | 'UNISOLATE_NETWORK' | 'SCAN_DEEP' | 'REPAIR_THEMES' | 'RESTORE_DEFENDER' | 'CUSTOM_PS';
+  type: 'KILL_PROCESS' | 'ISOLATE_NETWORK' | 'UNISOLATE_NETWORK' | 'SCAN_DEEP' | 'REPAIR_THEMES' | 'RESTORE_DEFENDER';
   payload?: {
     pid?: number;
     command?: string;
     reason?: string;
   };
-  status: 'PENDING' | 'EXECUTED' | 'FAILED';
+  status: 'PENDING' | 'EXECUTED' | 'FAILED' | 'EXPIRED';
   createdAt: string;
+  expiresAt?: string;
+  signature?: string;
   executedAt?: string;
   result?: string;
 }

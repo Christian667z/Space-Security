@@ -3,6 +3,12 @@ import type { Request, Response, NextFunction } from 'express';
 import type http from 'http';
 import { logger } from './logger.ts';
 
+// Injected endpoint lookup provider to avoid tight coupling with sqlite dbManager
+let authDbManager: { getEndpoint: (id: string) => any } | null = null;
+export function setAuthDbManager(mgr: { getEndpoint: (id: string) => any }) {
+  authDbManager = mgr;
+}
+
 // Cryptographically secure tokens generated on server startup
 const SERVER_AUTH_TOKEN = process.env.SPACESEC_AUTH_TOKEN || crypto.randomBytes(32).toString('hex');
 const EDR_AGENT_TOKEN = process.env.SPACESEC_EDR_TOKEN || crypto.randomBytes(32).toString('hex');
@@ -59,13 +65,21 @@ export function isAllowedHost(hostnameOrHost?: string | null): boolean {
 
   let hostClean = hostnameOrHost.trim().toLowerCase();
 
-  // Strip IPv6 bracket notation if present
+  // Direct match (e.g. '::1', '[::1]', 'localhost', '127.0.0.1')
+  if (DEFAULT_ALLOWED_HOSTNAMES.has(hostClean)) {
+    return true;
+  }
+
+  // Strip IPv6 bracket notation if present: [::1]:3000 -> ::1
   if (hostClean.startsWith('[') && hostClean.includes(']')) {
     const closingIdx = hostClean.indexOf(']');
     hostClean = hostClean.substring(1, closingIdx);
-  } else if (hostClean.includes(':')) {
-    // Strip port
-    hostClean = hostClean.split(':')[0];
+  } else {
+    // Only strip port if it's a domain/IPv4 with a single colon (e.g. localhost:3000, 127.0.0.1:8080)
+    const colonCount = (hostClean.match(/:/g) || []).length;
+    if (colonCount === 1) {
+      hostClean = hostClean.split(':')[0];
+    }
   }
 
   if (DEFAULT_ALLOWED_HOSTNAMES.has(hostClean)) {
@@ -669,6 +683,148 @@ export function requireEdrAuth(req: Request, res: Response, next: NextFunction) 
   return res.status(401).json({
     success: false,
     error: 'Non autorisé : Jeton d\'authentification d\'agent EDR invalide ou manquant.',
+    code: 'UNAUTHORIZED_EDR_AGENT',
+  });
+}
+
+/**
+ * Per-Agent EDR Authentication Middleware.
+ * Authenticates agents using per-agent secret and HMAC-SHA256 request signatures.
+ */
+export function requireAgentAuth(req: Request, res: Response, next: NextFunction) {
+  if (req.method === 'OPTIONS') return next();
+
+  // 1. If active SOC Admin/Analyst session is present, allow access
+  const authHeader = req.headers.authorization;
+  const customHeader = req.headers['x-spacesec-token'];
+  let bearerToken: string | undefined;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    bearerToken = authHeader.substring(7).trim();
+  } else if (typeof customHeader === 'string') {
+    bearerToken = customHeader.trim();
+  }
+
+  if (bearerToken) {
+    const session = getSession(bearerToken);
+    if (session && (session.operator.role === 'admin' || session.operator.role === 'analyste')) {
+      (req as any).authenticatedOperator = session.operator;
+      return next();
+    }
+    if (isValidToken(bearerToken)) {
+      (req as any).authenticatedOperator = {
+        id: 'OP-MASTER-ADMIN',
+        name: 'Administrateur SOC (Master)',
+        role: 'admin' as OperatorRole,
+        ip: req.ip || '127.0.0.1',
+        verified: true,
+      };
+      return next();
+    }
+  }
+
+  // 2. Identify the endpoint
+  const endpointId = (
+    (req.headers['x-spacesec-endpoint-id'] as string) ||
+    req.body?.endpointId ||
+    req.params?.id ||
+    (req.query?.endpointId as string)
+  )?.trim();
+
+  const sigHeader = (req.headers['x-spacesec-signature'] as string | undefined)?.trim();
+  const timestampHeader = (req.headers['x-spacesec-timestamp'] as string | undefined)?.trim();
+  const agentSecretHeader = (req.headers['x-spacesec-agent-secret'] as string | undefined)?.trim();
+
+  if (endpointId) {
+    const endpoint = authDbManager ? authDbManager.getEndpoint(endpointId) : null;
+    if (!endpoint) {
+      logger.warn({ endpointId, path: req.path }, '[EDR Auth] Endpoint ID introuvable en base');
+      return res.status(401).json({
+        success: false,
+        error: 'Endpoint non reconnu par le SOC.',
+        code: 'AGENT_NOT_REGISTERED',
+      });
+    }
+
+    const secret = endpoint.agentSecret || getEdrAgentToken();
+
+    // Verify HMAC signature if provided
+    if (sigHeader && timestampHeader) {
+      const reqTime = new Date(timestampHeader).getTime();
+      if (isNaN(reqTime) || Math.abs(Date.now() - reqTime) > 5 * 60 * 1000) {
+        return res.status(401).json({
+          success: false,
+          error: 'Requête rejetée : Horodatage expiré ou désynchronisé (anti-rejeu).',
+          code: 'AGENT_TIMESTAMP_EXPIRED',
+        });
+      }
+
+      const rawBody = JSON.stringify(req.body || {});
+      const dataToSign = `${timestampHeader}:${endpointId}:${rawBody}`;
+      const expectedSig = crypto.createHmac('sha256', secret).update(dataToSign).digest('hex');
+
+      if (
+        sigHeader.length === expectedSig.length &&
+        crypto.timingSafeEqual(Buffer.from(sigHeader, 'utf-8'), Buffer.from(expectedSig, 'utf-8'))
+      ) {
+        (req as any).edrEndpoint = endpoint;
+        (req as any).authenticatedOperator = {
+          id: `AGENT-${endpoint.id}`,
+          name: `Agent EDR (${endpoint.hostname})`,
+          role: 'analyste' as OperatorRole,
+          ip: req.ip || '127.0.0.1',
+          verified: true,
+        };
+        return next();
+      } else {
+        logger.warn({ endpointId, path: req.path }, '[EDR Auth] Signature HMAC invalide');
+        return res.status(401).json({
+          success: false,
+          error: 'Signature HMAC invalide : Altération ou clé compromise.',
+          code: 'INVALID_AGENT_SIGNATURE',
+        });
+      }
+    }
+
+    // Direct secret verification (Bearer or X-SpaceSec-Agent-Secret)
+    const suppliedSecret = agentSecretHeader || bearerToken;
+    if (suppliedSecret && endpoint.agentSecret && suppliedSecret === endpoint.agentSecret) {
+      (req as any).edrEndpoint = endpoint;
+      (req as any).authenticatedOperator = {
+        id: `AGENT-${endpoint.id}`,
+        name: `Agent EDR (${endpoint.hostname})`,
+        role: 'analyste' as OperatorRole,
+        ip: req.ip || '127.0.0.1',
+        verified: true,
+      };
+      return next();
+    }
+
+    // Transitional fleet token fallback
+    if (suppliedSecret && isValidEdrAgentToken(suppliedSecret)) {
+      (req as any).edrEndpoint = endpoint;
+      (req as any).authenticatedOperator = {
+        id: `AGENT-${endpoint.id}`,
+        name: `Agent EDR (${endpoint.hostname})`,
+        role: 'analyste' as OperatorRole,
+        ip: req.ip || '127.0.0.1',
+        verified: true,
+      };
+      return next();
+    }
+  }
+
+  // 3. Desktop Electron packaged mode loopback IPC
+  if (process.env.IS_ELECTRON === 'true') {
+    const clientIp = req.ip || req.socket.remoteAddress || '';
+    if (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp.includes('127.0.0.1')) {
+      return next();
+    }
+  }
+
+  logger.warn({ ip: req.ip, path: req.path, endpointId }, '[EDR Auth] Accès agent rejeté');
+  return res.status(401).json({
+    success: false,
+    error: 'Non autorisé : Clé secrète ou signature HMAC de l\'agent EDR manquante ou invalide.',
     code: 'UNAUTHORIZED_EDR_AGENT',
   });
 }

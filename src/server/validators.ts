@@ -271,10 +271,9 @@ export const edrTelemetrySchema = z.object({
 
 export const edrCommandCreateSchema = z.object({
   endpointId: z.string().min(1, 'ID endpoint requis').max(128),
-  type: z.enum(['KILL_PROCESS', 'ISOLATE_NETWORK', 'UNISOLATE_NETWORK', 'SCAN_DEEP', 'REPAIR_THEMES', 'RESTORE_DEFENDER', 'CUSTOM_PS']),
+  type: z.enum(['KILL_PROCESS', 'ISOLATE_NETWORK', 'UNISOLATE_NETWORK', 'SCAN_DEEP', 'REPAIR_THEMES', 'RESTORE_DEFENDER']),
   payload: z.object({
     pid: z.number().optional(),
-    command: z.string().max(2000).optional(),
     reason: z.string().max(500).optional(),
   }).optional(),
 });

@@ -34,6 +34,8 @@ class BackgroundSchedulerService {
   // State memory to detect real deltas between consecutive scan runs
   private previousThreatSignatures: Set<string> = new Set();
   private hasCompletedInitialScan = false;
+  private fleetSweepTimer: NodeJS.Timeout | null = null;
+  private telemetryPruneTimer: NodeJS.Timeout | null = null;
 
   start(broadcast: BroadcastFunction): void {
     this.broadcast = broadcast;
@@ -46,6 +48,34 @@ class BackgroundSchedulerService {
         logger.error({ err }, '[Scheduler] Erreur lors du scan initial de surveillance');
       });
     }, 10000);
+
+    // EDR Fleet Sweep Watchdog: runs every 15s to transition uncommunicative agents to OFFLINE,
+    // expire stale commands, and recover healthScore for clean endpoints
+    this.fleetSweepTimer = setInterval(() => {
+      try {
+        const { changedEndpoints, expiredCommands } = dbManager.sweepEndpoints(45000);
+        if (changedEndpoints.length > 0 && this.broadcast) {
+          logger.info({ changedCount: changedEndpoints.length, expiredCommands }, '[Scheduler] EDR Fleet sweep detected state changes');
+          this.broadcast({
+            type: 'EDR_FLEET_SYNC',
+            endpoints: dbManager.getEndpoints(),
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch (err: any) {
+        logger.error({ err: err?.message || err }, '[Scheduler] Erreur lors du balayage de la flotte EDR');
+      }
+    }, 15000);
+
+    // EDR Telemetry Retention Pruner: runs every 10 minutes to prune events older than 7 days
+    // and cap events to 500 per endpoint to prevent unbounded database growth
+    this.telemetryPruneTimer = setInterval(() => {
+      try {
+        dbManager.pruneTelemetryEvents(7, 500);
+      } catch (err: any) {
+        logger.error({ err: err?.message || err }, '[Scheduler] Erreur lors de la purge de rétention télémétrie');
+      }
+    }, 10 * 60 * 1000);
   }
 
   configureInterval(interval: 'disabled' | '5m' | '15m' | '30m' | '1h'): void {
@@ -389,6 +419,14 @@ class BackgroundSchedulerService {
       this.task.stop();
       this.task = null;
       logger.info('[Scheduler] Planificateur arrêté.');
+    }
+    if (this.fleetSweepTimer) {
+      clearInterval(this.fleetSweepTimer);
+      this.fleetSweepTimer = null;
+    }
+    if (this.telemetryPruneTimer) {
+      clearInterval(this.telemetryPruneTimer);
+      this.telemetryPruneTimer = null;
     }
   }
 

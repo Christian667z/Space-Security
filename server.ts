@@ -40,6 +40,9 @@ import {
   requireAuth,
   requireRole,
   requireEdrAuth,
+  requireAgentAuth,
+  setAuthDbManager,
+  isAllowedHost,
   getLocalAuthToken,
   getEdrAgentToken,
   isValidToken,
@@ -54,6 +57,9 @@ import {
   resolveAuthenticatedOperator,
   type OperatorRole,
 } from './src/server/auth.ts';
+
+// Wire up database provider for EDR agent authentication
+setAuthDbManager(dbManager);
 import { checkHashReputation, checkIpReputation } from './src/server/threatIntel.ts';
 import { backgroundScheduler } from './src/server/scheduler.ts';
 import { safeExecFile, validateAndParsePid, sanitizeInterfaceName, sanitizePath, sanitizeIpAddress } from './src/server/safeExec.ts';
@@ -4014,8 +4020,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   // EDR CLIENT/SERVER & REMOTE AGENT INGESTION ROUTES
   // =========================================================================
 
-  // 1. Endpoints List & Fleet Status
-  app.get('/api/edr/endpoints', (req, res) => {
+  // 1. Endpoints List & Fleet Status (SECURED: requireAuth)
+  app.get('/api/edr/endpoints', requireAuth, (req, res) => {
     try {
       const endpoints = dbManager.getEndpoints();
       const stats = dbManager.getStats();
@@ -4030,8 +4036,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 2. Single Endpoint Detail, Telemetry History & Commands
-  app.get('/api/edr/endpoints/:id', (req, res) => {
+  // 2. Single Endpoint Detail, Telemetry History & Commands (SECURED: requireAuth)
+  app.get('/api/edr/endpoints/:id', requireAuth, (req, res) => {
     try {
       const endpoint = dbManager.getEndpoint(req.params.id);
       if (!endpoint) {
@@ -4050,13 +4056,20 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 3. EDR Agent Registration Handshake (SECURED: requireEdrAuth)
+  // 3. EDR Agent Registration Handshake (SECURED: requireEdrAuth - Generates Per-Agent Secret)
   app.post('/api/edr/register', requireEdrAuth, validateBody(edrRegisterSchema), (req, res) => {
     try {
       const forwarded = req.headers['x-forwarded-for'];
       const callerIp = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress || '';
       const data = req.body;
-      const endpointId = data.id || `ep-${data.hostname.toLowerCase().replace(/[^a-z0-9]/g, '')}-${Math.abs(data.hostname.split('').reduce((a: number, b: string) => ((a << 5) - a) + b.charCodeAt(0), 0))}`;
+      
+      // Generate a non-spoofable, authoritative endpointId
+      const sanitizedHost = data.hostname.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const existing = data.id ? dbManager.getEndpoint(data.id) : null;
+      const endpointId = existing ? existing.id : `ep-${sanitizedHost}-${crypto.randomBytes(4).toString('hex')}`;
+      
+      // Generate or preserve a high-entropy per-agent secret key for HMAC signing
+      const agentSecret = existing?.agentSecret || crypto.randomBytes(32).toString('hex');
 
       const savedEndpoint = dbManager.saveEndpoint({
         id: endpointId,
@@ -4065,9 +4078,12 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         publicIp: callerIp && callerIp !== '127.0.0.1' && callerIp !== '::1' ? callerIp : data.publicIp,
         macAddress: data.macAddress || '00:00:00:00:00:00',
         osVersion: data.osVersion || 'Windows',
-        agentVersion: data.agentVersion || 'v3.0.0-EDR-LIGHT',
+        agentVersion: data.agentVersion || 'v3.1.0-EDR-SECURE',
         status: 'ONLINE',
         lastSeen: new Date().toISOString(),
+        agentSecret,
+        isolationStatus: existing?.isolationStatus || 'NORMAL',
+        networkIsolated: existing?.networkIsolated ?? false,
       });
 
       dbManager.addAuditLog({
@@ -4075,7 +4091,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         timestamp: new Date().toLocaleTimeString('fr-FR'),
         level: 'INFO',
         tag: 'EDR-FLEET',
-        text: `Nouvel agent EDR enregistré : ${savedEndpoint.hostname} (${savedEndpoint.ipAddress}) sous ${savedEndpoint.osVersion}.`,
+        text: `Nouvel agent EDR enregistré : ${savedEndpoint.hostname} (${savedEndpoint.ipAddress}) sous ${savedEndpoint.osVersion}. Clé secrète par agent provisionnée.`,
         operatorName: 'EDR Ingestion Gateway',
       });
 
@@ -4087,36 +4103,38 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         timestamp: new Date().toISOString(),
       });
 
-      logger.info({ endpointId, hostname: data.hostname }, '[EDR Gateway] Agent Windows enregistré avec succès');
+      logger.info({ endpointId, hostname: data.hostname }, '[EDR Gateway] Agent Windows enregistré avec secret cryptographique dédié');
       res.json({
         success: true,
         message: 'Endpoint enregistré avec succès.',
         endpoint: savedEndpoint,
+        agentSecret,
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  // 4. EDR Agent Heartbeat (Keepalive + Command Pulling - SECURED: requireEdrAuth)
-  app.post('/api/edr/heartbeat', requireEdrAuth, validateBody(edrHeartbeatSchema), (req, res) => {
+  // 4. EDR Agent Heartbeat (Keepalive + Command Pulling - SECURED: requireAgentAuth with HMAC validation)
+  app.post('/api/edr/heartbeat', requireAgentAuth, validateBody(edrHeartbeatSchema), (req, res) => {
     try {
-      const { endpointId, cpuUsagePercent, ramUsagePercent, activeThreatsCount, networkIsolated } = req.body;
+      const { endpointId, cpuUsagePercent, ramUsagePercent, activeThreatsCount } = req.body;
       const existing = dbManager.getEndpoint(endpointId);
       if (existing) {
         const updated = dbManager.saveEndpoint({
           ...existing,
           lastSeen: new Date().toISOString(),
-          status: (activeThreatsCount && activeThreatsCount > 0) ? (existing.healthScore < 50 ? 'CRITICAL' : 'WARNING') : 'ONLINE',
+          status: (activeThreatsCount && activeThreatsCount > 0)
+            ? (existing.healthScore < 50 ? 'CRITICAL' : 'WARNING')
+            : (existing.status === 'OFFLINE' ? 'ONLINE' : existing.status),
           cpuUsagePercent: cpuUsagePercent !== undefined ? cpuUsagePercent : existing.cpuUsagePercent,
           ramUsagePercent: ramUsagePercent !== undefined ? ramUsagePercent : existing.ramUsagePercent,
           activeThreatsCount: activeThreatsCount !== undefined ? activeThreatsCount : existing.activeThreatsCount,
-          networkIsolated: networkIsolated !== undefined ? networkIsolated : existing.networkIsolated,
         });
         firestoreSync.syncEdrEndpoint(updated);
       }
 
-      // Check for pending remediation commands
+      // Check for pending remediation commands (automatically purges expired commands)
       const pendingCommands = dbManager.getPendingCommands(endpointId);
 
       res.json({
@@ -4129,8 +4147,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 5. Ingestion of Real-time EDR Telemetry Events (SECURED: requireEdrAuth)
-  app.post('/api/edr/telemetry', requireEdrAuth, validateBody(edrTelemetrySchema), (req, res) => {
+  // 5. Ingestion of Real-time EDR Telemetry Events (SECURED: requireAgentAuth with HMAC validation)
+  app.post('/api/edr/telemetry', requireAgentAuth, validateBody(edrTelemetrySchema), (req, res) => {
     try {
       const { endpointId, hostname, events } = req.body;
       const savedEvents = [];
@@ -4210,7 +4228,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 6. Create Remote Remediation Command (SECURED: requireAuth + requireRole('admin') + sensitiveActionLimiter)
+  // 6. Create Remote Remediation Command (SECURED: requireAuth + requireRole('admin') + sensitiveActionLimiter + HMAC signature & TTL)
   app.post('/api/edr/commands', requireAuth, requireRole('admin'), sensitiveActionLimiter, validateBody(edrCommandCreateSchema), (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
@@ -4220,11 +4238,20 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         return res.status(404).json({ success: false, error: 'Endpoint cible introuvable.' });
       }
 
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min TTL
+      const cmdId = `cmd-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+      const payloadStr = JSON.stringify(payload || {});
+      const secret = endpoint.agentSecret || getEdrAgentToken();
+      const signature = crypto.createHmac('sha256', secret).update(`${cmdId}:${type}:${payloadStr}:${expiresAt}`).digest('hex');
+
       const cmd = dbManager.createEdrCommand({
+        id: cmdId,
         endpointId,
         hostname: endpoint.hostname,
         type,
         payload,
+        expiresAt,
+        signature,
       });
 
       dbManager.addAuditLog({
@@ -4232,7 +4259,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         timestamp: new Date().toLocaleTimeString('fr-FR'),
         level: 'WARN',
         tag: 'EDR-COMMAND',
-        text: `Ordre de remédiation EDR [${type}] envoyé à distance vers ${endpoint.hostname} (ID: ${cmd.id}) par ${authenticatedOp.name}.`,
+        text: `Ordre de remédiation EDR [${type}] envoyé à distance vers ${endpoint.hostname} (ID: ${cmd.id}) par ${authenticatedOp.name}. Signé par HMAC avec TTL 30m.`,
         operatorName: authenticatedOp.name,
       });
 
@@ -4243,7 +4270,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
       res.json({
         success: true,
-        message: 'Ordre de remédiation enregistré avec succès. Il sera exécuté au prochain heartbeat de l\'agent.',
+        message: 'Ordre de remédiation signé enregistré avec succès. Il sera exécuté au prochain heartbeat de l\'agent.',
         command: cmd,
       });
     } catch (err: any) {
@@ -4251,11 +4278,50 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 7. Acknowledge Command Execution by Agent (SECURED: requireEdrAuth)
-  app.post('/api/edr/commands/:id/ack', requireEdrAuth, validateBody(edrCommandAckSchema), (req, res) => {
+  // 7. Acknowledge Command Execution by Agent (SECURED: requireAgentAuth + Deferred Network Isolation State)
+  app.post('/api/edr/commands/:id/ack', requireAgentAuth, validateBody(edrCommandAckSchema), (req, res) => {
     try {
       const { status, result } = req.body;
+      const cmd = dbManager.getEdrCommand(req.params.id);
       dbManager.updateEdrCommand(req.params.id, status, result);
+
+      // Handle deferred isolation state transition based on authentic agent acknowledgement
+      if (cmd) {
+        const endpoint = dbManager.getEndpoint(cmd.endpointId);
+        if (endpoint) {
+          let stateChanged = false;
+          if (cmd.type === 'ISOLATE_NETWORK') {
+            if (status === 'EXECUTED') {
+              endpoint.networkIsolated = true;
+              endpoint.isolationStatus = 'ISOLATED';
+              stateChanged = true;
+            } else {
+              endpoint.networkIsolated = false;
+              endpoint.isolationStatus = 'NORMAL';
+              stateChanged = true;
+            }
+          } else if (cmd.type === 'UNISOLATE_NETWORK') {
+            if (status === 'EXECUTED') {
+              endpoint.networkIsolated = false;
+              endpoint.isolationStatus = 'NORMAL';
+              stateChanged = true;
+            } else {
+              endpoint.networkIsolated = true;
+              endpoint.isolationStatus = 'ISOLATED';
+              stateChanged = true;
+            }
+          }
+
+          if (stateChanged) {
+            dbManager.saveEndpoint(endpoint);
+            firestoreSync.syncEdrEndpoint(endpoint);
+            broadcastToAll({
+              type: 'EDR_FLEET_SYNC',
+              endpoints: dbManager.getEndpoints(),
+            });
+          }
+        }
+      }
 
       dbManager.addAuditLog({
         id: `log-ack-${Date.now()}`,
@@ -4279,7 +4345,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 8. Toggle Host Network Isolation (SECURED: requireAuth + requireRole('admin') + sensitiveActionLimiter)
+  // 8. Toggle Host Network Isolation (SECURED: requireAuth + requireRole('admin') + sensitiveActionLimiter + Deferred Ack)
   app.post('/api/edr/endpoints/:id/isolate', requireAuth, requireRole('admin'), sensitiveActionLimiter, (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
@@ -4290,17 +4356,30 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
       const shouldIsolate = !endpoint.networkIsolated;
       const cmdType = shouldIsolate ? 'ISOLATE_NETWORK' : 'UNISOLATE_NETWORK';
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      const cmdId = `cmd-iso-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+      const payload = {
+        reason: shouldIsolate
+          ? `Confinement d'urgence déclenché par ${authenticatedOp.name}`
+          : `Levée de l'isolation réseau par ${authenticatedOp.name}`,
+      };
+      const secret = endpoint.agentSecret || getEdrAgentToken();
+      const signature = crypto.createHmac('sha256', secret).update(`${cmdId}:${cmdType}:${JSON.stringify(payload)}:${expiresAt}`).digest('hex');
 
       const cmd = dbManager.createEdrCommand({
+        id: cmdId,
         endpointId: endpoint.id,
         hostname: endpoint.hostname,
         type: cmdType,
-        payload: { reason: shouldIsolate ? `Confinement d'urgence déclenché par ${authenticatedOp.name}` : `Levée de l'isolation réseau par ${authenticatedOp.name}` },
+        payload,
+        expiresAt,
+        signature,
       });
 
+      // Crucial: Set isolationStatus to PENDING without toggling networkIsolated until agent acknowledgement
       const updated = dbManager.saveEndpoint({
         ...endpoint,
-        networkIsolated: shouldIsolate,
+        isolationStatus: shouldIsolate ? 'ISOLATION_PENDING' : 'RESTORATION_PENDING',
       });
       firestoreSync.syncEdrEndpoint(updated);
 
@@ -4310,16 +4389,23 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         level: 'WARN',
         tag: 'EDR-ISOLATION',
         text: shouldIsolate
-          ? `Isolement réseau de ${endpoint.hostname} ordonné par ${authenticatedOp.name}.`
-          : `Rétablissement réseau de ${endpoint.hostname} ordonné par ${authenticatedOp.name}.`,
+          ? `Demande d'isolement réseau de ${endpoint.hostname} ordonnée par ${authenticatedOp.name} (en attente d'acquittement de l'agent).`
+          : `Demande de rétablissement réseau de ${endpoint.hostname} ordonnée par ${authenticatedOp.name} (en attente d'acquittement de l'agent).`,
         operatorName: authenticatedOp.name,
+      });
+
+      broadcastToAll({
+        type: 'EDR_FLEET_SYNC',
+        endpoints: dbManager.getEndpoints(),
       });
 
       res.json({
         success: true,
-        message: shouldIsolate ? `Ordre d'isolation réseau envoyé à ${endpoint.hostname}.` : `Ordre de rétablissement réseau envoyé à ${endpoint.hostname}.`,
+        message: shouldIsolate
+          ? `Ordre d'isolation réseau envoyé à ${endpoint.hostname}. L'état sera confirmé dès l'acquittement de l'agent.`
+          : `Ordre de rétablissement réseau envoyé à ${endpoint.hostname}. L'état sera confirmé dès l'acquittement de l'agent.`,
         command: cmd,
-        isolated: shouldIsolate,
+        pendingStatus: updated.isolationStatus,
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -4356,10 +4442,13 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
   // 10. Generate / Download EDR Agent PowerShell Script (SECURED: requireAuth + requireRole('admin', 'analyste') + Scoped EDR Token)
   app.get('/api/edr/agent-script', requireAuth, requireRole('admin', 'analyste'), (req, res) => {
-    const host = req.headers.host || `localhost:${PORT}`;
+    const hostHeader = (req.headers.host || '').trim();
+    const isHostWhitelisted = isAllowedHost(hostHeader);
+    const validHost = isHostWhitelisted ? hostHeader : `127.0.0.1:${PORT}`;
     const protocol = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
-    const fullServerUrl = `${protocol}://${host}`;
-    // Security: Use dedicated scoped EDR Agent Token rather than leaking the master administrative token
+    const fullServerUrl = process.env.SPACESEC_SERVER_URL || `${protocol}://${validHost}`;
+
+    // Dedicated scoped EDR Agent Token rather than leaking the master administrative token
     const token = getEdrAgentToken();
     const script = generateEdrAgentPowerShell(fullServerUrl, token);
 
@@ -4373,15 +4462,21 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     res.send(script);
   });
 
-  // 11. Quick Deployment One-Liner Command (SECURED: requireAuth + requireRole('admin', 'analyste'))
+  // 11. Quick Deployment One-Liner Command (SECURED: requireAuth + requireRole('admin', 'analyste') + Host Sanitization)
   app.get('/api/edr/oneliner', requireAuth, requireRole('admin', 'analyste'), (req, res) => {
-    const host = req.headers.host || `localhost:${PORT}`;
+    const hostHeader = (req.headers.host || '').trim();
+    const isHostWhitelisted = isAllowedHost(hostHeader);
+    const validHost = isHostWhitelisted ? hostHeader : `127.0.0.1:${PORT}`;
     const protocol = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
-    const fullServerUrl = `${protocol}://${host}`;
-    const oneLiner = `powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "irm ${fullServerUrl}/api/edr/agent-script | iex"`;
+    const canonicalServerUrl = process.env.SPACESEC_SERVER_URL || `${protocol}://${validHost}`;
+    const token = getEdrAgentToken();
+
+    // Secure deployment one-liner: prevents Host header poisoning, enforces TLS1.2, authenticates script download
+    const oneLiner = `powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "$h=@{Authorization='Bearer ${token}'}; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $s = (Invoke-RestMethod -Uri '${canonicalServerUrl}/api/edr/agent-script' -Headers $h); & ([ScriptBlock]::Create($s)) -ServerUrl '${canonicalServerUrl}' -AuthToken '${token}'"`;
+
     res.json({
       success: true,
-      serverUrl: fullServerUrl,
+      serverUrl: canonicalServerUrl,
       oneLiner,
       instructions: "Exécutez cette commande dans une fenêtre PowerShell Administrateur sur le poste Windows cible pour connecter immédiatement la machine au SOC Space Security.",
     });

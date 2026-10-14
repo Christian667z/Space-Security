@@ -216,7 +216,9 @@ class SQLiteDatabaseManager {
         activeThreatsCount INTEGER NOT NULL DEFAULT 0,
         networkIsolated INTEGER NOT NULL DEFAULT 0,
         cpuUsagePercent INTEGER NOT NULL DEFAULT 0,
-        ramUsagePercent INTEGER NOT NULL DEFAULT 0
+        ramUsagePercent INTEGER NOT NULL DEFAULT 0,
+        agentSecret TEXT,
+        isolationStatus TEXT NOT NULL DEFAULT 'NORMAL'
       );
 
       CREATE TABLE IF NOT EXISTS edr_telemetry_events (
@@ -240,7 +242,9 @@ class SQLiteDatabaseManager {
         status TEXT NOT NULL DEFAULT 'PENDING',
         createdAt TEXT NOT NULL,
         executedAt TEXT,
-        resultJson TEXT
+        resultJson TEXT,
+        expiresAt TEXT,
+        signature TEXT
       );
     `);
 
@@ -253,6 +257,18 @@ class SQLiteDatabaseManager {
     } catch {}
     try {
       this.db.run('ALTER TABLE scan_history ADD COLUMN score INTEGER NOT NULL DEFAULT 100');
+    } catch {}
+    try {
+      this.db.run('ALTER TABLE edr_endpoints ADD COLUMN agentSecret TEXT');
+    } catch {}
+    try {
+      this.db.run("ALTER TABLE edr_endpoints ADD COLUMN isolationStatus TEXT NOT NULL DEFAULT 'NORMAL'");
+    } catch {}
+    try {
+      this.db.run('ALTER TABLE edr_commands ADD COLUMN expiresAt TEXT');
+    } catch {}
+    try {
+      this.db.run('ALTER TABLE edr_commands ADD COLUMN signature TEXT');
     } catch {}
   }
 
@@ -804,7 +820,10 @@ class SQLiteDatabaseManager {
   getEndpoints(): EdrEndpoint[] {
     if (!this.db) return [];
     const res = this.db.exec(`
-      SELECT e.*, (SELECT COUNT(*) FROM edr_commands c WHERE c.endpointId = e.id AND c.status = 'PENDING') as pendingCount
+      SELECT e.id, e.hostname, e.ipAddress, e.publicIp, e.macAddress, e.osVersion, e.agentVersion,
+             e.status, e.lastSeen, e.registeredAt, e.healthScore, e.activeThreatsCount,
+             e.networkIsolated, e.cpuUsagePercent, e.ramUsagePercent, e.agentSecret, e.isolationStatus,
+             (SELECT COUNT(*) FROM edr_commands c WHERE c.endpointId = e.id AND c.status = 'PENDING') as pendingCount
       FROM edr_endpoints e ORDER BY e.lastSeen DESC
     `);
     if (res.length === 0) return [];
@@ -824,14 +843,19 @@ class SQLiteDatabaseManager {
       networkIsolated: Boolean(row[12]),
       cpuUsagePercent: Number(row[13]),
       ramUsagePercent: Number(row[14]),
-      pendingCommandsCount: Number(row[15] || 0),
+      agentSecret: row[15] ? String(row[15]) : undefined,
+      isolationStatus: (row[16] as EdrEndpoint['isolationStatus']) || 'NORMAL',
+      pendingCommandsCount: Number(row[17] || 0),
     }));
   }
 
   getEndpoint(id: string): EdrEndpoint | null {
     if (!this.db) return null;
     const res = this.db.exec(`
-      SELECT e.*, (SELECT COUNT(*) FROM edr_commands c WHERE c.endpointId = e.id AND c.status = 'PENDING') as pendingCount
+      SELECT e.id, e.hostname, e.ipAddress, e.publicIp, e.macAddress, e.osVersion, e.agentVersion,
+             e.status, e.lastSeen, e.registeredAt, e.healthScore, e.activeThreatsCount,
+             e.networkIsolated, e.cpuUsagePercent, e.ramUsagePercent, e.agentSecret, e.isolationStatus,
+             (SELECT COUNT(*) FROM edr_commands c WHERE c.endpointId = e.id AND c.status = 'PENDING') as pendingCount
       FROM edr_endpoints e WHERE e.id = ?
     `, [id]);
     if (res.length === 0 || res[0].values.length === 0) return null;
@@ -852,7 +876,9 @@ class SQLiteDatabaseManager {
       networkIsolated: Boolean(row[12]),
       cpuUsagePercent: Number(row[13]),
       ramUsagePercent: Number(row[14]),
-      pendingCommandsCount: Number(row[15] || 0),
+      agentSecret: row[15] ? String(row[15]) : undefined,
+      isolationStatus: (row[16] as EdrEndpoint['isolationStatus']) || 'NORMAL',
+      pendingCommandsCount: Number(row[17] || 0),
     };
   }
 
@@ -876,14 +902,16 @@ class SQLiteDatabaseManager {
       networkIsolated: ep.networkIsolated !== undefined ? ep.networkIsolated : (existing?.networkIsolated ?? false),
       cpuUsagePercent: ep.cpuUsagePercent !== undefined ? ep.cpuUsagePercent : (existing?.cpuUsagePercent ?? 0),
       ramUsagePercent: ep.ramUsagePercent !== undefined ? ep.ramUsagePercent : (existing?.ramUsagePercent ?? 0),
+      agentSecret: ep.agentSecret !== undefined ? ep.agentSecret : existing?.agentSecret,
+      isolationStatus: ep.isolationStatus || existing?.isolationStatus || 'NORMAL',
     };
 
     this.db.run(`
       INSERT OR REPLACE INTO edr_endpoints (
         id, hostname, ipAddress, publicIp, macAddress, osVersion, agentVersion, status,
         lastSeen, registeredAt, healthScore, activeThreatsCount, networkIsolated,
-        cpuUsagePercent, ramUsagePercent
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        cpuUsagePercent, ramUsagePercent, agentSecret, isolationStatus
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       endpoint.id,
       endpoint.hostname,
@@ -900,6 +928,8 @@ class SQLiteDatabaseManager {
       endpoint.networkIsolated ? 1 : 0,
       endpoint.cpuUsagePercent,
       endpoint.ramUsagePercent,
+      endpoint.agentSecret || null,
+      endpoint.isolationStatus || 'NORMAL',
     ]);
 
     this.scheduleSave();
@@ -912,6 +942,47 @@ class SQLiteDatabaseManager {
     this.db.run('DELETE FROM edr_telemetry_events WHERE endpointId = ?', [id]);
     this.db.run('DELETE FROM edr_commands WHERE endpointId = ?', [id]);
     this.scheduleSave();
+  }
+
+  sweepEndpoints(offlineThresholdMs = 45000): { changedEndpoints: EdrEndpoint[]; expiredCommands: number } {
+    if (!this.db) return { changedEndpoints: [], expiredCommands: 0 };
+    const now = Date.now();
+    const changedEndpoints: EdrEndpoint[] = [];
+
+    // Expire commands whose TTL has passed
+    const nowIso = new Date(now).toISOString();
+    const beforeExpired = this.scalar("SELECT COUNT(*) FROM edr_commands WHERE status = 'EXPIRED'");
+    this.db.run(
+      "UPDATE edr_commands SET status = 'EXPIRED' WHERE status = 'PENDING' AND expiresAt IS NOT NULL AND expiresAt < ?",
+      [nowIso]
+    );
+    const afterExpired = this.scalar("SELECT COUNT(*) FROM edr_commands WHERE status = 'EXPIRED'");
+    const expiredCommands = afterExpired - beforeExpired;
+
+    const endpoints = this.getEndpoints();
+    for (const ep of endpoints) {
+      let modified = false;
+      const lastSeenMs = new Date(ep.lastSeen).getTime();
+
+      // Check if heartbeat stopped
+      if (ep.status === 'ONLINE' && now - lastSeenMs > offlineThresholdMs) {
+        ep.status = 'OFFLINE';
+        modified = true;
+      }
+
+      // Recover health score gradually if ONLINE and 0 active threats
+      if (ep.status === 'ONLINE' && ep.activeThreatsCount === 0 && ep.healthScore < 100) {
+        ep.healthScore = Math.min(100, ep.healthScore + 5);
+        modified = true;
+      }
+
+      if (modified) {
+        this.saveEndpoint(ep);
+        changedEndpoints.push(ep);
+      }
+    }
+
+    return { changedEndpoints, expiredCommands };
   }
 
   addEdrEvent(event: Omit<EdrTelemetryEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: string }): EdrTelemetryEvent {
@@ -947,6 +1018,38 @@ class SQLiteDatabaseManager {
     return fullEvent;
   }
 
+  pruneTelemetryEvents(maxAgeDays = 7, maxPerEndpoint = 500): { prunedByAge: number; prunedByLimit: number } {
+    if (!this.db) return { prunedByAge: 0, prunedByLimit: 0 };
+    const cutoffDate = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000).toISOString();
+    const beforeCount = this.scalar('SELECT COUNT(*) FROM edr_telemetry_events');
+    this.db.run('DELETE FROM edr_telemetry_events WHERE timestamp < ?', [cutoffDate]);
+    const afterAgeCount = this.scalar('SELECT COUNT(*) FROM edr_telemetry_events');
+    const prunedByAge = beforeCount - afterAgeCount;
+
+    let prunedByLimit = 0;
+    const endpointsRes = this.db.exec('SELECT DISTINCT endpointId FROM edr_telemetry_events');
+    if (endpointsRes.length > 0 && endpointsRes[0].values.length > 0) {
+      for (const row of endpointsRes[0].values) {
+        const epId = String(row[0]);
+        const count = this.scalar('SELECT COUNT(*) FROM edr_telemetry_events WHERE endpointId = ?', [epId]);
+        if (count > maxPerEndpoint) {
+          const deleteCount = count - maxPerEndpoint;
+          this.db.run(`
+            DELETE FROM edr_telemetry_events WHERE id IN (
+              SELECT id FROM edr_telemetry_events WHERE endpointId = ? ORDER BY timestamp ASC LIMIT ?
+            )
+          `, [epId, deleteCount]);
+          prunedByLimit += deleteCount;
+        }
+      }
+    }
+    if (prunedByAge > 0 || prunedByLimit > 0) {
+      this.scheduleSave();
+      logger.info(`[Database] Telemetry retention: pruned ${prunedByAge} old events, ${prunedByLimit} excess events`);
+    }
+    return { prunedByAge, prunedByLimit };
+  }
+
   getEdrEvents(endpointId?: string, limit = 50): EdrTelemetryEvent[] {
     if (!this.db) return [];
     const query = endpointId
@@ -968,7 +1071,30 @@ class SQLiteDatabaseManager {
     }));
   }
 
-  createEdrCommand(cmd: Omit<EdrCommand, 'id' | 'status' | 'createdAt'> & { id?: string }): EdrCommand {
+  getEdrCommand(id: string): EdrCommand | null {
+    if (!this.db) return null;
+    const res = this.db.exec(
+      'SELECT id, endpointId, hostname, commandType, payloadJson, status, createdAt, executedAt, resultJson, expiresAt, signature FROM edr_commands WHERE id = ?',
+      [id]
+    );
+    if (res.length === 0 || res[0].values.length === 0) return null;
+    const row = res[0].values[0];
+    return {
+      id: String(row[0]),
+      endpointId: String(row[1]),
+      hostname: String(row[2]),
+      type: row[3] as EdrCommand['type'],
+      payload: row[4] ? JSON.parse(String(row[4])) : undefined,
+      status: row[5] as EdrCommand['status'],
+      createdAt: String(row[6]),
+      executedAt: row[7] ? String(row[7]) : undefined,
+      result: row[8] ? String(row[8]) : undefined,
+      expiresAt: row[9] ? String(row[9]) : undefined,
+      signature: row[10] ? String(row[10]) : undefined,
+    };
+  }
+
+  createEdrCommand(cmd: Omit<EdrCommand, 'id' | 'status' | 'createdAt'> & { id?: string; expiresAt?: string; signature?: string }): EdrCommand {
     if (!this.db) throw new Error('Database not initialized');
     const fullCmd: EdrCommand = {
       id: cmd.id || `cmd-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
@@ -978,11 +1104,13 @@ class SQLiteDatabaseManager {
       payload: cmd.payload,
       status: 'PENDING',
       createdAt: new Date().toISOString(),
+      expiresAt: cmd.expiresAt || new Date(Date.now() + 3600 * 1000).toISOString(),
+      signature: cmd.signature,
     };
 
     this.db.run(`
-      INSERT INTO edr_commands (id, endpointId, hostname, commandType, payloadJson, status, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO edr_commands (id, endpointId, hostname, commandType, payloadJson, status, createdAt, expiresAt, signature)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       fullCmd.id,
       fullCmd.endpointId,
@@ -991,6 +1119,8 @@ class SQLiteDatabaseManager {
       fullCmd.payload ? JSON.stringify(fullCmd.payload) : null,
       fullCmd.status,
       fullCmd.createdAt,
+      fullCmd.expiresAt || null,
+      fullCmd.signature || null,
     ]);
 
     this.scheduleSave();
@@ -999,8 +1129,15 @@ class SQLiteDatabaseManager {
 
   getPendingCommands(endpointId: string): EdrCommand[] {
     if (!this.db) return [];
+    // Mark expired pending commands first
+    const nowIso = new Date().toISOString();
+    this.db.run(
+      "UPDATE edr_commands SET status = 'EXPIRED' WHERE endpointId = ? AND status = 'PENDING' AND expiresAt IS NOT NULL AND expiresAt < ?",
+      [endpointId, nowIso]
+    );
+
     const res = this.db.exec(
-      "SELECT id, endpointId, hostname, commandType, payloadJson, status, createdAt FROM edr_commands WHERE endpointId = ? AND status = 'PENDING' ORDER BY createdAt ASC",
+      "SELECT id, endpointId, hostname, commandType, payloadJson, status, createdAt, expiresAt, signature FROM edr_commands WHERE endpointId = ? AND status = 'PENDING' ORDER BY createdAt ASC",
       [endpointId]
     );
     if (res.length === 0) return [];
@@ -1012,10 +1149,12 @@ class SQLiteDatabaseManager {
       payload: row[4] ? JSON.parse(String(row[4])) : undefined,
       status: 'PENDING' as const,
       createdAt: String(row[6]),
+      expiresAt: row[7] ? String(row[7]) : undefined,
+      signature: row[8] ? String(row[8]) : undefined,
     }));
   }
 
-  updateEdrCommand(id: string, status: 'EXECUTED' | 'FAILED', result?: string): void {
+  updateEdrCommand(id: string, status: 'EXECUTED' | 'FAILED' | 'EXPIRED', result?: string): void {
     if (!this.db) return;
     this.db.run(
       'UPDATE edr_commands SET status = ?, executedAt = ?, resultJson = ? WHERE id = ?',
@@ -1027,8 +1166,8 @@ class SQLiteDatabaseManager {
   getEdrCommands(endpointId?: string, limit = 50): EdrCommand[] {
     if (!this.db) return [];
     const query = endpointId
-      ? 'SELECT id, endpointId, hostname, commandType, payloadJson, status, createdAt, executedAt, resultJson FROM edr_commands WHERE endpointId = ? ORDER BY createdAt DESC LIMIT ?'
-      : 'SELECT id, endpointId, hostname, commandType, payloadJson, status, createdAt, executedAt, resultJson FROM edr_commands ORDER BY createdAt DESC LIMIT ?';
+      ? 'SELECT id, endpointId, hostname, commandType, payloadJson, status, createdAt, executedAt, resultJson, expiresAt, signature FROM edr_commands WHERE endpointId = ? ORDER BY createdAt DESC LIMIT ?'
+      : 'SELECT id, endpointId, hostname, commandType, payloadJson, status, createdAt, executedAt, resultJson, expiresAt, signature FROM edr_commands ORDER BY createdAt DESC LIMIT ?';
     const params = endpointId ? [endpointId, limit] : [limit];
     const res = this.db.exec(query, params);
     if (res.length === 0) return [];
@@ -1042,6 +1181,8 @@ class SQLiteDatabaseManager {
       createdAt: String(row[6]),
       executedAt: row[7] ? String(row[7]) : undefined,
       result: row[8] ? String(row[8]) : undefined,
+      expiresAt: row[9] ? String(row[9]) : undefined,
+      signature: row[10] ? String(row[10]) : undefined,
     }));
   }
 
