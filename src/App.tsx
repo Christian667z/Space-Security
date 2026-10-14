@@ -263,6 +263,16 @@ export default function App() {
                         targetTab: 'overview',
                       });
                     });
+
+                    // Sync newly detected scan threats to shared state
+                    apiFetch('/api/shared/mutate', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        action: 'RECORD_SCANNED_THREATS',
+                        payload: { threats: data.threats },
+                      }),
+                    }).catch(() => {});
                   }
                 }
                 return;
@@ -1263,6 +1273,9 @@ export default function App() {
               <ThreatTimeline
                 onRunInConsole={handleExecuteCommand}
                 onNavigateTab={setActiveTab}
+                threats={threats}
+                logs={logs}
+                onMutateThreatStatus={mutateThreatStatus}
               />
             )}
 

@@ -9,9 +9,10 @@ const DefenderSync = React.lazy(() => import('./DefenderSync').then(m => ({ defa
 interface HardeningPanelProps {
   onRunInConsole: (command: string) => void;
   onMutateThreatStatus?: (threatId: string, targetPath: string, status: ThreatItem['status']) => void;
+  onRecordScannedThreats?: (threats: ThreatItem[]) => void;
 }
 
-export const HardeningPanel: React.FC<HardeningPanelProps> = ({ onRunInConsole, onMutateThreatStatus }) => {
+export const HardeningPanel: React.FC<HardeningPanelProps> = ({ onRunInConsole, onMutateThreatStatus, onRecordScannedThreats }) => {
   const hardeningMetrics: HardeningMetric[] = [
     {
       title: 'Windows Defender & Protection en Temps Réel',
@@ -134,14 +135,22 @@ export const HardeningPanel: React.FC<HardeningPanelProps> = ({ onRunInConsole, 
       {/* DefenderSync Module: Audit and Clean Malware Exclusions in Microsoft Defender */}
       <ErrorBoundary moduleName="Audit des Exclusions Windows Defender (MpPreference)">
         <React.Suspense fallback={<div className="h-40 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement de DefenderSync...</div>}>
-          <DefenderSync onRunInConsole={onRunInConsole} onMutateThreatStatus={onMutateThreatStatus} />
+          <DefenderSync
+            onRunInConsole={onRunInConsole}
+            onMutateThreatStatus={onMutateThreatStatus}
+            onRecordScannedThreats={onRecordScannedThreats}
+          />
         </React.Suspense>
       </ErrorBoundary>
 
       {/* VulnerabilityScanner Module: Obsolete Windows Services & Missing Hotfixes (Get-HotFix / Get-Service) */}
       <ErrorBoundary moduleName="Scanner de Vulnérabilités & Correctifs Windows">
         <React.Suspense fallback={<div className="h-40 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement du Scanner de Vulnérabilités...</div>}>
-          <VulnerabilityScanner onRunInConsole={onRunInConsole} />
+          <VulnerabilityScanner
+            onRunInConsole={onRunInConsole}
+            onRecordScannedThreats={onRecordScannedThreats}
+            onMutateThreatStatus={onMutateThreatStatus}
+          />
         </React.Suspense>
       </ErrorBoundary>
 

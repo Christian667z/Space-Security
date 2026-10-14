@@ -3,7 +3,7 @@ import fs from 'fs';
 import { promisify } from 'util';
 import { exec } from 'child_process';
 import { persistentPs } from './persistentPowerShell.ts';
-import { parseNetshWifiOutput, FlattenedWifiItem } from './wifiParser.ts';
+import { parseNetshWifiOutput, type FlattenedWifiItem } from './wifiParser.ts';
 import { safeExecFile } from '../safeExec.ts';
 import { logger } from '../logger.ts';
 

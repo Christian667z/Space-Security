@@ -933,6 +933,89 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         });
       }
 
+      // Check Defender Exclusions
+      const defExclusions = scan.defenderExclusions?.paths || [];
+      for (const exPath of defExclusions) {
+        const lower = exPath.toLowerCase();
+        if (lower.includes('public') || lower.includes('temp') || lower.includes('appdata') || lower.includes('downloads')) {
+          realThreatsFound.push({
+            id: `real-threat-def-ex-${Buffer.from(exPath).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 16)}`,
+            name: `Exclusion Antivirus Suspecte : ${exPath}`,
+            category: 'Defender',
+            severity: 'HIGH',
+            targetPath: exPath,
+            mitreTechnique: 'T1562.001 - Impair Defenses: Disable or Modify Tools',
+            lockedBySystem: false,
+            trustedInstallerLocked: false,
+            description: `Le dossier sensible ${exPath} est exclu de l'analyse automatique Windows Defender.`,
+            status: 'ACTIVE',
+          });
+        }
+      }
+
+      // Check Themes Folder Malware
+      const isWin = os.platform() === 'win32';
+      const themesSuspects = [
+        { name: 'explorer.exe', path: 'C:\\Windows\\Resources\\Themes\\explorer.exe' },
+        { name: 'icsys.icn.exe', path: 'C:\\Windows\\Resources\\Themes\\icsys.icn.exe' },
+      ];
+      if (isWin) {
+        for (const t of themesSuspects) {
+          if (fs.existsSync(t.path)) {
+            realThreatsFound.push({
+              id: `threat-themes-${t.name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+              name: `Malware Dossier Thèmes : ${t.name}`,
+              category: 'Trojan',
+              severity: 'CRITICAL',
+              targetPath: t.path,
+              mitreTechnique: 'T1036.005 - Masquerading',
+              lockedBySystem: true,
+              trustedInstallerLocked: true,
+              description: `Binaire hostile masqué dans le dossier Themes (${t.path}).`,
+              status: 'ACTIVE',
+              detectedAt: new Date().toISOString(),
+            });
+          }
+        }
+      } else {
+        // Preview/demo environment: include Themes rogue explorer case study if not cleaned
+        const isCleaned = req.query.cleaned === 'true';
+        if (!isCleaned) {
+          realThreatsFound.push({
+            id: 'threat-themes-explorer_exe',
+            name: 'Malware Dossier Thèmes : explorer.exe',
+            category: 'Trojan',
+            severity: 'CRITICAL',
+            targetPath: 'C:\\Windows\\Resources\\Themes\\explorer.exe',
+            mitreTechnique: 'T1036.005 - Masquerading',
+            lockedBySystem: true,
+            trustedInstallerLocked: true,
+            description: 'Faux binaire explorer.exe (32-bit) masqué dans C:\\Windows\\Resources\\Themes avec verrouillage TrustedInstaller.',
+            status: 'ACTIVE',
+            detectedAt: new Date().toISOString(),
+          });
+        }
+      }
+
+      // Check Suspicious BITS Exfiltration Jobs
+      for (const job of (scan.bitsJobs || [])) {
+        if (job.isSuspicious || (job.remoteUrl && (job.remoteUrl.includes('194.26.') || job.remoteUrl.includes(':4444')))) {
+          realThreatsFound.push({
+            id: `real-threat-bits-${job.id || 'exfil'}`,
+            name: `Tâche BITS d'Exfiltration : ${job.name || 'Transfert Inconnu'}`,
+            category: 'Persistence',
+            severity: 'HIGH',
+            targetPath: `bitsadmin /job ${job.name || 'Job'} (${job.remoteUrl || 'URL distante'})`,
+            mitreTechnique: 'T1197 - BITS Jobs',
+            lockedBySystem: true,
+            trustedInstallerLocked: false,
+            description: `Tâche BITS suspecte configurée pour transférer des données vers ${job.remoteUrl || 'un serveur distant'}.`,
+            status: 'ACTIVE',
+          });
+        }
+      }
+
+      // Check Suspicious Processes
       for (const p of scan.suspiciousProcesses) {
         realThreatsFound.push({
           id: `real-threat-proc-${p.pid}`,
@@ -963,12 +1046,59 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         });
       }
 
+      // Check active sockets for C2 beaconing
+      try {
+        const sockets = await nativeEngine.getSockets();
+        const suspSockets = sockets.filter(s => s.isSuspicious || s.remote.includes(':4444') || s.remote.includes(':1337'));
+        for (const s of suspSockets) {
+          realThreatsFound.push({
+            id: `real-threat-socket-${s.pid}-${s.local.replace(/[^0-9]/g, '')}`,
+            name: `Connexion C2 Suspecte Détectée (${s.processName})`,
+            category: 'C2',
+            severity: 'CRITICAL',
+            targetPath: `TCP ${s.local} -> ${s.remote} (PID: ${s.pid})`,
+            mitreTechnique: 'T1071 - Application Layer Protocol C2',
+            lockedBySystem: false,
+            trustedInstallerLocked: false,
+            description: `Socket sortant actif vers balise de commande et contrôle distante ${s.remote}.`,
+            status: 'ACTIVE',
+          });
+        }
+      } catch {}
+
       if (realThreatsFound.length > 0) {
+        let addedCount = 0;
         realThreatsFound.forEach(rt => {
           if (!sharedState.threats.some(t => t.id === rt.id)) {
             sharedState.threats.push(rt);
+            dbManager.saveThreat(rt);
+            addedCount++;
           }
         });
+        if (addedCount > 0) {
+          const logEntry = {
+            id: `log-scan-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+            timestamp: new Date().toLocaleTimeString('fr-FR'),
+            level: 'WARN',
+            text: `[SCAN COMPLET] ${addedCount} anomalie(s) active(s) identifiée(s) et intégrée(s) au centre de surveillance partagé.`,
+            tag: 'SCAN',
+            operatorName: 'Moteur de Détection',
+          };
+          sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+          dbManager.addAuditLog(logEntry);
+
+          sharedState.lastModified = new Date().toISOString();
+          broadcastToAll({
+            type: 'STATE_DELTA',
+            action: 'RECORD_SCANNED_THREATS',
+            payload: { threats: realThreatsFound },
+            state: {
+              ...sharedState,
+              activeUsersCount: Math.max(1, connectedClients.size),
+              activeOperators: getActiveOperators(),
+            },
+          });
+        }
       }
 
       const totalAudited = scan.processesScanned + scan.startupPrograms.length + scan.bitsJobs.length + scan.hostsReport.totalEntries + scan.hotfixesCount;
@@ -1061,7 +1191,76 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   app.get('/api/system/vulnerabilities', async (req, res) => {
     try {
       if (os.platform() !== 'win32') {
-        return res.json({ success: true, hotfixes: [], services: [] });
+        const mockHotfixes = [
+          {
+            hotfixId: 'KB5034441',
+            title: 'KB5034441 (Mise à jour de sécurité Windows WinRE)',
+            severity: 'HIGH',
+            cveRef: 'CVE-2024-20666',
+            description: 'Mise à jour de sécurité critique pour l\'environnement de récupération Windows (BitLocker bypass).',
+            isInstalled: false,
+            installedOn: 'Non installé',
+            remediationCmd: 'Install-WindowsUpdate -KBArticleID KB5034441',
+          },
+          {
+            hotfixId: 'KB5034123',
+            title: 'KB5034123 (Mise à jour cumulative de sécurité du noyau)',
+            severity: 'LOW',
+            cveRef: 'Patch Officiel Microsoft',
+            description: 'Correctif de sécurité officiel Microsoft installé avec succès.',
+            isInstalled: true,
+            installedOn: '2026-09-15',
+            remediationCmd: 'Get-HotFix -Id KB5034123',
+          },
+          {
+            hotfixId: 'KB5033375',
+            title: 'KB5033375 (Correctif de sécurité Wi-Fi & WPA3)',
+            severity: 'LOW',
+            cveRef: 'Patch Officiel Microsoft',
+            description: 'Correctif contre les attaques de réinjection de paquets sans fil.',
+            isInstalled: true,
+            installedOn: '2026-08-20',
+            remediationCmd: 'Get-HotFix -Id KB5033375',
+          },
+        ];
+
+        const mockServices = [
+          {
+            serviceName: 'RemoteRegistry',
+            displayName: 'Registre à distance (RemoteRegistry)',
+            status: 'Running',
+            startupType: 'Automatic',
+            isVulnerableOrObsolete: true,
+            severity: 'HIGH',
+            vulnerabilityReason: 'Registre à distance actif (surface d\'attaque). Devrait être arrêté sur un poste client sécurisé.',
+            cveOrVector: 'T1112 - Modify Registry',
+            disableCmd: 'Stop-Service RemoteRegistry -Force; Set-Service RemoteRegistry -StartupType Disabled',
+          },
+          {
+            serviceName: 'Spooler',
+            displayName: 'Spouleur d\'impression (Print Spooler)',
+            status: 'Running',
+            startupType: 'Automatic',
+            isVulnerableOrObsolete: false,
+            severity: 'LOW',
+            vulnerabilityReason: 'Service d\'impression nominal, récepteur RPC local sécurisé.',
+            cveOrVector: 'Système Nominal',
+            disableCmd: 'Stop-Service Spooler -Force; Set-Service Spooler -StartupType Disabled',
+          },
+          {
+            serviceName: 'LanmanServer',
+            displayName: 'Serveur de Partage SMB (LanmanServer)',
+            status: 'Running',
+            startupType: 'Automatic',
+            isVulnerableOrObsolete: false,
+            severity: 'LOW',
+            vulnerabilityReason: 'Partage réseau actif en protocole SMBv2/v3. SMBv1 désactivé.',
+            cveOrVector: 'CIS Hardened',
+            disableCmd: 'Stop-Service LanmanServer -Force; Set-Service LanmanServer -StartupType Disabled',
+          },
+        ];
+
+        return res.json({ success: true, hotfixes: mockHotfixes, services: mockServices });
       }
 
       let hotfixes: any[] = [];
@@ -2561,6 +2760,28 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       };
       sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
       dbManager.addAuditLog(logEntry);
+    } else if (action === 'RECORD_SCANNED_THREATS') {
+      const incoming: any[] = Array.isArray(payload.threats) ? payload.threats : [];
+      let addedCount = 0;
+      for (const t of incoming) {
+        if (!t || !t.id) continue;
+        const exists = sharedState.threats.some(existing => existing.id === t.id);
+        if (!exists) {
+          sharedState.threats.push(t);
+          dbManager.saveThreat(t);
+          addedCount++;
+        }
+      }
+      if (addedCount > 0) {
+        logger.info({ addedCount, operator: operator?.name }, '[StateMutation] Nouvelles menaces de scan enregistrées');
+      }
+    } else if (action === 'ADD_THREAT') {
+      const t = payload;
+      if (t && t.id && !sharedState.threats.some(existing => existing.id === t.id)) {
+        sharedState.threats.push(t);
+        dbManager.saveThreat(t);
+        logger.info({ threatId: t.id, operator: operator?.name }, '[StateMutation] Menace ajoutée');
+      }
     } else if (action === 'RESET_THREATS') {
       sharedState.threats = sharedState.threats.map(t => ({ ...t, status: 'ACTIVE' }));
       dbManager.resetThreats();
@@ -2701,6 +2922,66 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
             },
           ];
           cfaEnabled = true;
+        }
+      }
+
+      // Automatically sync detected themes threats into persistent shared threat repository
+      if (foundFiles.length > 0 || activeProcesses.length > 0) {
+        let newThreatsAdded = false;
+        for (const f of foundFiles) {
+          const threatId = `threat-themes-${f.name.replace(/[^a-zA-Z0-9]/g, '_')}`;
+          if (!sharedState.threats.some(t => t.id === threatId)) {
+            const newThreat: any = {
+              id: threatId,
+              name: `Malware Dossier Thèmes : ${f.name}`,
+              category: 'Trojan',
+              severity: 'CRITICAL',
+              targetPath: f.path,
+              mitreTechnique: 'T1036.005 - Masquerading',
+              lockedBySystem: true,
+              trustedInstallerLocked: true,
+              description: f.details || `Binaire hostile masqué dans le dossier Themes (${f.path}).`,
+              status: 'ACTIVE',
+              detectedAt: new Date().toISOString(),
+            };
+            sharedState.threats.push(newThreat);
+            dbManager.saveThreat(newThreat);
+            newThreatsAdded = true;
+          }
+        }
+        for (const p of activeProcesses) {
+          const threatId = `threat-proc-themes-${p.pid}`;
+          if (!sharedState.threats.some(t => t.id === threatId)) {
+            const newThreat: any = {
+              id: threatId,
+              name: `Processus Hostile : ${p.name} (PID ${p.pid})`,
+              category: 'Trojan',
+              severity: 'CRITICAL',
+              targetPath: `PID: ${p.pid} (${p.path})`,
+              mitreTechnique: 'T1059 - Command and Scripting',
+              lockedBySystem: true,
+              trustedInstallerLocked: false,
+              description: p.description || `Processus rogue verrouillant les fichiers de thèmes.`,
+              status: 'ACTIVE',
+              detectedAt: new Date().toISOString(),
+            };
+            sharedState.threats.push(newThreat);
+            dbManager.saveThreat(newThreat);
+            newThreatsAdded = true;
+          }
+        }
+        if (newThreatsAdded) {
+          sharedState.lastModified = new Date().toISOString();
+          broadcastToAll({
+            type: 'STATE_DELTA',
+            action: 'RECORD_SCANNED_THREATS',
+            payload: { count: foundFiles.length + activeProcesses.length },
+            state: {
+              ...sharedState,
+              activeUsersCount: Math.max(1, connectedClients.size),
+              activeOperators: getActiveOperators(),
+            },
+          });
         }
       }
 
@@ -2882,6 +3163,15 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         });
       }
 
+      // Mark Themes threats as NEUTRALIZED in persistent database and shared state
+      sharedState.threats = sharedState.threats.map(t => {
+        if (t.targetPath.toLowerCase().includes('themes') || t.id.includes('themes')) {
+          dbManager.updateThreatStatus(t.id, 'NEUTRALIZED');
+          return { ...t, status: 'NEUTRALIZED' as const };
+        }
+        return t;
+      });
+
       // Add log to shared state
       const logEntry = {
         id: `log-${Date.now()}`,
@@ -2891,12 +3181,17 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         text: 'Protocole d\'éradication Claude / SpaceSec terminé : Faux explorer.exe & icsys.icn.exe éradiqués avec succès de C:\\Windows\\Resources\\Themes.',
       };
       sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+      sharedState.lastModified = new Date().toISOString();
 
       broadcastToAll({
         type: 'STATE_DELTA',
-        action: 'ADD_LOG',
-        payload: logEntry,
-        state: sharedState,
+        action: 'UPDATE_THREAT_STATUS',
+        payload: { status: 'NEUTRALIZED', targetPath: 'C:\\Windows\\Resources\\Themes' },
+        state: {
+          ...sharedState,
+          activeUsersCount: Math.max(1, connectedClients.size),
+          activeOperators: getActiveOperators(),
+        },
       });
 
       res.json({
@@ -3203,6 +3498,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
             'UPDATE_THREAT_STATUS', 'ADD_LOG', 'BLOCK_IP', 'UNBLOCK_IP',
             'BLOCK_WIFI_BSSID', 'BULK_UPDATE_THREAT_STATUS', 'DISMISS_THREATS',
             'RESTORE_THREATS', 'CLEAR_LOGS', 'RESET_THREATS',
+            'RECORD_SCANNED_THREATS', 'ADD_THREAT',
           ];
           if (!allowed.includes(action)) {
             logger.warn({ action }, '[WebSocket] Action MUTATE non autorisée ignorée');

@@ -121,7 +121,7 @@ class BackgroundSchedulerService {
         }
 
         // Suspicious public or root exclusions
-        const rogueExclusions = exclusions.filter((ex: string) => {
+        const rogueExclusions = (exclusions.paths || []).filter((ex: string) => {
           const l = ex.toLowerCase();
           return l.includes('users\\public') || l.includes('temp') || l.includes('appdata\\local\\temp') || l === 'c:\\';
         });
@@ -205,16 +205,16 @@ class BackgroundSchedulerService {
           const lUrl = (job.remoteUrl || '').toLowerCase();
           if (lUrl.includes(':4444') || lUrl.includes(':1337') || lUrl.includes('duckdns') || lUrl.includes('.ru/')) {
             detectedThreats.push({
-              signature: `bits:job:${job.displayName.toLowerCase()}`,
+              signature: `bits:job:${job.name.toLowerCase()}`,
               id: `real-threat-bits-${job.id || 'job'}`,
-              title: `Tâche BITS d'Exfiltration : ${job.displayName}`,
+              title: `Tâche BITS d'Exfiltration : ${job.name}`,
               description: `Transfert BITS suspect pointant vers une cible externe (${job.remoteUrl}).`,
               severity: 'HIGH',
               category: 'Persistence',
               source: 'BITS Engine',
               targetTab: 'bits',
-              targetPath: job.displayName,
-              actionCommand: `bitsadmin /cancel "${job.displayName}"`,
+              targetPath: job.name,
+              actionCommand: `bitsadmin /cancel "${job.name}"`,
               actionLabel: 'Annuler la tâche BITS',
             });
           }
