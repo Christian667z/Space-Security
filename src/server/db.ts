@@ -51,6 +51,9 @@ export interface ScanHistoryRecord {
   scanType: string;
   totalScanned: number;
   threatsFound: number;
+  activeThreats: number;
+  neutralizedThreats: number;
+  score: number;
   durationMs: number;
   scannedAt: string;
   summaryJson: string;
@@ -166,6 +169,9 @@ class SQLiteDatabaseManager {
         scanType TEXT NOT NULL,
         totalScanned INTEGER NOT NULL,
         threatsFound INTEGER NOT NULL,
+        activeThreats INTEGER NOT NULL DEFAULT 0,
+        neutralizedThreats INTEGER NOT NULL DEFAULT 0,
+        score INTEGER NOT NULL DEFAULT 100,
         durationMs INTEGER NOT NULL,
         scannedAt TEXT NOT NULL,
         summaryJson TEXT NOT NULL
@@ -194,6 +200,17 @@ class SQLiteDatabaseManager {
         cachedAt TEXT NOT NULL
       );
     `);
+
+    // Dynamic schema migrations for existing databases
+    try {
+      this.db.run('ALTER TABLE scan_history ADD COLUMN activeThreats INTEGER NOT NULL DEFAULT 0');
+    } catch {}
+    try {
+      this.db.run('ALTER TABLE scan_history ADD COLUMN neutralizedThreats INTEGER NOT NULL DEFAULT 0');
+    } catch {}
+    try {
+      this.db.run('ALTER TABLE scan_history ADD COLUMN score INTEGER NOT NULL DEFAULT 100');
+    } catch {}
   }
 
   private seedDefaults(): void {
@@ -433,30 +450,79 @@ class SQLiteDatabaseManager {
   }
 
   // --- SCAN HISTORY API ---
-  getScanHistory(limit = 20): ScanHistoryRecord[] {
+  getScanHistory(limit = 50): ScanHistoryRecord[] {
     if (!this.db) return [];
-    const res = this.db.exec(
-      'SELECT id, scanType, totalScanned, threatsFound, durationMs, scannedAt, summaryJson FROM scan_history ORDER BY scannedAt DESC LIMIT ?',
-      [limit]
-    );
-    if (res.length === 0) return [];
-    return res[0].values.map(row => ({
-      id: String(row[0]),
-      scanType: String(row[1]),
-      totalScanned: Number(row[2]),
-      threatsFound: Number(row[3]),
-      durationMs: Number(row[4]),
-      scannedAt: String(row[5]),
-      summaryJson: String(row[6]),
-    }));
+    try {
+      const res = this.db.exec(
+        'SELECT id, scanType, totalScanned, threatsFound, activeThreats, neutralizedThreats, score, durationMs, scannedAt, summaryJson FROM scan_history ORDER BY scannedAt DESC LIMIT ?',
+        [limit]
+      );
+      if (res.length === 0) return [];
+      return res[0].values.map(row => {
+        let summary: any = {};
+        try { summary = JSON.parse(String(row[9])); } catch {}
+        return {
+          id: String(row[0]),
+          scanType: String(row[1]),
+          totalScanned: Number(row[2]),
+          threatsFound: Number(row[3]),
+          activeThreats: row[4] !== null && row[4] !== undefined ? Number(row[4]) : (summary.activeThreats ?? Number(row[3])),
+          neutralizedThreats: row[5] !== null && row[5] !== undefined ? Number(row[5]) : (summary.neutralizedThreats ?? 0),
+          score: row[6] !== null && row[6] !== undefined ? Number(row[6]) : (summary.score ?? 100),
+          durationMs: Number(row[7]),
+          scannedAt: String(row[8]),
+          summaryJson: String(row[9]),
+        };
+      });
+    } catch {
+      const res = this.db.exec(
+        'SELECT id, scanType, totalScanned, threatsFound, durationMs, scannedAt, summaryJson FROM scan_history ORDER BY scannedAt DESC LIMIT ?',
+        [limit]
+      );
+      if (res.length === 0) return [];
+      return res[0].values.map(row => {
+        let summary: any = {};
+        try { summary = JSON.parse(String(row[6])); } catch {}
+        return {
+          id: String(row[0]),
+          scanType: String(row[1]),
+          totalScanned: Number(row[2]),
+          threatsFound: Number(row[3]),
+          activeThreats: summary.activeThreats ?? Number(row[3]),
+          neutralizedThreats: summary.neutralizedThreats ?? 0,
+          score: summary.score ?? 100,
+          durationMs: Number(row[4]),
+          scannedAt: String(row[5]),
+          summaryJson: String(row[6]),
+        };
+      });
+    }
   }
 
   recordScan(scan: ScanHistoryRecord): void {
     if (!this.db) return;
-    this.db.run(
-      'INSERT INTO scan_history (id, scanType, totalScanned, threatsFound, durationMs, scannedAt, summaryJson) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [scan.id, scan.scanType, scan.totalScanned, scan.threatsFound, scan.durationMs, scan.scannedAt, scan.summaryJson]
-    );
+    try {
+      this.db.run(
+        'INSERT INTO scan_history (id, scanType, totalScanned, threatsFound, activeThreats, neutralizedThreats, score, durationMs, scannedAt, summaryJson) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          scan.id,
+          scan.scanType,
+          scan.totalScanned,
+          scan.threatsFound,
+          scan.activeThreats ?? scan.threatsFound,
+          scan.neutralizedThreats ?? 0,
+          scan.score ?? 100,
+          scan.durationMs,
+          scan.scannedAt,
+          scan.summaryJson,
+        ]
+      );
+    } catch {
+      this.db.run(
+        'INSERT INTO scan_history (id, scanType, totalScanned, threatsFound, durationMs, scannedAt, summaryJson) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [scan.id, scan.scanType, scan.totalScanned, scan.threatsFound, scan.durationMs, scan.scannedAt, scan.summaryJson]
+      );
+    }
     this.scheduleSave();
   }
 

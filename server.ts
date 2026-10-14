@@ -1001,8 +1001,39 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         },
         threats: realThreatsFound,
       });
+
+      // Permanently record this real scan into local SQLite database
+      const computedScore = realThreatsFound.length === 0 ? 100 : Math.max(30, 100 - realThreatsFound.length * 25);
+      const neutralizedCount = dbManager.getThreats().filter(t => t.status === 'NEUTRALIZED' || t.status === 'DISMISSED').length;
+      dbManager.recordScan({
+        id: `scan-${Date.now()}`,
+        scanType: deep ? 'DEEP_SYSTEM_SCAN' : 'QUICK_SYSTEM_SCAN',
+        totalScanned: totalAudited,
+        threatsFound: realThreatsFound.length,
+        activeThreats: realThreatsFound.length,
+        neutralizedThreats: neutralizedCount,
+        score: computedScore,
+        durationMs: elapsedMs,
+        scannedAt: new Date().toISOString(),
+        summaryJson: JSON.stringify({
+          status: realThreatsFound.length === 0 ? 'HEALTHY' : 'WARNING',
+          threatsFound: realThreatsFound.length,
+          totalAudited,
+        }),
+      });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message, threats: [] });
+    }
+  });
+
+  // API 8b: Get Real Recorded Scan History from SQLite Database
+  app.get('/api/scans/history', (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string, 10) || 50;
+      const history = dbManager.getScanHistory(limit);
+      res.json({ success: true, history });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message, history: [] });
     }
   });
 
