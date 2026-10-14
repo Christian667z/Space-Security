@@ -28,6 +28,9 @@ import { requireAuth, getLocalAuthToken, validateWebSocketConnection, corsAndCsr
 import { checkHashReputation, checkIpReputation } from './src/server/threatIntel.ts';
 import { backgroundScheduler } from './src/server/scheduler.ts';
 import { safeExecFile, validateAndParsePid, sanitizeInterfaceName, sanitizePath, sanitizeIpAddress } from './src/server/safeExec.ts';
+import { persistentPs } from './src/server/native/persistentPowerShell.ts';
+import { parseNetshWifiOutput } from './src/server/native/wifiParser.ts';
+import { nativeTelemetry } from './src/server/native/systemTelemetry.ts';
 
 const execAsync = promisify(exec);
 const appDir = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
@@ -1048,97 +1051,27 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // API 4: Real WiFi Scanner from Windows Netsh
+  // API 4: Multilingual Culture-Agnostic WiFi Scanner (Windows Netsh & Native)
   app.get('/api/system/wifi', async (req, res) => {
     try {
       let rawOutput = '';
       if (os.platform() === 'win32') {
         try {
-          const { stdout } = await execAsync('netsh wlan show networks mode=bssid');
+          // Native execution without shell wrapper to avoid command-chaining vulnerabilities
+          const { stdout } = await safeExecFile('netsh.exe', ['wlan', 'show', 'networks', 'mode=bssid'], { timeout: 6000 });
           rawOutput = stdout;
-        } catch {}
-      }
-
-      const networks: any[] = [];
-      if (rawOutput) {
-        const lines = rawOutput.split('\n');
-        let current: any = null;
-        let netIndex = 1;
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          const ssidMatch = trimmed.match(/^SSID\s+\d+\s*:\s*(.*)$/i);
-          if (ssidMatch) {
-            if (current && current.bssids && current.bssids.length > 0) {
-              networks.push(current);
-            }
-            current = {
-              id: `wifi-${netIndex++}`,
-              ssid: ssidMatch[1].trim() || 'Réseau Masqué',
-              bssids: [],
-              security: 'Inconnu',
-            };
-            continue;
-          }
-          if (!current) continue;
-          const authMatch = trimmed.match(/^(?:Authentification|Authentication)\s*:\s*(.*)$/i);
-          if (authMatch) current.security = authMatch[1].trim();
-
-          const bssidMatch = trimmed.match(/^(?:BSSID\s+\d+|BSSID)\s*:\s*([0-9a-fA-F:]{17})/i);
-          if (bssidMatch) {
-            current.bssids.push({
-              bssid: bssidMatch[1].trim(),
-              signalPercent: 0,
-              channel: 0,
-              frequency: '',
-            });
-            continue;
-          }
-
-          const lastBssid = current.bssids[current.bssids.length - 1];
-          if (lastBssid) {
-            const sigMatch = trimmed.match(/^Signal\s*:\s*(\d+)%/i);
-            if (sigMatch) lastBssid.signalPercent = parseInt(sigMatch[1], 10);
-            const chanMatch = trimmed.match(/^(?:Canal|Channel)\s*:\s*(\d+)/i);
-            if (chanMatch) lastBssid.channel = parseInt(chanMatch[1], 10);
-            const bandMatch = trimmed.match(/^(?:Bande|Radio type|Type de radio|Bande passante)\s*:\s*(.*)$/i);
-            if (bandMatch) lastBssid.frequency = bandMatch[1].trim();
-          }
-        }
-        if (current && current.bssids && current.bssids.length > 0) {
-          networks.push(current);
+        } catch (e: any) {
+          logger.debug({ err: e.message }, '[WiFi] netsh query failed');
         }
       }
 
-      // Flatten into item per BSSID for frontend consumption
-      const flatNetworks: any[] = [];
-      networks.forEach(net => {
-        net.bssids.forEach((b: any, idx: number) => {
-          const isUnsecured = net.security.toLowerCase().includes('open') || net.security.toLowerCase().includes('ouvert') || net.security.toLowerCase().includes('aucun');
-          flatNetworks.push({
-            id: `${net.id}-${idx}`,
-            ssid: net.ssid,
-            bssid: b.bssid,
-            channel: b.channel || 0,
-            frequency: b.frequency || (b.channel > 14 ? '5 GHz' : '2.4 GHz'),
-            signalPercent: b.signalPercent || 0,
-            signalDbm: b.signalPercent ? Math.round((b.signalPercent / 2) - 100) : -100,
-            security: net.security,
-            vendor: 'Borne Wi-Fi Détectée',
-            isEvilTwin: false,
-            isUnsecured,
-            deauthFramesDetected: 0,
-            status: isUnsecured ? 'UNSECURED_WARNING' : 'LEGITIMATE',
-            firstSeen: new Date().toLocaleTimeString('fr-FR'),
-            recommendedAction: isUnsecured ? 'Réseau sans mot de passe. Utilisez un tunnel VPN chiffré.' : 'Réseau sécurisé nominal.',
-          });
-        });
-      });
+      // Multilingual culture-agnostic tokenized parser (supports FR, EN, ES, DE, IT)
+      const flatNetworks = parseNetshWifiOutput(rawOutput);
 
       res.json({
         success: true,
         interfaceStatus: flatNetworks.length > 0 ? 'Connected' : 'Scanning',
-        interfaceName: 'Interface Wi-Fi Windows',
+        interfaceName: 'Interface Wi-Fi Windows (802.11ax/ac)',
         timestamp: new Date().toISOString(),
         networks: flatNetworks,
         hasRawNetsh: !!rawOutput,
