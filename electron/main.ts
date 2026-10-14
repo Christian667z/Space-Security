@@ -3,7 +3,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
 
+import crypto from 'crypto';
+
 process.env.IS_ELECTRON = 'true';
+const localAuthToken = crypto.randomBytes(32).toString('hex');
+process.env.SPACESEC_AUTH_TOKEN = localAuthToken;
+
+// Register IPC handler to share token only with local renderer
+ipcMain.handle('get-auth-token', () => localAuthToken);
 
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
 const DEFAULT_PORT = 3000;
@@ -82,6 +89,7 @@ async function createWindow() {
     show: false,
     autoHideMenuBar: true,
     title: 'Space Security - CyberDefense Suite & Kernel Extirpator',
+    icon: path.join(__dirname, '../build/icon.png'),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

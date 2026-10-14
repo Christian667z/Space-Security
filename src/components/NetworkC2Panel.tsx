@@ -22,9 +22,11 @@ import {
 } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { NetworkConnectionItem } from '../types/cyberdefense';
-import { PortScanner } from './PortScanner';
-import { WiFiScanner } from './WiFiScanner';
 import { apiFetch } from '../utils/api';
+import { ErrorBoundary } from './ErrorBoundary';
+
+const PortScanner = React.lazy(() => import('./PortScanner').then(m => ({ default: m.PortScanner })));
+const WiFiScanner = React.lazy(() => import('./WiFiScanner').then(m => ({ default: m.WiFiScanner })));
 
 interface HostGeoInfo {
   ip: string;
@@ -490,20 +492,18 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, 
       <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-5 shadow-xl">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center flex-wrap gap-2">
               <Activity className="w-4 h-4 text-rose-400" />
               <h3 className="text-base font-bold text-slate-100 font-['Plus_Jakarta_Sans']">
-                Surveillance du Trafic en Temps Réel vers les IPs Malveillantes C2
+                Surveillance du Trafic vers les IPs Malveillantes C2
               </h3>
-              {isLiveActive && (
-                <span className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-rose-950/80 border border-rose-800 text-rose-300 font-mono text-[11px] font-semibold">
-                  <Radio className="w-3 h-3 text-rose-400" />
-                  <span>FLUX LIVE ACTIF</span>
-                </span>
-              )}
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-amber-950/80 border border-amber-800 text-amber-300 font-mono text-[10px] font-semibold">
+                <Radio className="w-3 h-3 text-amber-400" />
+                <span>MODÈLE D'ANALYSE HEURISTIQUE (SIMULATION C2)</span>
+              </span>
             </div>
             <p className="text-xs text-slate-400">
-              Détection en temps réel des pics d'exfiltration sortants (Upload) et de téléchargement de payloads secondaires (Download).
+              Modélisation des signatures de balisage (beaconing) et d'exfiltration vers les C2 détectés pour analyse comportementale. Les sockets réels de la machine sont listés ci-dessous.
             </p>
           </div>
 
@@ -735,10 +735,15 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, 
       {/* Active Connections Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
         <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2">
-            <Server className="w-4 h-4 text-cyan-400" />
-            Connexions Réseau Établies (Get-NetTCPConnection)
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2">
+              <Server className="w-4 h-4 text-cyan-400" />
+              Connexions Réseau Établies (Get-NetTCPConnection)
+            </h3>
+            <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-950/80 border border-emerald-800 text-emerald-300 font-mono font-semibold">
+              SOCKETS RÉELS (OS LIVE)
+            </span>
+          </div>
           <span className="text-xs text-slate-400">
             {connections.filter(c => c.isSuspicious).length} alerte(s) de sécurité détectée(s)
           </span>
@@ -832,10 +837,18 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, 
       </div>
 
       {/* PortScanner Module: Local Open Ports & Listening Malicious Services */}
-      <PortScanner onRunInConsole={onRunInConsole} />
+      <ErrorBoundary moduleName="Scanner de Ports d'Écoute Locaux">
+        <React.Suspense fallback={<div className="h-48 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement du Scanner de Ports...</div>}>
+          <PortScanner onRunInConsole={onRunInConsole} />
+        </React.Suspense>
+      </ErrorBoundary>
 
       {/* WiFi Scanner Module: Surrounding Wireless Networks, Unsecured APs & Evil Twin Detection */}
-      <WiFiScanner onRunInConsole={onRunInConsole} />
+      <ErrorBoundary moduleName="Scanner Wi-Fi & Analyse BSSID 802.11">
+        <React.Suspense fallback={<div className="h-48 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement du Scanner Wi-Fi...</div>}>
+          <WiFiScanner onRunInConsole={onRunInConsole} />
+        </React.Suspense>
+      </ErrorBoundary>
 
       {/* Lower Row: Named Pipes & HOSTS / Proxy Audit */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

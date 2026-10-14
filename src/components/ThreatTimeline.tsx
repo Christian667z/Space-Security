@@ -10,160 +10,221 @@ import {
   CheckCircle2,
   Terminal,
   Cpu,
-  Network,
   Lock,
   Copy,
   Check,
   Search,
   Filter,
   Download,
-  ArrowRight,
-  ExternalLink,
   ChevronDown,
   ChevronUp,
   Flame,
-  FileCode,
   Zap,
   TrendingUp,
   Gauge,
   ShieldCheck,
-  Activity
 } from 'lucide-react';
-import { TabId, ThreatTimelineEvent, TimelinePhase } from '../types/cyberdefense';
+import { TabId, ThreatItem, ConsoleLogMessage, ThreatTimelineEvent, TimelinePhase } from '../types/cyberdefense';
 
 interface ThreatTimelineProps {
   onRunInConsole: (command: string) => void;
   onNavigateTab?: (tab: TabId) => void;
+  threats?: ThreatItem[];
+  logs?: ConsoleLogMessage[];
+  onMutateThreatStatus?: (threatId: string, targetPath: string, status: ThreatItem['status']) => void;
 }
-
-const INITIAL_TIMELINE_EVENTS: ThreatTimelineEvent[] = [
-  {
-    id: 'evt-1',
-    timeOffsetSec: 0,
-    timeDisplay: '07:35:01 (T+00:00)',
-    phase: 'SCAN',
-    phaseLabel: '1. Scan & Ingestion des Privilèges',
-    title: 'Initialisation du Scan Profond & Élévation P/Invoke Natif',
-    severity: 'INFO',
-    status: 'VERIFIED',
-    mitreId: 'T1068',
-    mitreTactic: 'Privilege Escalation Boundary',
-    targetArtifact: 'ntdll.dll / SeDebugPrivilege + SeTakeOwnershipPrivilege',
-    description: 'Vérification du jeton UAC (SID Administrateur S-1-5-32-544) et validation des privilèges NT SeDebug et SeTakeOwnership via P/Invoke pour l\'inspection sécurisée de la mémoire.',
-    evidence: '[P/Invoke] OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &hToken)\n[P/Invoke] LookupPrivilegeValue(NULL, "SeDebugPrivilege", &luid)\n[P/Invoke] AdjustTokenPrivileges(hToken, FALSE, &newState, ...) -> STATUS_SUCCESS (0x00000000)',
-    remediationActionCmd: 'scan --deep',
-    remediationButtonLabel: 'Relancer le Scan Kernel',
-    remediationResult: 'Privilèges SeDebug et SeTakeOwnership confirmés actifs.',
-    scoreDelta: 4,
-    cumulativeScore: 32,
-    riskReductionPercent: 5,
-    riskCategory: 'Visibilité & Droits Noyau P/Invoke'
-  },
-  {
-    id: 'evt-2',
-    timeOffsetSec: 2,
-    timeDisplay: '07:35:03 (T+00:02)',
-    phase: 'DETECTION',
-    phaseLabel: '2. Audit des Processus & LOLBins',
-    title: 'Inspection des Processus & Binaires Système LOLBAS',
-    severity: 'INFO',
-    status: 'VERIFIED',
-    mitreId: 'T1105',
-    mitreTactic: 'Ingress Tool Transfer Verification',
-    targetArtifact: 'C:\\Windows\\System32\\certutil.exe, powershell.exe, mshta.exe',
-    description: 'Audit de la ligne de commande des processus actifs. Aucun téléchargement distant non autorisé ni injection de code détectée.',
-    evidence: 'EventID: 4688 | Security Auditing\nProcess Tree: tasklist & powershell baseline\nRésultat : 0 LOLBin malveillant en cours d\'exécution.\nTous les exécutables vérifiés disposent de signatures valides.',
-    remediationActionCmd: 'tasklist',
-    remediationButtonLabel: 'Inspecter les Processus',
-    remediationResult: 'Tous les processus actifs sont homologués.',
-    scoreDelta: 13,
-    cumulativeScore: 45,
-    riskReductionPercent: 15,
-    riskCategory: 'Validation des Processus Système'
-  },
-  {
-    id: 'evt-3',
-    timeOffsetSec: 5,
-    timeDisplay: '07:35:05 (T+00:05)',
-    phase: 'DETECTION',
-    phaseLabel: '2. Audit Réseau & Sockets',
-    title: 'Surveillance des Sockets TCP & Canaux Sortants',
-    severity: 'INFO',
-    status: 'VERIFIED',
-    mitreId: 'T1071',
-    mitreTactic: 'Network Architecture Inspection',
-    targetArtifact: 'Get-NetTCPConnection (Tous les sockets actifs)',
-    description: 'Analyse en temps réel de tous les flux réseau ouverts. Vérification de l\'absence de balisage C2 ou d\'écoute non autorisée.',
-    evidence: 'netstat -ano -p tcp:\nRésultat : Tous les sockets distants correspondent à des services authentifiés.\nAucune connexion vers des nœuds malveillants répertoriés.',
-    remediationActionCmd: 'sockets',
-    remediationButtonLabel: 'Inspecter les Sockets',
-    remediationResult: 'Flux réseau intègres et conformes.',
-    scoreDelta: 15,
-    cumulativeScore: 60,
-    riskReductionPercent: 20,
-    riskCategory: 'Intégrité des Flux Réseau'
-  },
-  {
-    id: 'evt-4',
-    timeOffsetSec: 8,
-    timeDisplay: '07:35:08 (T+00:08)',
-    phase: 'CONTAINMENT',
-    phaseLabel: '3. Intégrité Noyau & Pilotes',
-    title: 'Vérification des Pilotes & Protection Kernel Ring0',
-    severity: 'INFO',
-    status: 'VERIFIED',
-    mitreId: 'T1014',
-    mitreTactic: 'Kernel Integrity Validation',
-    targetArtifact: 'fltmc filters / driverquery /v',
-    description: 'Contrôle des filtres de système de fichiers et des modules en mémoire noyau. Kernel Patch Protection (PatchGuard) actif.',
-    evidence: 'fltmc filters:\nFiltres actifs : WdFilter, fltmgr, npsvctrig\nSignatures : WHQL Microsoft Corporation\nAucun crochet noyau suspect non-signé.',
-    remediationActionCmd: 'driverquery /v',
-    remediationButtonLabel: 'Vérifier les Pilotes',
-    remediationResult: 'Noyau Windows et pilotes pleinement intègres.',
-    scoreDelta: 10,
-    cumulativeScore: 70,
-    riskReductionPercent: 12,
-    riskCategory: 'Intégrité Kernel Ring0'
-  },
-  {
-    id: 'evt-5',
-    timeOffsetSec: 15,
-    timeDisplay: '07:35:15 (T+00:15)',
-    phase: 'HARDENING',
-    phaseLabel: '4. Durcissement & Validation Defender',
-    title: 'Validation des Protections Defender, Pare-feu & WMI',
-    severity: 'INFO',
-    status: 'VERIFIED',
-    mitreId: 'T1562',
-    mitreTactic: 'Defense Verification',
-    targetArtifact: 'Windows Defender / Netsh AdvFirewall / WMI',
-    description: 'Vérification de l\'état de la protection en temps réel, de la protection contre les falsifications (Tamper Protection) et des règles de pare-feu.',
-    evidence: 'Get-MpPreference:\nRealTimeMonitoring: Enabled\nTamperProtection: Enabled\nFirewallProfiles: Domain, Private, Public Active\nScore de conformité de sécurité : 98%.',
-    remediationActionCmd: 'defender-repair',
-    remediationButtonLabel: 'Auditer Windows Defender',
-    remediationResult: 'Protection Windows Defender optimale.',
-    scoreDelta: 10,
-    cumulativeScore: 98,
-    riskReductionPercent: 18,
-    riskCategory: 'Durcissement Endpoint & Defender'
-  }
-];
 
 export const ThreatTimeline: React.FC<ThreatTimelineProps> = ({
   onRunInConsole,
-  onNavigateTab
+  onNavigateTab,
+  threats = [],
+  logs = [],
+  onMutateThreatStatus,
 }) => {
-  const [events, setEvents] = useState<ThreatTimelineEvent[]>(INITIAL_TIMELINE_EVENTS);
   const [selectedPhase, setSelectedPhase] = useState<string>('ALL');
   const [selectedSeverity, setSelectedSeverity] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [expandedEventId, setExpandedEventId] = useState<string | null>('evt-4');
+  const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Playback Simulation Mode state
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentPlaybackIndex, setCurrentPlaybackIndex] = useState<number>(-1);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1); // 1x, 2x, 4x
+
+  // Dynamically build real timeline events from active and historical threats + logs
+  const dynamicTimelineEvents: ThreatTimelineEvent[] = useMemo(() => {
+    const list: ThreatTimelineEvent[] = [
+      // Step 1: System Scan Ingestion & Privilege Elevation
+      {
+        id: 'evt-init-privelev',
+        timeOffsetSec: 0,
+        timeDisplay: 'T+00:00 (Initialisation)',
+        phase: 'SCAN',
+        phaseLabel: '1. Scan & Ingestion des Privilèges',
+        title: 'Initialisation du Scan Système & Acquisition des Droits NT',
+        severity: 'INFO',
+        status: 'VERIFIED',
+        mitreId: 'T1068',
+        mitreTactic: 'Privilege Escalation Boundary',
+        targetArtifact: 'ntdll.dll / SeDebugPrivilege + SeTakeOwnershipPrivilege',
+        description: 'Vérification du jeton UAC Administrateur (SID S-1-5-32-544) et acquisition des privilèges natifs SeDebug et SeTakeOwnership pour l\'audit de la mémoire et des fichiers verrouillés.',
+        evidence: '[P/Invoke] OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &hToken)\n[P/Invoke] SeDebugPrivilege : STATUS_SUCCESS (0x00000000)\n[P/Invoke] SeTakeOwnershipPrivilege : ACTIVÉ',
+        remediationActionCmd: 'scan --deep',
+        remediationButtonLabel: 'Relancer le Scan Système',
+        remediationResult: 'Privilèges Administrateurs validés.',
+        scoreDelta: 5,
+        cumulativeScore: 35,
+        riskReductionPercent: 5,
+        riskCategory: 'Visibilité & Droits Noyau',
+      },
+    ];
+
+    let currentScore = 35;
+    let secCounter = 2;
+
+    // Add each threat from real threats list as a dynamic timeline milestone
+    threats.forEach((t, idx) => {
+      secCounter += 3;
+      const isRemediated = t.status === 'NEUTRALIZED';
+      const isContained = t.status === 'SCHEDULED_BOOT_DELETE';
+      const isDismissed = t.status === 'DISMISSED';
+
+      let phase: TimelinePhase = 'DETECTION';
+      let phaseLabel = '2. Détection d\'Anomalies';
+      if (t.category === 'Kernel' || t.category === 'Rootkit' || t.trustedInstallerLocked) {
+        phase = 'EXCISION';
+        phaseLabel = '4. Excision Noyau & Ring 0';
+      } else if (t.category === 'Persistence' || t.category === 'C2' || t.category === 'Network') {
+        phase = 'CONTAINMENT';
+        phaseLabel = '3. Confinement & Isolation';
+      } else if (t.category === 'Defender') {
+        phase = 'HARDENING';
+        phaseLabel = '5. Durcissement Système';
+      }
+
+      const scoreDelta = t.severity === 'CRITICAL' ? 18 : t.severity === 'HIGH' ? 12 : 8;
+      if (isRemediated || isDismissed) {
+        currentScore = Math.min(100, currentScore + scoreDelta);
+      }
+
+      // Infer recommended command
+      let cmd = 'scan --deep';
+      if (t.targetPath.toLowerCase().includes('themes')) cmd = 'clean-themes';
+      else if (t.targetPath.toLowerCase().includes('.sys') || t.lockedBySystem) cmd = `unlock "${t.targetPath}"`;
+      else if (t.targetPath.toLowerCase().includes('pid:')) {
+        const pid = t.targetPath.replace(/[^0-9]/g, '');
+        cmd = pid ? `kill ${pid}` : 'tasklist';
+      } else if (t.targetPath.toLowerCase().includes('bits')) cmd = 'bitsadmin /cancel WindowsHealthUpdate';
+      else if (t.category === 'Defender') cmd = 'defender-repair';
+
+      list.push({
+        id: `evt-threat-${t.id}`,
+        timeOffsetSec: secCounter,
+        timeDisplay: `T+${String(secCounter).padStart(2, '0')}s (${t.detectedAt ? new Date(t.detectedAt).toLocaleTimeString('fr-FR') : 'Audit'})`,
+        phase,
+        phaseLabel,
+        title: t.name,
+        severity: t.severity,
+        status: isRemediated ? 'REMEDIATED' : isContained ? 'CONTAINED' : isDismissed ? 'VERIFIED' : 'DETECTED',
+        mitreId: t.mitreTechnique.split(' - ')[0] || 'T1059',
+        mitreTactic: t.mitreTechnique.split(' - ')[1] || t.category,
+        targetArtifact: t.targetPath,
+        description: t.description || t.name,
+        evidence: `Signature Détectée : ${t.category.toUpperCase()} // ${t.name}\nCible Système : ${t.targetPath}\nVerrouillage Système : ${t.lockedBySystem ? 'OUI (Handle actif)' : 'NON'}\nVerrouillage TrustedInstaller : ${t.trustedInstallerLocked ? 'OUI' : 'NON'}\nStatut Actuel : ${t.status}`,
+        remediationActionCmd: cmd,
+        remediationButtonLabel: isRemediated ? 'Menace Neutralisée' : 'Neutraliser l\'Anomalie',
+        remediationResult: isRemediated ? 'Binaire ou clé hostile neutralisé.' : undefined,
+        scoreDelta,
+        cumulativeScore: currentScore,
+        riskReductionPercent: Math.round(scoreDelta * 0.9),
+        riskCategory: t.category,
+      });
+    });
+
+    // Add real events from console / audit logs
+    const relevantLogs = logs.filter(l => 
+      l.level === 'WARN' || 
+      l.level === 'ERROR' || 
+      l.tag === 'SCAN' || 
+      l.tag === 'THEMES-EXTIRPATION' || 
+      l.tag === 'DEFENDER' ||
+      l.tag === 'FIREWALL'
+    ).slice(-6);
+
+    relevantLogs.forEach((l) => {
+      secCounter += 2;
+      const isOk = l.level === 'OK';
+      const isWarn = l.level === 'WARN' || l.level === 'ERROR';
+
+      let phase: TimelinePhase = 'DETECTION';
+      let phaseLabel = '2. Détection d\'Anomalies';
+      if (l.tag === 'THEMES-EXTIRPATION' || l.tag === 'DEFENDER') {
+        phase = 'EXCISION';
+        phaseLabel = '4. Excision Noyau & Remédiation';
+      } else if (l.tag === 'FIREWALL' || l.tag === 'WIFI-DEFENSE') {
+        phase = 'CONTAINMENT';
+        phaseLabel = '3. Confinement & Isolation';
+      }
+
+      list.push({
+        id: `evt-log-${l.id}`,
+        timeOffsetSec: secCounter,
+        timeDisplay: `${l.timestamp || 'T+' + secCounter + 's'} (Journal)`,
+        phase,
+        phaseLabel,
+        title: `Événement ${l.tag || 'Système'} : ${l.text.slice(0, 50)}...`,
+        severity: isWarn ? 'HIGH' : isOk ? 'LOW' : 'INFO',
+        status: isOk ? 'REMEDIATED' : isWarn ? 'DETECTED' : 'VERIFIED',
+        mitreId: l.tag === 'THEMES-EXTIRPATION' ? 'T1036' : l.tag === 'DEFENDER' ? 'T1562' : 'T1059',
+        mitreTactic: l.tag || 'Sécurité Système',
+        targetArtifact: l.operatorName || 'System Kernel',
+        description: l.text,
+        evidence: `Journal Hôte (${l.timestamp}) // Opérateur: ${l.operatorName || 'System'}\nNiveau: [${l.level}] ${l.tag || 'SYSTEM'}\n${l.text}`,
+        remediationActionCmd: 'scan --deep',
+        remediationButtonLabel: 'Vérifier l\'Intégrité',
+        scoreDelta: isOk ? 10 : 5,
+        cumulativeScore: currentScore,
+        riskReductionPercent: 8,
+        riskCategory: l.tag || 'Journal d\'Audit',
+      });
+    });
+
+    // Final Hardening milestone
+    list.push({
+      id: 'evt-final-hardening',
+      timeOffsetSec: secCounter + 5,
+      timeDisplay: `T+${String(secCounter + 5).padStart(2, '0')}s (Final)`,
+      phase: 'HARDENING',
+      phaseLabel: '5. Durcissement & Validation',
+      title: 'Validation de l\'Intégrité Globale & Durcissement Windows',
+      severity: 'INFO',
+      status: 'VERIFIED',
+      mitreId: 'T1562',
+      mitreTactic: 'Defense Verification & Posture',
+      targetArtifact: 'MpPreference / GPO / TamperProtection',
+      description: 'Audit final de conformité : vérification de l\'antivirus temps réel, isolation des processus résiduels et intégrité de la persistance.',
+      evidence: 'Get-MpPreference : RealTimeMonitoring actif, TamperProtection vérifiée.\nIntégrité du système de fichiers validée.',
+      remediationActionCmd: 'defender-repair',
+      remediationButtonLabel: 'Vérifier la Posture Finale',
+      remediationResult: 'Posture défensive optimale atteinte.',
+      scoreDelta: 8,
+      cumulativeScore: Math.min(100, currentScore + 8),
+      riskReductionPercent: 10,
+      riskCategory: 'Durcissement Endpoint',
+    });
+
+    return list;
+  }, [threats, logs]);
+
+  const [events, setEvents] = useState<ThreatTimelineEvent[]>(dynamicTimelineEvents);
+
+  useEffect(() => {
+    setEvents(dynamicTimelineEvents);
+    if (!expandedEventId && dynamicTimelineEvents.length > 1) {
+      setExpandedEventId(dynamicTimelineEvents[1].id);
+    }
+  }, [dynamicTimelineEvents]);
 
   // Timer effect for playback simulation
   useEffect(() => {
@@ -177,7 +238,6 @@ export const ThreatTimeline: React.FC<ThreatTimelineProps> = ({
             setIsPlaying(false);
             return events.length - 1;
           }
-          // auto expand current playing event
           setExpandedEventId(events[next].id);
           return next;
         });
@@ -187,12 +247,9 @@ export const ThreatTimeline: React.FC<ThreatTimelineProps> = ({
   }, [isPlaying, currentPlaybackIndex, playbackSpeed, events]);
 
   const handleStartPlayback = () => {
-    if (currentPlaybackIndex >= events.length - 1) {
+    if (currentPlaybackIndex >= events.length - 1 || currentPlaybackIndex === -1) {
       setCurrentPlaybackIndex(0);
-      setExpandedEventId(events[0].id);
-    } else if (currentPlaybackIndex === -1) {
-      setCurrentPlaybackIndex(0);
-      setExpandedEventId(events[0].id);
+      setExpandedEventId(events[0]?.id || null);
     }
     setIsPlaying(true);
   };
@@ -204,13 +261,13 @@ export const ThreatTimeline: React.FC<ThreatTimelineProps> = ({
   const handleResetPlayback = () => {
     setIsPlaying(false);
     setCurrentPlaybackIndex(-1);
-    setExpandedEventId(null);
+    setExpandedEventId(events[0]?.id || null);
   };
 
   const handleStepForward = () => {
     setCurrentPlaybackIndex(prev => {
       const next = Math.min(events.length - 1, prev + 1);
-      setExpandedEventId(events[next].id);
+      setExpandedEventId(events[next]?.id || null);
       return next;
     });
   };
@@ -218,12 +275,11 @@ export const ThreatTimeline: React.FC<ThreatTimelineProps> = ({
   const handleStepBackward = () => {
     setCurrentPlaybackIndex(prev => {
       const next = Math.max(0, prev - 1);
-      setExpandedEventId(events[next].id);
+      setExpandedEventId(events[next]?.id || null);
       return next;
     });
   };
 
-  // Copy to clipboard helper
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -234,11 +290,13 @@ export const ThreatTimeline: React.FC<ThreatTimelineProps> = ({
   const handleExecuteRemediation = (evt: ThreatTimelineEvent) => {
     if (evt.remediationActionCmd) {
       onRunInConsole(evt.remediationActionCmd);
+      const threatId = evt.id.replace('evt-threat-', '');
+      if (onMutateThreatStatus && threatId) {
+        onMutateThreatStatus(threatId, evt.targetArtifact || '', 'NEUTRALIZED');
+      }
       setEvents(prev =>
         prev.map(item =>
-          item.id === evt.id
-            ? { ...item, status: 'REMEDIATED' }
-            : item
+          item.id === evt.id ? { ...item, status: 'REMEDIATED' } : item
         )
       );
     }
@@ -247,16 +305,20 @@ export const ThreatTimeline: React.FC<ThreatTimelineProps> = ({
   // Run full remediation pipeline
   const handleRunAllRemediations = () => {
     onRunInConsole('scan --deep');
-    setTimeout(() => onRunInConsole('suspend swisyn'), 600);
-    setTimeout(() => onRunInConsole('kill 3128'), 1200);
-    setTimeout(() => onRunInConsole('unlock "C:\\Windows\\System32\\drivers\\suspicious_kernel_hook.sys"'), 1800);
+    setTimeout(() => onRunInConsole('clean-themes'), 800);
+    setTimeout(() => onRunInConsole('wmi-clean'), 1600);
     setTimeout(() => onRunInConsole('defender-repair'), 2400);
-    setTimeout(() => onRunInConsole('wmi-clean'), 3000);
+
+    threats.forEach(t => {
+      if (t.status === 'ACTIVE' && onMutateThreatStatus) {
+        onMutateThreatStatus(t.id, t.targetPath, 'NEUTRALIZED');
+      }
+    });
 
     setEvents(prev =>
       prev.map(evt => ({
         ...evt,
-        status: evt.phase === 'HARDENING' || evt.phase === 'SCAN' ? 'VERIFIED' : 'REMEDIATED'
+        status: evt.phase === 'HARDENING' || evt.phase === 'SCAN' ? 'VERIFIED' : 'REMEDIATED',
       }))
     );
   };
@@ -289,7 +351,7 @@ export const ThreatTimeline: React.FC<ThreatTimelineProps> = ({
     const lines = [
       '# RAPPORT D\'ENQUÊTE & CHRONOLOGIE DES MENACES - SPACESEC CYBERDEFENSE v3.0',
       `Date de génération : ${new Date().toISOString()}`,
-      `Système : SEC-ENDPOINT-01 (Architecture Windows x64)`,
+      `Système : POSTE LOCAL (Architecture Windows NT x64)`,
       '================================================================================',
       '',
       '## RÉSUMÉ CHRONOLOGIQUE DES INCIDENTS (DE L\'INGESTION AU DURCISSEMENT)',
@@ -300,7 +362,6 @@ export const ThreatTimeline: React.FC<ThreatTimelineProps> = ({
 - **Timestamp** : ${e.timeDisplay} (Phase: ${e.phase})
 - **Statut** : ${e.status}
 - **Impact Score Sécurité** : +${e.scoreDelta || 0} pts (Score cumulé: ${e.cumulativeScore || 0}%)
-- **Réduction du Risque** : -${e.riskReductionPercent || 0}% (${e.riskCategory || 'Général'})
 - **Technique MITRE** : ${e.mitreId || 'N/A'} - ${e.mitreTactic || 'N/A'}
 - **Cible Artifact** : ${e.targetArtifact || 'N/A'}
 - **Description** : ${e.description}
@@ -308,14 +369,9 @@ export const ThreatTimeline: React.FC<ThreatTimelineProps> = ({
 \`\`\`
 ${e.evidence}
 \`\`\`
-- **Action de Remédiation** : \`${e.remediationActionCmd || 'N/A'}\` (${e.remediationResult || 'Effectué'})
+- **Action de Remédiation** : \`${e.remediationActionCmd || 'N/A'}\`
 `;
       }),
-      '',
-      '## CONCLUSION FORENSIQUE & RECOMMANDATIONS :',
-      '1. Redémarrer le système pour finaliser l\'excision atomique via PendingFileRenameOperations.',
-      '2. Maintenir la politique PowerShell d\'interdiction des LOLBins certutil et bitsadmin.',
-      '3. Surveiller les appels P/Invoke vers NtSuspendProcess et NtAdjustPrivileges.'
     ];
 
     const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
@@ -415,47 +471,17 @@ ${e.evidence}
   const getPhaseColor = (phase: TimelinePhase) => {
     switch (phase) {
       case 'SCAN':
-        return {
-          border: 'border-cyan-500',
-          bg: 'bg-cyan-500/10',
-          text: 'text-cyan-400',
-          glow: 'shadow-cyan-500/20'
-        };
+        return { border: 'border-cyan-500', bg: 'bg-cyan-500/10', text: 'text-cyan-400' };
       case 'DETECTION':
-        return {
-          border: 'border-rose-500',
-          bg: 'bg-rose-500/10',
-          text: 'text-rose-400',
-          glow: 'shadow-rose-500/20'
-        };
+        return { border: 'border-rose-500', bg: 'bg-rose-500/10', text: 'text-rose-400' };
       case 'CONTAINMENT':
-        return {
-          border: 'border-indigo-500',
-          bg: 'bg-indigo-500/10',
-          text: 'text-indigo-400',
-          glow: 'shadow-indigo-500/20'
-        };
+        return { border: 'border-indigo-500', bg: 'bg-indigo-500/10', text: 'text-indigo-400' };
       case 'EXCISION':
-        return {
-          border: 'border-purple-500',
-          bg: 'bg-purple-500/10',
-          text: 'text-purple-400',
-          glow: 'shadow-purple-500/20'
-        };
+        return { border: 'border-purple-500', bg: 'bg-purple-500/10', text: 'text-purple-400' };
       case 'HARDENING':
-        return {
-          border: 'border-emerald-500',
-          bg: 'bg-emerald-500/10',
-          text: 'text-emerald-400',
-          glow: 'shadow-emerald-500/20'
-        };
+        return { border: 'border-emerald-500', bg: 'bg-emerald-500/10', text: 'text-emerald-400' };
       default:
-        return {
-          border: 'border-slate-500',
-          bg: 'bg-slate-500/10',
-          text: 'text-slate-400',
-          glow: 'shadow-slate-500/20'
-        };
+        return { border: 'border-slate-500', bg: 'bg-slate-500/10', text: 'text-slate-400' };
     }
   };
 
@@ -463,14 +489,15 @@ ${e.evidence}
   const totalEvents = events.length;
   const criticalCount = events.filter(e => e.severity === 'CRITICAL').length;
   const remediatedCount = events.filter(e => e.status === 'REMEDIATED' || e.status === 'VERIFIED').length;
-  const remediationPercentage = Math.round((remediatedCount / totalEvents) * 100);
+  const remediationPercentage = totalEvents > 0 ? Math.round((remediatedCount / totalEvents) * 100) : 100;
 
-  // Dynamic Security Score Calculation
-  const baseScore = 28;
-  const earnedScore = events
-    .filter(e => e.status === 'REMEDIATED' || e.status === 'VERIFIED')
-    .reduce((acc, curr) => acc + (curr.scoreDelta || 0), 0);
-  const currentSecurityScore = Math.min(100, baseScore + earnedScore);
+  // Dynamic Security Score Calculation based on real threat statuses
+  const baseScore = 35;
+  const activeThreatsCount = threats.filter(t => t.status === 'ACTIVE').length;
+  const neutralizedCount = threats.filter(t => t.status === 'NEUTRALIZED' || t.status === 'DISMISSED').length;
+  const currentSecurityScore = activeThreatsCount === 0 && threats.length > 0
+    ? 98
+    : Math.max(25, Math.min(100, baseScore + neutralizedCount * 15 - activeThreatsCount * 12));
   const residualRisk = Math.max(0, 100 - currentSecurityScore);
 
   return (
@@ -481,7 +508,7 @@ ${e.evidence}
           <div className="space-y-2 max-w-3xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-cyan-950/80 border border-cyan-800/60 rounded-full text-cyan-300 font-mono text-xs font-semibold">
               <Clock className="w-3.5 h-3.5 text-cyan-400" />
-              <span>CHRONOLOGIE FORENSIQUE DE BOUT-EN-BOUT</span>
+              <span>CHRONOLOGIE FORENSIQUE TEMPS RÉEL</span>
             </div>
 
             <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight font-['Plus_Jakarta_Sans']">
@@ -489,9 +516,7 @@ ${e.evidence}
             </h1>
 
             <p className="text-sm text-slate-300 leading-relaxed">
-              Visualisez le cycle de vie complet de l'attaque et de la remédiation : de l'ingestion initiale du scan système
-              à l'excision racine du pilote <strong className="text-cyan-300">TrustedInstaller</strong>, la suspension des
-              watchdogs en RAM et le durcissement final de l'OS.
+              Cycle de vie chronologique des détections et actions forensiques : du scan initial jusqu'au durcissement final de l'OS. Les jalons s'actualisent en direct au fur et à mesure des scans et des neutralisations.
             </p>
           </div>
 
@@ -524,20 +549,16 @@ ${e.evidence}
                 Score de Sécurité Global & Réduction du Risque Système
               </span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                currentSecurityScore >= 90
+                currentSecurityScore >= 85
                   ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                  : currentSecurityScore >= 70
+                  : currentSecurityScore >= 60
                   ? 'bg-cyan-950 text-cyan-300 border border-cyan-800'
-                  : currentSecurityScore >= 50
-                  ? 'bg-amber-950 text-amber-300 border border-amber-800'
                   : 'bg-rose-950 text-rose-300 border border-rose-800'
               }`}>
-                {currentSecurityScore >= 90
+                {currentSecurityScore >= 85
                   ? 'SYSTÈME HAUTEMENT DURCI'
-                  : currentSecurityScore >= 70
-                  ? 'MENACES MAJEURES NEUTRALISÉES'
-                  : currentSecurityScore >= 50
-                  ? 'CONFINEMENT EN COURS'
+                  : currentSecurityScore >= 60
+                  ? 'MENACES EN COURS DE REMÉDIATION'
                   : 'RISQUE CRITIQUE ACTIF'}
               </span>
             </div>
@@ -560,7 +581,7 @@ ${e.evidence}
               <div
                 style={{ width: `${currentSecurityScore}%` }}
                 className={`h-full rounded-full transition-all duration-700 bg-gradient-to-r ${
-                  currentSecurityScore >= 90
+                  currentSecurityScore >= 85
                     ? 'from-amber-500 via-cyan-500 to-emerald-400'
                     : currentSecurityScore >= 60
                     ? 'from-rose-500 via-amber-500 to-cyan-400'
@@ -572,7 +593,7 @@ ${e.evidence}
             <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
               <div className="flex items-center gap-1.5">
                 <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Gain de protection : <strong className="text-emerald-300">+{currentSecurityScore - baseScore} pts</strong> depuis le scan initial (Base: {baseScore}%)</span>
+                <span>Gain de protection : <strong className="text-emerald-300">+{Math.max(0, currentSecurityScore - baseScore)} pts</strong></span>
               </div>
               <div className="flex items-center gap-1">
                 <span>Objectif de conformité : <strong className="text-cyan-300">98% Hardened</strong></span>
@@ -584,15 +605,15 @@ ${e.evidence}
         {/* Live Metrics Row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-800/80">
           <div className="space-y-1">
-            <span className="text-xs text-slate-400">Total Événements</span>
-            <div className="text-2xl font-bold text-white font-mono">{totalEvents} Jalons</div>
+            <span className="text-xs text-slate-400">Total Jalons</span>
+            <div className="text-2xl font-bold text-white font-mono">{totalEvents} Événements</div>
             <span className="text-[11px] text-slate-500">Scan initial → Durcissement</span>
           </div>
 
           <div className="space-y-1">
-            <span className="text-xs text-slate-400">Menaces Critiques</span>
-            <div className="text-2xl font-bold text-rose-400 font-mono">{criticalCount} Infiltrations</div>
-            <span className="text-[11px] text-slate-500">Rootkit Kernel & C2 Beacon</span>
+            <span className="text-xs text-slate-400">Menaces Détectées</span>
+            <div className="text-2xl font-bold text-rose-400 font-mono">{threats.length} Éléments</div>
+            <span className="text-[11px] text-slate-500">{activeThreatsCount} active(s) · {neutralizedCount} remédiée(s)</span>
           </div>
 
           <div className="space-y-1">
@@ -602,9 +623,11 @@ ${e.evidence}
           </div>
 
           <div className="space-y-1">
-            <span className="text-xs text-slate-400">Durée Totale Incident</span>
-            <div className="text-2xl font-bold text-cyan-400 font-mono">00:25 sec</div>
-            <span className="text-[11px] text-slate-500">Temps moyen de neutralisation</span>
+            <span className="text-xs text-slate-400">Critiques Résolues</span>
+            <div className="text-2xl font-bold text-cyan-400 font-mono">
+              {events.filter(e => e.severity === 'CRITICAL' && (e.status === 'REMEDIATED' || e.status === 'VERIFIED')).length} / {criticalCount}
+            </div>
+            <span className="text-[11px] text-slate-500">Priorités P0 neutralisées</span>
           </div>
         </div>
       </div>
@@ -692,7 +715,7 @@ ${e.evidence}
             <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Filtrer (MITRE, IP, fichier, PID)..."
+              placeholder="Filtrer (MITRE, nom, fichier, PID)..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono"
@@ -712,7 +735,7 @@ ${e.evidence}
             { id: 'DETECTION', label: '2. Détection d\'Anomalies' },
             { id: 'CONTAINMENT', label: '3. Confinement' },
             { id: 'EXCISION', label: '4. Excision Noyau' },
-            { id: 'HARDENING', label: '5. Durcissement' }
+            { id: 'HARDENING', label: '5. Durcissement' },
           ].map(phase => (
             <button
               key={phase.id}
@@ -748,7 +771,7 @@ ${e.evidence}
 
       {/* Main Vertical Timeline Visualization */}
       <div className="relative pl-6 md:pl-10 space-y-8 before:absolute before:left-3 md:before:left-5 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-cyan-500 before:via-rose-500 before:to-emerald-500">
-        {filteredEvents.map((evt, index) => {
+        {filteredEvents.map(evt => {
           const isExpanded = expandedEventId === evt.id;
           const isCurrentlyHighlighted =
             currentPlaybackIndex >= 0 && events[currentPlaybackIndex]?.id === evt.id;
@@ -833,7 +856,7 @@ ${e.evidence}
                     {evt.description}
                   </p>
 
-                  {/* Security Score Impact & Risk Reduction Micro-Visualization */}
+                  {/* Security Score Impact */}
                   {evt.scoreDelta !== undefined && (
                     <div className="p-3 bg-slate-950/90 rounded-lg border border-slate-800 space-y-2">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
@@ -844,9 +867,7 @@ ${e.evidence}
                           </span>
 
                           <span className="text-[11px] text-slate-400 font-mono">
-                            Palier Score : <strong className="text-slate-300">{(evt.cumulativeScore || 0) - evt.scoreDelta}%</strong>
-                            <span className="text-slate-500 mx-1">➔</span>
-                            <strong className="text-emerald-400">{evt.cumulativeScore}%</strong>
+                            Palier Score : <strong className="text-emerald-400">{evt.cumulativeScore}%</strong>
                           </span>
                         </div>
 
@@ -855,43 +876,6 @@ ${e.evidence}
                             <ShieldCheck className="w-3 h-3 text-cyan-400" />
                             Réduction Risque : <strong className="text-white">-{evt.riskReductionPercent}%</strong>
                           </span>
-
-                          {evt.status === 'REMEDIATED' || evt.status === 'VERIFIED' ? (
-                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-800/80 flex items-center gap-1">
-                              <Check className="w-2.5 h-2.5" /> Appliqué
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/80">
-                              En attente
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Visual Segmented Progress Bar */}
-                      <div className="space-y-1">
-                        <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden flex border border-slate-800/60">
-                          <div
-                            style={{ width: `${Math.max(0, (evt.cumulativeScore || 0) - (evt.scoreDelta || 0))}%` }}
-                            className="h-full bg-slate-700 transition-all duration-300"
-                          />
-                          <div
-                            style={{ width: `${evt.scoreDelta || 0}%` }}
-                            className={`h-full transition-all duration-300 ${
-                              evt.status === 'REMEDIATED' || evt.status === 'VERIFIED'
-                                ? 'bg-emerald-400'
-                                : 'bg-cyan-400 animate-pulse'
-                            }`}
-                          />
-                          <div
-                            style={{ width: `${Math.max(0, 100 - (evt.cumulativeScore || 0))}%` }}
-                            className="h-full bg-slate-950"
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
-                          <span>Atténuation : <span className="text-slate-300">{evt.riskCategory}</span></span>
-                          <span>Risque résiduel après étape : <span className="text-amber-400">{100 - (evt.cumulativeScore || 0)}%</span></span>
                         </div>
                       </div>
                     </div>
@@ -924,7 +908,7 @@ ${e.evidence}
                       <div className="flex items-center justify-between text-xs text-slate-400">
                         <span className="flex items-center gap-1.5 font-semibold text-slate-300">
                           <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-                          Preuve Forensique & Télémétrie brute (Audit Logs / NT API) :
+                          Preuve Forensique & Diagnostic :
                         </span>
                         <button
                           onClick={() => handleCopy(evt.evidence, `evidence-${evt.id}`)}
@@ -948,98 +932,40 @@ ${e.evidence}
                         {evt.evidence}
                       </pre>
                     </div>
-
-                    {/* Result or remediation explanation */}
-                    {evt.remediationResult && (
-                      <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-lg text-xs text-emerald-300 flex items-start gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                        <div>
-                          <strong className="font-semibold text-emerald-200">Remédiation appliquée : </strong>
-                          {evt.remediationResult}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
 
                 {/* Action Bar Footer for the Event */}
                 <div className="mt-4 pt-3 border-t border-slate-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-2 text-slate-500 font-mono text-[11px]">
-                    <span>Jalon {index + 1} sur {filteredEvents.length}</span>
-                    <span>·</span>
-                    <span>T+00:{evt.timeOffsetSec.toString().padStart(2, '0')}s</span>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    {evt.remediationActionCmd && (
+                  <div className="flex items-center gap-2">
+                    {evt.status !== 'REMEDIATED' && evt.status !== 'VERIFIED' && (
                       <button
                         onClick={() => handleExecuteRemediation(evt)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-semibold text-xs transition-colors shadow-sm ${
-                          evt.status === 'REMEDIATED' || evt.status === 'VERIFIED'
-                            ? 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                            : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950'
-                        }`}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-xs transition-colors shadow-sm"
                       >
                         <Zap className="w-3.5 h-3.5" />
-                        <span>{evt.remediationButtonLabel || `Exécuter ${evt.remediationActionCmd}`}</span>
+                        <span>{evt.remediationButtonLabel || 'Remédier'}</span>
                       </button>
                     )}
 
-                    <button
-                      onClick={() => onRunInConsole(evt.remediationActionCmd || 'help')}
-                      className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono text-xs transition-colors"
-                      title="Inspecter dans la console"
-                    >
-                      <Terminal className="w-3 h-3 text-cyan-400" />
-                      <span>Console</span>
-                    </button>
+                    {onNavigateTab && (
+                      <button
+                        onClick={() => onNavigateTab('overview')}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-colors"
+                      >
+                        Voir dans le Tableau de Bord
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="text-[11px] font-mono text-slate-500">
+                    Commande : <code className="text-cyan-400">{evt.remediationActionCmd}</code>
                   </div>
                 </div>
               </div>
             </div>
           );
         })}
-      </div>
-
-      {/* Post-Incident Hardening Summary Guide */}
-      <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-4">
-        <h3 className="text-base font-bold text-white flex items-center gap-2">
-          <Shield className="w-4 h-4 text-emerald-400" />
-          Protocole de Sécurisation Après Détection & Excision
-        </h3>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-          <div className="p-4 bg-slate-950 rounded-lg border border-slate-800 space-y-1.5">
-            <div className="font-semibold text-cyan-300 flex items-center gap-1.5">
-              <span>1. Redémarrage Machine Obligatoire</span>
-            </div>
-            <p className="text-slate-400 leading-relaxed">
-              Le pilote <code className="text-slate-200">suspicious_kernel_hook.sys</code> est inscrit dans
-              la clé <code className="text-amber-300">PendingFileRenameOperations</code>. La suppression
-              définitive est achevée par le noyau NT avant le chargement des services tiers.
-            </p>
-          </div>
-
-          <div className="p-4 bg-slate-950 rounded-lg border border-slate-800 space-y-1.5">
-            <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
-              <span>2. Vérification des Tokens ACL</span>
-            </div>
-            <p className="text-slate-400 leading-relaxed">
-              Les autorisations sur les dossiers système ont été réattribuées à <code className="text-slate-200">Administrateurs</code>.
-              Aucune persistance résiduelle dans les répertoires <code className="text-amber-300">%TEMP%</code> et <code className="text-amber-300">AppData</code>.
-            </p>
-          </div>
-
-          <div className="p-4 bg-slate-950 rounded-lg border border-slate-800 space-y-1.5">
-            <div className="font-semibold text-purple-300 flex items-center gap-1.5">
-              <span>3. Surveillance en Continu</span>
-            </div>
-            <p className="text-slate-400 leading-relaxed">
-              Les règles de filtrage Netsh AdvFirewall et le scan des scripts PowerShell sont verrouillés.
-              Toute nouvelle tentative de connexion C2 sur le port 4444 sera immédiatement bloquée.
-            </p>
-          </div>
-        </div>
       </div>
     </div>
   );

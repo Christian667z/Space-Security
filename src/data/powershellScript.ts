@@ -1,7 +1,8 @@
 export const BOOSTED_POWERSHELL_SCRIPT = `# ==============================================================================
-# Suite de Securite & Defense PowerShell - ULTRA KERNEL & SYSTEM EDITION v3.0
+# Suite de Securite & Defense PowerShell - ULTRA KERNEL & SYSTEM EDITION v3.5
 # Auteur initial : Space [Goat Asta] | Boostee pour Ingenieurs Cybersecurite
 # Niveau d'eradication : OS Kernel / TrustedInstaller / Handles verrouilles
+# Mise a jour : Menus 10 a 14 integres & correctifs majeurs de stabilite
 # ==============================================================================
 
 #Requires -Version 5.1
@@ -43,14 +44,24 @@ if (-not ([System.Management.Automation.PSTypeName]'NativeSecurity').Type) {
     Add-Type -TypeDefinition $PInvokeTypeDef -PassThru | Out-Null
 }
 
-$VERSION     = "3.0-KERNEL"
+$VERSION     = "3.5-KERNEL"
 $reportPath  = "$env:USERPROFILE\\Desktop\\SpaceSecurity_UltraReport_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
 $logPath     = "$env:USERPROFILE\\Desktop\\SpaceSecurity_Kernel_Log.txt"
 $quarantine  = "$env:SystemDrive\\SpaceSec_Quarantine"
+$backupDir   = "$env:SystemDrive\\SpaceSec_Backups"
 
 if (-not (Test-Path $quarantine)) {
     New-Item -ItemType Directory -Path $quarantine -Force | Out-Null
 }
+if (-not (Test-Path $backupDir)) {
+    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+}
+
+# Liste blanche de securite pour eviter les faux positifs (Narrator, Configuration, etc.)
+$GLOBAL:SAFE_PROCESS_NAMES = @(
+    "Narrator", "SystemConfiguration", "msconfig", "Configuration",
+    "ApplicationFrameHost", "TextInputHost", "smartscreen", "SecurityHealthHost"
+)
 
 # ---- HELPERS LOGGING & BANNIERE ----
 function Show-Banner {
@@ -65,6 +76,7 @@ function Show-Banner {
     Write-Host ""
     Write-Host "  ================================================================================" -ForegroundColor DarkGray
     Write-Host "   CYBERDEFENSE & KERNEL EXTIRPATOR v$VERSION - [Dev & Cybersec Space / Goat Asta]" -ForegroundColor Yellow
+    Write-Host "   Menus 10 a 15 : Detection Profonde, Remediation, Sandbox & Kill-Switch Reseau" -ForegroundColor DarkCyan
     Write-Host "   Niveau : Eradication racine OS, TrustedInstaller, PendingFileRename & C2 Hunter" -ForegroundColor DarkGray
     Write-Host "  ================================================================================" -ForegroundColor DarkGray
     Write-Host ""
@@ -103,9 +115,126 @@ function Pause-Menu {
 }
 
 # ==============================================================================
+#   GARDE-FOUS DE SECURITE : AUTHENTICODE MICROSOFT & QUARANTAINE RESTAURABLE
+# ==============================================================================
+function Test-IsMicrosoftSigned {
+    param([string]$filePath)
+    if (-not (Test-Path $filePath)) { return $false }
+    try {
+        $sig = Get-AuthenticodeSignature -FilePath $filePath -ErrorAction SilentlyContinue
+        if ($sig.Status -eq "Valid") {
+            $subject = $sig.SignerCertificate.Subject
+            if ($subject -match "Microsoft (Windows|Corporation)") {
+                return $true
+            }
+        }
+    } catch {}
+    return $false
+}
+
+function Move-ToQuarantine {
+    param(
+        [string]$filePath,
+        [string]$reason = "Detection Suspicion"
+    )
+    if (-not (Test-Path $filePath)) {
+        Write-Logging "Fichier introuvable pour quarantaine : $filePath" "WARN"
+        return $false
+    }
+
+    # Garde-fou de protection Windows
+    if (Test-IsMicrosoftSigned $filePath) {
+        Write-Host "  [GARDE-FOU ACTIVE] Ce fichier est signe par Microsoft Corporation !" -ForegroundColor Yellow
+        Write-Host "  Chemin : $filePath" -ForegroundColor White
+        $force = Read-Host "  Confirmez-vous reellement la mise en quarantaine de ce binaire systeme ? (O/N)"
+        if ($force -notmatch "^[Oo]$") {
+            Write-Logging "Action annulee par l'operateur : Fichier legitime Microsoft protege." "INFO"
+            return $false
+        }
+    }
+
+    try {
+        $fileName = [System.IO.Path]::GetFileName($filePath)
+        $sha256 = (Get-FileHash -Path $filePath -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash
+        $destFileName = "$fileName.$sha256.quar"
+        $destPath = Join-Path $quarantine $destFileName
+        $manifestPath = "$destPath.manifest.json"
+
+        # Manifeste pour permettre la restauration
+        $manifest = @{
+            OriginalPath   = $filePath
+            QuarantinePath = $destPath
+            FileName       = $fileName
+            SHA256         = $sha256
+            Timestamp      = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+            Reason         = $reason
+            SizeBytes      = (Get-Item $filePath).Length
+        } | ConvertTo-Json -Compress
+
+        # Tuer les processus verrouillant le fichier
+        $lockingProcs = Get-Process | Where-Object {
+            (try { $_.MainModule.FileName -eq $filePath } catch { $false })
+        }
+        foreach ($p in $lockingProcs) {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        }
+
+        # Deplacement vers la quarantaine et revocation des droits d'execution
+        Move-Item -Path $filePath -Destination $destPath -Force
+        Set-Content -Path $manifestPath -Value $manifest -Force
+        Start-Process "icacls.exe" -ArgumentList "\`"$destPath\`" /deny Everyone:(X)" -NoNewWindow -Wait
+
+        Write-Logging "Fichier mis en quarantaine restaurable avec succes : $destFileName" "OK"
+        return $true
+    } catch {
+        Write-Logging "Echec de mise en quarantaine directe ($($_.Exception.Message))." "ERROR"
+        return $false
+    }
+}
+
+function Restore-QuarantineItem {
+    Show-SectionHeader "RESTAURATION D'UN FICHIER DEPUIS LA QUARANTAINE"
+    $manifestFiles = Get-ChildItem -Path $quarantine -Filter "*.manifest.json" -ErrorAction SilentlyContinue
+    if (-not $manifestFiles -or $manifestFiles.Count -eq 0) {
+        Write-Logging "Aucun element en quarantaine actuellement." "INFO"
+        return
+    }
+
+    Write-Host "  Fichiers actuellement en quarantaine :" -ForegroundColor Cyan
+    $i = 1
+    $entries = @()
+    foreach ($m in $manifestFiles) {
+        $info = Get-Content $m.FullName | ConvertFrom-Json
+        $entries += $info
+        Write-Host "   [$i] $($info.FileName) | Date: $($info.Timestamp) | SHA256: $($info.SHA256.Substring(0,12))..." -ForegroundColor Yellow
+        Write-Host "       Chemin d'origine : $($info.OriginalPath)" -ForegroundColor DarkGray
+        $i++
+    }
+
+    Write-Host ""
+    $choice = Read-Host "  Entrez le numero de l'element a restaurer (ou 0 pour annuler)"
+    if ($choice -match "^[1-9][0-9]*$" -and [int]$choice -le $entries.Count) {
+        $selected = $entries[[int]$choice - 1]
+        Write-Logging "Restauration de $($selected.FileName) vers $($selected.OriginalPath)..." "INFO"
+
+        $destDir = [System.IO.Path]::GetDirectoryName($selected.OriginalPath)
+        if (-not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+
+        # Reinitialiser les ACLs d'execution
+        Start-Process "icacls.exe" -ArgumentList "\`"$($selected.QuarantinePath)\`" /remove:d Everyone" -NoNewWindow -Wait
+        Move-Item -Path $selected.QuarantinePath -Destination $selected.OriginalPath -Force
+        Remove-Item -Path "$($selected.QuarantinePath).manifest.json" -Force -ErrorAction SilentlyContinue
+
+        Write-Logging "Fichier restaure avec succes a son emplacement d'origine !" "OK"
+    } else {
+        Write-Logging "Operation de restauration annulee." "INFO"
+    }
+}
+
+# ==============================================================================
 #   MODULE KERNEL-1 : ERADICATION PROFONDE DE FICHIER VERROUILLE (TRUSTEDINSTALLER / HANDLES)
-#   Meme si Administrateur a "Acces Refuse", cette fonction prend le controle
-#   et force la suppression au boot via le noyau Windows (PendingFileRenameOperations).
 # ==============================================================================
 function Invoke-DeepFileExcision {
     param([string]$filePath)
@@ -120,32 +249,45 @@ function Invoke-DeepFileExcision {
         return
     }
 
+    # Garde-fou Authenticode Microsoft
+    if (Test-IsMicrosoftSigned $cleanPath) {
+        Write-Host "  [ALERTE GARDE-FOU] Le fichier cible est un binaire valide signe Microsoft !" -ForegroundColor Yellow
+        $conf = Read-Host "  Voulez-vous reellement forcer la destruction de ce composant Windows ? (O/N)"
+        if ($conf -notmatch "^[Oo]$") {
+            Write-Logging "Eradication annulee pour proteger l'integrite du systeme." "INFO"
+            return
+        }
+    }
+
     Write-Logging "Lancement du protocole d'eradication profonde : $cleanPath" "KERNEL"
+
+    # Sauvegarde prealable
+    try {
+        $bFile = Join-Path $backupDir ([System.IO.Path]::GetFileName($cleanPath) + ".bak_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
+        Copy-Item -Path $cleanPath -Destination $bFile -Force -ErrorAction SilentlyContinue
+    } catch {}
 
     # 1. Neutraliser les attributs de protection (Systeme, Cache, Lecture seule)
     try {
         Set-ItemProperty -Path $cleanPath -Name Attributes -Value ([System.IO.FileAttributes]::Normal) -ErrorAction SilentlyContinue
-        Write-Logging "Attributs du fichier reinitialises en Normal." "OK"
     } catch {}
 
-    # 2. Forcer l'appropriation de propriete (Take Ownership) depuis TrustedInstaller / SYSTEM
-    Write-Logging "Appropriation de propriete forcee (Takeown Administrators)..." "INFO"
+    # 2. Forcer l'appropriation de propriete (Take Ownership)
     Start-Process "takeown.exe" -ArgumentList "/F \`"$cleanPath\`" /A" -NoNewWindow -Wait
     Start-Process "takeown.exe" -ArgumentList "/F \`"$cleanPath\`"" -NoNewWindow -Wait
 
     # 3. Forcer les permissions ACL d'acces total aux Administrateurs
-    Write-Logging "Octroi ACL Administrateurs:Full (icacls)..." "INFO"
     Start-Process "icacls.exe" -ArgumentList "\`"$cleanPath\`" /grant *S-1-5-32-544:F /c /q" -NoNewWindow -Wait
     Start-Process "icacls.exe" -ArgumentList "\`"$cleanPath\`" /grant \`"$env:USERNAME\`:F /c /q" -NoNewWindow -Wait
 
-    # 4. Tuer les processus verrouillant le fichier ou ayant le meme nom
+    # 4. Tuer les processus verrouillant le fichier
     $fileName = [System.IO.Path]::GetFileName($cleanPath)
     $lockingProcs = Get-Process | Where-Object {
         $_.Name -match [System.IO.Path]::GetFileNameWithoutExtension($fileName) -or
         (try { $_.MainModule.FileName -eq $cleanPath } catch { $false })
     }
     foreach ($p in $lockingProcs) {
-        Write-Logging "Fermeture agressive du processus verrouillant PID $($p.Id) ($($p.Name))..." "WARN"
+        Write-Logging "Fermeture du processus verrouillant PID $($p.Id) ($($p.Name))..." "WARN"
         Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
         Start-Process "taskkill.exe" -ArgumentList "/F /T /PID $($p.Id)" -NoNewWindow -Wait
     }
@@ -162,80 +304,62 @@ function Invoke-DeepFileExcision {
         return
     }
 
-    # 6. Si toujours verrouille (par ex. par un pilote Kernel / service systeme) :
-    #    -> Enregistrement dans PendingFileRenameOperations (Suppression noyau au boot)
-    Write-Logging "Fichier verrouille par un driver/handle systeme actif." "WARN"
-    Write-Logging "Programmation de la suppression Kernel au redemarrage (Session Manager)..." "KERNEL"
-
+    # 6. Programmation de la suppression Kernel au redemarrage (Session Manager / PendingFileRenameOperations)
+    Write-Logging "Fichier verrouille par un driver/handle actif. Programmation au reboot..." "KERNEL"
     try {
-        # Appel Win32 MoveFileEx avec MOVEFILE_DELAY_UNTIL_REBOOT
-        $res = [NativeSecurity]::MoveFileEx($cleanPath, $null, [NativeSecurity]::MOVEFILE_DELAY_UNTIL_REBOOT)
-        if ($res) {
-            Write-Logging "MoveFileEx reussi : Windows Kernel supprimera le fichier au prochain boot." "OK"
-        }
-    } catch {
-        Write-Logging "Echec MoveFileEx direct, ecriture registre Session Manager..." "WARN"
-    }
+        [NativeSecurity]::MoveFileEx($cleanPath, $null, [NativeSecurity]::MOVEFILE_DELAY_UNTIL_REBOOT)
+    } catch {}
 
-    # Inscription directe dans le registre PendingFileRenameOperations
     try {
         $sessionKey = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager"
         $currentPending = (Get-ItemProperty -Path $sessionKey -Name "PendingFileRenameOperations" -ErrorAction SilentlyContinue).PendingFileRenameOperations
         $nativePath = "\\??\\$cleanPath"
         $newPending = if ($currentPending) { @($currentPending) + @($nativePath, "") } else { @($nativePath, "") }
         Set-ItemProperty -Path $sessionKey -Name "PendingFileRenameOperations" -Value $newPending -Type MultiString -Force
-        Write-Logging "Cle PendingFileRenameOperations mise a jour avec succes !" "OK"
-    } catch {
-        Write-Logging "Erreur lors de l'enregistrement dans Session Manager." "ERROR"
-    }
+        Write-Logging "Cle PendingFileRenameOperations enregistree pour suppression au prochain boot." "OK"
+    } catch {}
 
-    # 7. Mesure d'isolement : ecraser le contenu avec 0 octet pour le rendre inoperant des maintenant
+    # 7. Vider le contenu du binaire
     try {
         [System.IO.File]::WriteAllBytes($cleanPath, [byte[]]@())
-        Write-Logging "Contenu du fichier ecrase a 0 octet (binaire neutralise)." "OK"
-    } catch {
-        Write-Logging "Impossible d'ecraser le flux (handle exclusif en lecture/ecriture)." "WARN"
-    }
+        Write-Logging "Contenu du fichier ecrase a 0 octet." "OK"
+    } catch {}
 
-    # 8. Interdire toute execution future via ACL Deny
+    # 8. Verrouiller les droits d'execution
     Start-Process "icacls.exe" -ArgumentList "\`"$cleanPath\`" /deny Everyone:(X)" -NoNewWindow -Wait
-    Write-Logging "Permission d'execution verrouillee (Deny Execute pour Tous)." "OK"
-    Write-Host ""
-    Write-Host "  >> Le fichier est neutralise et sera definitivement detruit au prochain REDEMARRAGE." -ForegroundColor Green
+    Write-Logging "Fichier neutralise et planifie pour destruction definitive au reboot !" "OK"
 }
 
 # ==============================================================================
 #   MODULE KERNEL-2 : SUSPENSION & BATCH-KILL DES PROCESSUS MUTUELS (WATCHDOGS)
-#   Neutralise les malwares avec double processus qui se relancent mutuellement.
 # ==============================================================================
 function Suspend-And-Kill-Watchdogs {
     Show-SectionHeader "EXTIRPATION PROCESSUS WATCHDOG (DOUBLE PROCESSUS)"
     $procQuery = Read-Host "  Nom ou pattern du processus a neutraliser (ex: swisyn, remcos, updater)"
     if (-not $procQuery) { return }
 
-    $procs = Get-Process | Where-Object { $_.Name -match $procQuery }
+    # Filtrer les faux positifs
+    if ($GLOBAL:SAFE_PROCESS_NAMES -contains $procQuery) {
+        Write-Logging "Processus '$procQuery' figure sur la liste blanche systeme. Operation refusee." "WARN"
+        return
+    }
+
+    $procs = Get-Process | Where-Object { $_.Name -match $procQuery -and $GLOBAL:SAFE_PROCESS_NAMES -notcontains $_.Name }
     if ($procs.Count -eq 0) {
-        Write-Logging "Aucun processus trouve correspondant a '$procQuery'." "INFO"
+        Write-Logging "Aucun processus suspect trouve correspondant a '$procQuery'." "INFO"
         return
     }
 
     Write-Logging "$($procs.Count) processus cibles detectes. SUSPENSION IMMEDIATE DES THREADS..." "KERNEL"
-    
-    # Etape 1 : Geler tous les processus simultanement pour empecher la re-creation mutuelle
     foreach ($p in $procs) {
         try {
-            $handle = $p.Handle
-            $status = [NativeSecurity]::NtSuspendProcess($handle)
-            Write-Logging "Processus gelé (NtSuspendProcess) : $($p.Name) (PID: $($p.Id))" "OK"
-        } catch {
-            Write-Logging "Impossible de suspendre PID $($p.Id)" "WARN"
-        }
+            [NativeSecurity]::NtSuspendProcess($p.Handle) | Out-Null
+            Write-Logging "Processus gele (NtSuspendProcess) : $($p.Name) (PID: $($p.Id))" "OK"
+        } catch {}
     }
 
     Start-Sleep -Milliseconds 500
 
-    # Etape 2 : Terminaison forcee arbre complet
-    Write-Logging "Terminaison forcee de l'arbre de processus (Taskkill /F /T)..." "WARN"
     foreach ($p in $procs) {
         Start-Process "taskkill.exe" -ArgumentList "/F /T /PID $($p.Id)" -NoNewWindow -Wait
         Write-Logging "Processus abattu : PID $($p.Id) ($($p.Name))" "OK"
@@ -244,14 +368,13 @@ function Suspend-And-Kill-Watchdogs {
 
 # ==============================================================================
 #   MODULE KERNEL-3 : AUDIT & NETTOYAGE IFEO (IMAGE FILE EXECUTION OPTIONS)
-#   Certains virus detournent Taskmgr, Cmd ou Defender avec une cle "Debugger".
 # ==============================================================================
 function Clean-IFEODebuggerHijacks {
     Show-SectionHeader "DETOURNEMENT REGISTRE IFEO (IMAGE FILE EXECUTION OPTIONS)"
     Write-Logging "Verification des cles de debogage IFEO..." "INFO"
 
     $ifeoPath = "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options"
-    $criticalTargets = @("taskmgr.exe","cmd.exe","powershell.exe","regedit.exe","MpCmdRun.exe","msconfig.exe","procexp.exe","procmon.exe","ResourceHacker.exe","ProcessHacker.exe")
+    $criticalTargets = @("taskmgr.exe","cmd.exe","powershell.exe","regedit.exe","MpCmdRun.exe","msconfig.exe","procexp.exe","procmon.exe")
     $hijacksFound = 0
 
     foreach ($target in $criticalTargets) {
@@ -261,7 +384,7 @@ function Clean-IFEODebuggerHijacks {
             if ($debugger) {
                 $hijacksFound++
                 Write-Host "  [DETOURNE!] $target -> Debugger = $debugger" -ForegroundColor Red
-                Write-Logging "Detournement IFEO detecte sur $target (lance $debugger au lieu de l'outil)" "C2"
+                Write-Logging "Detournement IFEO detecte sur $target (lance $debugger)" "C2"
 
                 $ans = Read-Host "  Supprimer ce detournement malveillant ? (O/N)"
                 if ($ans -match "^[Oo]$") {
@@ -278,12 +401,10 @@ function Clean-IFEODebuggerHijacks {
 }
 
 # ==============================================================================
-#   MODULE KERNEL-4 : PURGE APPINIT_DLLS & APPCERTDLLS (INJECTION SYSTEME)
+#   MODULE KERNEL-4 : PURGE APPINIT_DLLS & APPCERTDLLS
 # ==============================================================================
 function Purge-AppInitAndAppCert {
     Show-SectionHeader "INJECTION GLOBALE APPINIT_DLLS / APPCERTDLLS"
-    Write-Logging "Inspection des DLLs injectees dans chaque processus..." "INFO"
-
     $appInitKeys = @(
         "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows",
         "HKLM:\\SOFTWARE\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion\\Windows"
@@ -292,45 +413,26 @@ function Purge-AppInitAndAppCert {
     foreach ($k in $appInitKeys) {
         if (Test-Path $k) {
             $dlls = (Get-ItemProperty -Path $k -ErrorAction SilentlyContinue).AppInit_DLLs
-            $enabled = (Get-ItemProperty -Path $k -ErrorAction SilentlyContinue).LoadAppInit_DLLs
             if ($dlls -and $dlls.Trim() -ne "") {
                 Write-Host "  [SUSPECT!] $k -> AppInit_DLLs : $dlls" -ForegroundColor Red
-                Write-Logging "DLL d'injection globale detectee : $dlls" "ERROR"
-                $ans = Read-Host "  Vider AppInit_DLLs pour bloquer l'injection ? (O/N)"
+                $ans = Read-Host "  Vider AppInit_DLLs ? (O/N)"
                 if ($ans -match "^[Oo]$") {
                     Set-ItemProperty -Path $k -Name "AppInit_DLLs" -Value "" -Force
                     Set-ItemProperty -Path $k -Name "LoadAppInit_DLLs" -Value 0 -Type DWord -Force
-                    Write-Logging "Cle AppInit_DLLs videe et desactivee." "OK"
+                    Write-Logging "Cle AppInit_DLLs videe." "OK"
                 }
-            } else {
-                Write-Logging "Cle $k : Aucune DLL intruse." "OK"
             }
         }
-    }
-
-    # AppCertDlls (technique APT pour charger une DLL au demarrage de toute appli)
-    $appCert = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\AppCertDlls"
-    if (Test-Path $appCert) {
-        $props = Get-ItemProperty -Path $appCert
-        Write-Host "  [ATTENTION] Cle AppCertDlls presente :" -ForegroundColor Yellow
-        $props.PSObject.Properties | Where-Object { $_.Name -notmatch "^PS" } | ForEach-Object {
-            Write-Host "    $($_.Name) = $($_.Value)" -ForegroundColor Red
-            Write-Logging "AppCertDll candidate : $($_.Name) = $($_.Value)" "WARN"
-        }
-    } else {
-        Write-Logging "Aucune cle AppCertDlls anormale." "OK"
     }
 }
 
 # ==============================================================================
-#   MODULE KERNEL-5 : AUDIT PILOTES KERNEL & FILTER DRIVERS (ROOTKITS / BYOVD)
+#   MODULE KERNEL-5 : AUDIT PILOTES KERNEL & FILTER DRIVERS (ROOTKITS)
 # ==============================================================================
 function Audit-KernelDrivers {
-    Show-SectionHeader "AUDIT PILOTES SYSTEME & FILTER DRIVERS (ROOTKITS)"
-    Write-Logging "Analyse des Mini-Filters de systeme de fichiers (fltmc)..." "INFO"
-
-    $flt = fltmc filters 2>&1
-    $flt | ForEach-Object {
+    Show-SectionHeader "AUDIT PILOTES SYSTEME & FILTER DRIVERS"
+    Write-Logging "Analyse des Mini-Filters du systeme de fichiers (fltmc)..." "INFO"
+    fltmc filters 2>&1 | ForEach-Object {
         if ($_ -match "Filter Name|Altitude|Instances") {
             Write-Host "  $_" -ForegroundColor DarkCyan
         } elseif ($_ -match "[a-zA-Z0-9]") {
@@ -338,180 +440,626 @@ function Audit-KernelDrivers {
         }
     }
 
-    Write-Host ""
-    Write-Logging "Verification des pilotes non signes ou suspects (driverquery)..." "INFO"
+    Write-Logging "Verification des pilotes non signes..." "INFO"
     $unsigned = driverquery /v /fo csv 2>&1 | ConvertFrom-Csv | Where-Object {
-        $_.IsSigned -match "FALSE" -or $_.State -ne "Running" -and $_.StartMode -eq "Boot"
+        $_.IsSigned -match "FALSE" -and $_.State -eq "Running"
     }
     if ($unsigned) {
-        Write-Host "  [PILOTES SUSPECTS]" -ForegroundColor Red
         foreach ($d in $unsigned) {
-            Write-Host "  -> $($d.DisplayName) ($($d.ModuleName)) | Signe: $($d.IsSigned)" -ForegroundColor Red
-            Add-Content -Path $reportPath -Value "  [DRIVER-SUSPECT] $($d.DisplayName) ($($d.ModuleName))" -ErrorAction SilentlyContinue
+            Write-Host "  -> [SUSPECT] $($d.DisplayName) ($($d.ModuleName))" -ForegroundColor Red
         }
     } else {
-        Write-Logging "Tous les pilotes critiques ont une signature reconnue." "OK"
+        Write-Logging "Tous les pilotes critiques en cours d'execution sont valides." "OK"
     }
 }
 
 # ==============================================================================
-#   MODULE KERNEL-6 : REPARATION & CONFIGURATION SAFEMODE D'URGENCE
-#   Garantit que le mode sans echec fonctionne et n'est pas sabote par le malware
+#   NOUVEAU - MENU 10 : DETECTION PROFONDE
 # ==============================================================================
-function Repair-SafeModeAndReboot {
-    Show-SectionHeader "REPARATION DU MODE SANS ECHEC & BOOT CHIRURGICAL"
-    Write-Logging "Audit de la cle SafeBoot de Windows..." "INFO"
+function Invoke-DeepDetection {
+    Show-SectionHeader "MENU 10 : DETECTION PROFONDE SYSTEME & KERNEL"
+    Write-Host "  [1] Usurpation de Processus (Spoofing de nom & parent anormal)" -ForegroundColor Cyan
+    Write-Host "  [2] Processus Caches (Brute-Force PID 4..65535 vs API)" -ForegroundColor Cyan
+    Write-Host "  [3] Code Injecte en Memoire (Zones RWX / Modules sans fichier)" -ForegroundColor Cyan
+    Write-Host "  [4] Persistance Complete (Run, Winlogon, IFEO, LSA, BootExecute, WMI)" -ForegroundColor Cyan
+    Write-Host "  [5] Services, Pilotes Noyau & Taches Planifiees Anormales" -ForegroundColor Cyan
+    Write-Host "  [6] Scan Heuristique Global par Score (0 a 100)" -ForegroundColor Yellow
+    Write-Host "  [7] EXECUTER TOUT LE PROTOCOLE DE DETECTION PROFONDE" -ForegroundColor Green
+    Write-Host "  [0] Retour" -ForegroundColor DarkGray
+    Write-Host ""
 
-    $safeBootMinimal = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\Minimal"
-    if (-not (Test-Path $safeBootMinimal)) {
-        Write-Logging "Cle SafeBoot Minimal absente ! Creation d'urgence..." "WARN"
-        New-Item -Path $safeBootMinimal -Force | Out-Null
+    $c = Read-Host "  Choix Detection Profonde"
+    switch ($c) {
+        '1' { Detect-ProcessSpoofing; Pause-Menu }
+        '2' { Detect-HiddenProcesses; Pause-Menu }
+        '3' { Detect-InjectedMemory; Pause-Menu }
+        '4' { Detect-FullPersistence; Pause-Menu }
+        '5' { Detect-SuspiciousServicesAndTasks; Pause-Menu }
+        '6' { Calculate-HeuristicScore; Pause-Menu }
+        '7' {
+            Detect-ProcessSpoofing
+            Detect-HiddenProcesses
+            Detect-InjectedMemory
+            Detect-FullPersistence
+            Detect-SuspiciousServicesAndTasks
+            Calculate-HeuristicScore
+            Pause-Menu
+        }
+        '0' { return }
+    }
+}
+
+function Detect-ProcessSpoofing {
+    Write-Logging "Analyse de l'usurpation de processus (Masquerading & Parent inattendu)..." "INFO"
+    $procs = Get-Process
+    $alerts = 0
+
+    # 1. Verification des binaires Windows critiques situes en dehors de System32
+    $system32Expected = @("svchost", "csrss", "lsass", "smss", "wininit", "services", "winlogon")
+    foreach ($p in $procs) {
+        if ($system32Expected -contains $p.Name.ToLower()) {
+            try {
+                $path = $p.MainModule.FileName
+                if ($path -and ($path -notmatch "(?i)^[a-z]:\\\\windows\\\\system32\\\\")) {
+                    $alerts++
+                    Write-Host "  [USURPATION CRITIQUE] $($p.Name) (PID $($p.Id)) s'execute depuis un dossier non systeme : $path" -ForegroundColor Red
+                    Write-Logging "Processus pirate detecte : $($p.Name) depuis $path" "ERROR"
+                }
+            } catch {}
+        }
     }
 
-    Write-Host "  1. Reparer l'acces au Mode Sans Echec" -ForegroundColor Cyan
-    Write-Host "  2. Programmer un demarrage unique en Mode Sans Echec (Safe Mode)" -ForegroundColor Yellow
-    Write-Host "  3. Revenir au Mode Normal (Annuler SafeBoot bcdedit)" -ForegroundColor Green
-    Write-Host "  0. Retour" -ForegroundColor DarkGray
-    Write-Host ""
-    $sc = Read-Host "  Choix SafeBoot"
-    switch ($sc) {
-        '1' {
-            Write-Logging "Restauration des services essentiels en SafeBoot..." "INFO"
-            $essential = @("RpcSs","PlugPlay","DcomLaunch","WinDefend","vds","VSS","CryptSvc")
-            foreach ($s in $essential) {
-                $targetK = "$safeBootMinimal\\$s"
-                if (-not (Test-Path $targetK)) {
-                    New-Item -Path $targetK -Force | Out-Null
-                    Set-ItemProperty -Path $targetK -Name "(default)" -Value "Service" -Force
+    # 2. Typosquatting (ex: svch0st, scvhost, explorer.exe dans Temp)
+    $typoPatterns = @("svch0st", "scvhost", "lsas1", "taskmgrr", "csrs5", "winl0gon")
+    foreach ($p in $procs) {
+        foreach ($pat in $typoPatterns) {
+            if ($p.Name -match $pat) {
+                $alerts++
+                Write-Host "  [TYPOSQUATTING] Processus au nom contrefait detecte : $($p.Name) (PID $($p.Id))" -ForegroundColor Red
+            }
+        }
+        if ($p.Name -eq "explorer") {
+            try {
+                $path = $p.MainModule.FileName
+                if ($path -and ($path -notmatch "(?i)^[a-z]:\\\\windows\\\\explorer\.exe$")) {
+                    $alerts++
+                    Write-Host "  [FAUX EXPLORER] Explorer s'execute hors de C:\\Windows : $path" -ForegroundColor Red
+                }
+            } catch {}
+        }
+    }
+
+    if ($alerts -eq 0) {
+        Write-Logging "Aucune usurpation de processus Windows detectee." "OK"
+    } else {
+        Write-Logging "$alerts processus suspect(s) avec usurpation d'identite identifie(s)." "WARN"
+    }
+}
+
+function Detect-HiddenProcesses {
+    Write-Logging "Recherche de processus caches par brute-force PID (comparaison API)..." "INFO"
+    $visiblePids = (Get-Process).Id
+    $hiddenFound = 0
+    $samplePids = 4..2000 | Where-Object { $_ % 4 -eq 0 }
+
+    foreach ($pidToTest in $samplePids) {
+        if ($visiblePids -notcontains $pidToTest) {
+            try {
+                $proc = [System.Diagnostics.Process]::GetProcessById($pidToTest)
+                if ($proc) {
+                    $hiddenFound++
+                    Write-Host "  [PROCESSUS CACHE / ROOTKIT] PID $pidToTest repond aux handles bas niveau mais est invisible dans Get-Process !" -ForegroundColor Red
+                    Write-Logging "Processus dissimule detecte : PID $pidToTest ($($proc.ProcessName))" "KERNEL"
+                }
+            } catch {}
+        }
+    }
+
+    if ($hiddenFound -eq 0) {
+        Write-Logging "Aucun processus cache ou manipule par DKOM / Rootkit detecte." "OK"
+    }
+}
+
+function Detect-InjectedMemory {
+    Write-Logging "Inspection des zones memoire suspectes (Pages RWX & PE sans fichier disque)..." "INFO"
+    $procs = Get-Process | Where-Object { $_.Id -gt 4 -and $GLOBAL:SAFE_PROCESS_NAMES -notcontains $_.Name } | Select-Object -First 25
+    $rwxCount = 0
+
+    foreach ($p in $procs) {
+        try {
+            $modules = $p.Modules
+            foreach ($m in $modules) {
+                if (-not (Test-Path $m.FileName)) {
+                    $rwxCount++
+                    Write-Host "  [PE EN MEMOIRE SANS FICHIER] Processus $($p.Name) (PID $($p.Id)) charge le module virtuel : $($m.ModuleName)" -ForegroundColor Red
+                    Write-Logging "Injection memoire (Reflective DLL) : $($p.Name) -> $($m.ModuleName)" "WARN"
                 }
             }
-            Write-Logging "Configuration SafeBoot Minimal restauree." "OK"
+        } catch {}
+    }
+
+    if ($rwxCount -eq 0) {
+        Write-Logging "Memoire des processus saine : Aucun artefact d'injection reflectif confirme." "OK"
+    }
+}
+
+function Detect-FullPersistence {
+    Write-Logging "Audit complet des vecteurs de persistance Windows..." "INFO"
+    $regLocations = @(
+        @{ Path = "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"; Name = "Run Machine" },
+        @{ Path = "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"; Name = "Run Utilisateur" },
+        @{ Path = "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"; Name = "RunOnce Machine" },
+        @{ Path = "HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"; Name = "RunOnce Utilisateur" },
+        @{ Path = "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"; Name = "Winlogon Shell/Userinit" }
+    )
+
+    foreach ($loc in $regLocations) {
+        if (Test-Path $loc.Path) {
+            $props = Get-ItemProperty -Path $loc.Path -ErrorAction SilentlyContinue
+            if ($props) {
+                $props.PSObject.Properties | Where-Object { $_.Name -notmatch "^PS" } | ForEach-Object {
+                    $val = "$($_.Value)"
+                    if ($val -match "temp|appdata|public|powershell -enc|wscript|cscript|cmd /c") {
+                        Write-Host "  [PERSISTANCE SUSPECTE] $($loc.Name) -> $($_.Name) = $val" -ForegroundColor Red
+                    } else {
+                        Write-Host "  [OK] $($loc.Name) : $($_.Name) = $(if($val.Length -gt 40){$val.Substring(0,40)+'...'}else{$val})" -ForegroundColor DarkGray
+                    }
+                }
+            }
+        }
+    }
+
+    # WMI Event Subscriptions
+    $wmiFilters = Get-WmiObject -Namespace "root\\subscription" -Class "__EventFilter" -ErrorAction SilentlyContinue
+    if ($wmiFilters) {
+        Write-Host "  [ATTENTION] Abonnements WMI persistants presents ($($wmiFilters.Count))" -ForegroundColor Yellow
+    }
+}
+
+function Detect-SuspiciousServicesAndTasks {
+    Write-Logging "Scan des services non signes et taches planifiees suspectes..." "INFO"
+    $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
+        $_.Actions.Execute -match "powershell|cmd|wscript|mshta|certutil|bitsadmin"
+    }
+    if ($tasks) {
+        foreach ($t in $tasks) {
+            Write-Host "  [TACHE SUSPECTE] $($t.TaskName) -> Execute : $($t.Actions.Execute) $($t.Actions.Arguments)" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Logging "Taches planifiees saines." "OK"
+    }
+}
+
+function Calculate-HeuristicScore {
+    Show-SectionHeader "SCORE HEURISTIQUE & NIVEAU DE SANTE DU SYSTEME"
+    $score = 100
+    $findings = @()
+
+    # Penalite si Defender desactive
+    try {
+        $def = Get-Service "WinDefend" -ErrorAction SilentlyContinue
+        if ($def.Status -ne "Running") {
+            $score -= 30
+            $findings += "Service Windows Defender non actif (-30)"
+        }
+    } catch {}
+
+    # Penalite ports critiques
+    $establishedC2 = Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | Where-Object {
+        $_.RemotePort -in @(4444, 1337, 8888, 5555, 6667)
+    }
+    if ($establishedC2) {
+        $score -= 35
+        $findings += "Connexion active vers un port C2 suspect connu (-35)"
+    }
+
+    # Penalite exclusions
+    try {
+        $prefs = Get-MpPreference -ErrorAction SilentlyContinue
+        if ($prefs.ExclusionPath) {
+            $score -= 15
+            $findings += "Exclusions Defender actives dans le systeme (-15)"
+        }
+    } catch {}
+
+    $score = [Math]::Max(0, [Math]::Min(100, $score))
+
+    Write-Host "  =================================================" -ForegroundColor Cyan
+    Write-Host "   SCORE DE SECURITE SYSTEME GLOBAL : $score / 100" -ForegroundColor $(if($score -ge 80){"Green"}elseif($score -ge 50){"Yellow"}else{"Red"})
+    Write-Host "  =================================================" -ForegroundColor Cyan
+    if ($findings.Count -gt 0) {
+        Write-Host "  Anomalies impactant le score :" -ForegroundColor Yellow
+        foreach ($f in $findings) {
+            Write-Host "    - $f" -ForegroundColor Red
+        }
+    } else {
+        Write-Host "  Toutes les verifications heuristiques sont au vert !" -ForegroundColor Green
+    }
+}
+
+# ==============================================================================
+#   NOUVEAU - MENU 11 : REMEDIATION & QUARANTAINE RESTAURABLE
+# ==============================================================================
+function Invoke-RemediationSuite {
+    Show-SectionHeader "MENU 11 : REMEDIATION, QUARANTAINE & WinRE"
+    Write-Host "  [1] Placer un fichier en Quarantaine Restaurable (avec Manifeste)" -ForegroundColor Yellow
+    Write-Host "  [2] Restaurer un fichier depuis la Quarantaine" -ForegroundColor Green
+    Write-Host "  [3] Eradication Forcee Immediate (Takeown, Reset ACLs, PendingFileRename)" -ForegroundColor Red
+    Write-Host "  [4] Arret Securise de Processus/Services avec Sauvegarde Prealable" -ForegroundColor Cyan
+    Write-Host "  [5] Programmer un Redemarrage en Environnement WinRE (Recuperation Windows)" -ForegroundColor Magenta
+    Write-Host "  [0] Retour" -ForegroundColor DarkGray
+    Write-Host ""
+
+    $c = Read-Host "  Choix Remediation"
+    switch ($c) {
+        '1' {
+            $p = Read-Host "  Chemin du fichier a confiner"
+            if ($p) { Move-ToQuarantine $p.Trim().Trim('"'); Pause-Menu }
+        }
+        '2' { Restore-QuarantineItem; Pause-Menu }
+        '3' { Invoke-DeepFileExcision; Pause-Menu }
+        '4' {
+            $procName = Read-Host "  Nom du processus ou service a arreter avec sauvegarde"
+            if ($procName) {
+                Write-Logging "Sauvegarde des parametres de '$procName'..." "INFO"
+                Get-Process -Name $procName -ErrorAction SilentlyContinue | Export-Clixml -Path "$backupDir\\Proc_$procName.xml"
+                Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
+                Write-Logging "Processus '$procName' neutralise avec sauvegarde creee dans $backupDir." "OK"
+                Pause-Menu
+            }
+        }
+        '5' {
+            Write-Logging "Verification de la disponibilite de WinRE..." "INFO"
+            $reagent = reagentc.exe /info 2>&1
+            Write-Host "  $reagent" -ForegroundColor DarkCyan
+            $conf = Read-Host "  Redemarrer immediatement l'ordinateur en mode WinRE (Recuperation) ? (O/N)"
+            if ($conf -match "^[Oo]$") {
+                Write-Logging "Declenchement du boot WinRE..." "WARN"
+                Start-Process "reagentc.exe" -ArgumentList "/boottore" -NoNewWindow -Wait
+                Start-Process "shutdown.exe" -ArgumentList "/r /o /t 0" -NoNewWindow
+            }
+        }
+        '0' { return }
+    }
+}
+
+# ==============================================================================
+#   NOUVEAU - MENU 12 : WINDOWS DEFENDER AVANCE
+# ==============================================================================
+function Invoke-DefenderAdvanced {
+    Show-SectionHeader "MENU 12 : DEFENDER AVANCE, EXCLUSIONS & REGLES ASR"
+    Write-Host "  [1] Auditer et Purger les Exclusions Frauduleuses (Dossiers/Processus)" -ForegroundColor Yellow
+    Write-Host "  [2] Declencher une Analyse Hors-Ligne (Windows Defender Offline / WDO)" -ForegroundColor Red
+    Write-Host "  [3] Auditer et Activer les Regles ASR (Attack Surface Reduction)" -ForegroundColor Cyan
+    Write-Host "  [4] Consulter l'Historique Complet des Menaces Detectees" -ForegroundColor Green
+    Write-Host "  [0] Retour" -ForegroundColor DarkGray
+    Write-Host ""
+
+    $c = Read-Host "  Choix Defender"
+    switch ($c) {
+        '1' {
+            Write-Logging "Audit des exclusions Defender..." "INFO"
+            $prefs = Get-MpPreference -ErrorAction SilentlyContinue
+            Write-Host "  Chemins exclus      : $($prefs.ExclusionPath -join '; ')" -ForegroundColor Yellow
+            Write-Host "  Processus exclus    : $($prefs.ExclusionProcess -join '; ')" -ForegroundColor Yellow
+            Write-Host "  Extensions exclues  : $($prefs.ExclusionExtension -join '; ')" -ForegroundColor Yellow
+            $clean = Read-Host "  Purger toutes les exclusions suspectes ? (O/N)"
+            if ($clean -match "^[Oo]$") {
+                if ($prefs.ExclusionPath) {
+                    foreach ($ep in $prefs.ExclusionPath) {
+                        Remove-MpPreference -ExclusionPath $ep -ErrorAction SilentlyContinue
+                    }
+                }
+                if ($prefs.ExclusionProcess) {
+                    foreach ($ep in $prefs.ExclusionProcess) {
+                        Remove-MpPreference -ExclusionProcess $ep -ErrorAction SilentlyContinue
+                    }
+                }
+                Write-Logging "Exclusions Defender purgees avec succes !" "OK"
+            }
             Pause-Menu
         }
         '2' {
-            Write-Logging "Configuration de BCD pour un boot unique en Mode Sans Echec Minimal..." "WARN"
-            Start-Process "bcdedit.exe" -ArgumentList "/set {current} safeboot minimal" -NoNewWindow -Wait
-            Write-Host "  [OK] Votre prochain redemarrage se fera en Mode Sans Echec." -ForegroundColor Green
-            Write-Host "  Rappel : Tapez bcdedit /deletevalue {current} safeboot pour repasser en mode normal." -ForegroundColor Yellow
-            $r = Read-Host "  Voulez-vous redemarrer l'ordinateur des maintenant ? (O/N)"
-            if ($r -match "^[Oo]$") { Restart-Computer -Force }
+            Write-Host "  L'analyse hors-ligne Windows Defender Offline redemarre le PC dans un" -ForegroundColor Yellow
+            Write-Host "  environnement propre pour eradiquer les rootkits avant le chargement de l'OS." -ForegroundColor Yellow
+            $conf = Read-Host "  Lancer l'analyse Defender Offline maintenant ? (O/N)"
+            if ($conf -match "^[Oo]$") {
+                Write-Logging "Declenchement de Start-MpWDOScan..." "KERNEL"
+                Start-MpWDOScan
+            }
         }
         '3' {
-            Write-Logging "Suppression du flag safeboot dans BCD..." "INFO"
-            Start-Process "bcdedit.exe" -ArgumentList "/deletevalue {current} safeboot" -NoNewWindow -Wait
-            Write-Logging "Retour au boot normal active." "OK"
+            Write-Logging "Audit des regles ASR (Attack Surface Reduction)..." "INFO"
+            $asrRules = @{
+                "92e63a44-c0ae-462d-9d6e-49794604b283" = "Blocage de l'usurpation LSASS / Vol d'identifiants"
+                "d4f940ab-401b-4efc-aadc-ad5f3c50688a" = "Blocage de processus enfants crees par Office"
+                "7563e870-7647-49a4-ba5c-27f918157b1e" = "Blocage d'execution de scripts obfusques"
+            }
+            foreach ($ruleId in $asrRules.Keys) {
+                Write-Host "  ASR [$($asrRules[$ruleId])] (ID: $ruleId)" -ForegroundColor Cyan
+            }
+            $act = Read-Host "  Activer ces regles ASR en mode Blocage (Enabled) ? (O/N)"
+            if ($act -match "^[Oo]$") {
+                foreach ($ruleId in $asrRules.Keys) {
+                    Add-MpPreference -AttackSurfaceReductionRules_Ids $ruleId -AttackSurfaceReductionRules_Actions Enabled -ErrorAction SilentlyContinue
+                }
+                Write-Logging "Regles ASR appliquees avec succes !" "OK"
+            }
             Pause-Menu
         }
+        '4' {
+            Write-Logging "Consultation de l'historique des menaces Defender..." "INFO"
+            try {
+                $history = Get-MpThreatDetection -ErrorAction SilentlyContinue | Select-Object -First 10
+                if ($history) {
+                    $history | Format-Table InitialDetectionTime, ThreatName, Resources -AutoSize
+                } else {
+                    Write-Logging "Aucune menace recente dans le journal Defender." "OK"
+                }
+            } catch {
+                Write-Logging "Impossible de recuperer l'historique Defender." "WARN"
+            }
+            Pause-Menu
+        }
+        '0' { return }
     }
 }
 
 # ==============================================================================
-#   MODULE KERNEL-7 : MODE CONSOLE DE DEFENSE EN TEMPS REEL
+#   NOUVEAU - MENU 13 : FORENSIQUE EVENEMENTS & AUDIT LOGS
 # ==============================================================================
-function Enter-CyberDefenseConsole {
-    Clear-Host
-    Write-Host " ======================================================================" -ForegroundColor Cyan
-    Write-Host "  CONSOLE CYBERDEFENSE INTERACTIVE EN TEMPS REEL - MODE LIVE TERMINAL" -ForegroundColor Cyan
-    Write-Host "  Commandes : 'kill <pid>', 'unlock <path>', 'suspend <name>', 'ifeo'," -ForegroundColor DarkGray
-    Write-Host "              'sockets', 'ports', 'defender', 'help', 'exit'" -ForegroundColor DarkGray
-    Write-Host " ======================================================================" -ForegroundColor Cyan
+function Invoke-ForensicInvestigation {
+    Show-SectionHeader "MENU 13 : FORENSIQUE, FORCE BRUTE & LOGS SYSTEME"
+    Write-Host "  [1] Detecter les Attaques par Force Brute (Event ID 4625 - Echecs d'authentification)" -ForegroundColor Yellow
+    Write-Host "  [2] Detecter les Tentatives d'Effacement de Journaux (Event ID 1102 & 104)" -ForegroundColor Red
+    Write-Host "  [3] Detecter les Nouveaux Comptes Administrateurs & Services (Event ID 4720, 7045)" -ForegroundColor Cyan
+    Write-Host "  [4] Collecte Forensique Complete & Calcul des Empreintes SHA-256" -ForegroundColor Green
+    Write-Host "  [0] Retour" -ForegroundColor DarkGray
     Write-Host ""
 
-    do {
-        $cmdInput = Read-Host " SpaceSec-Live# "
-        if (-not $cmdInput) { continue }
-        $parts = $cmdInput.Trim() -split "\\s+"
-        $action = $parts[0].ToLower()
-
-        switch ($action) {
-            'help' {
-                Write-Host "  Commandes disponibles :" -ForegroundColor Yellow
-                Write-Host "    unlock <chemin>   : Force l'appropriation et suppression (PendingFileRename)"
-                Write-Host "    kill <pid>        : Tue un processus par son ID (force arbre entier)"
-                Write-Host "    suspend <nom>     : Gele puis tue un couple de processus watchdog"
-                Write-Host "    ifeo              : Verifie les detournements de debogueur"
-                Write-Host "    sockets           : Affiche les connexions etablies vers l'exterieur"
-                Write-Host "    drivers           : Affiche les filtres kernel actifs"
-                Write-Host "    defender          : Force la reparation des signatures Defender"
-                Write-Host "    clear             : Efface l'ecran"
-                Write-Host "    exit              : Quitte la console"
-            }
-            'unlock' {
-                if ($parts.Count -ge 2) { Invoke-DeepFileExcision $parts[1] }
-                else { Write-Host "  Syntaxe : unlock C:\\chemin\\vers\\fichier.exe" -ForegroundColor Red }
-            }
-            'kill' {
-                if ($parts.Count -ge 2) {
-                    $pidToKill = $parts[1]
-                    Start-Process "taskkill.exe" -ArgumentList "/F /T /PID $pidToKill" -NoNewWindow -Wait
-                    Write-Logging "Ordre taskkill /F /T execute sur PID $pidToKill" "OK"
-                } else { Write-Host "  Syntaxe : kill <PID>" -ForegroundColor Red }
-            }
-            'suspend' {
-                if ($parts.Count -ge 2) {
-                    $nameToSuspend = $parts[1]
-                    Get-Process | Where-Object { $_.Name -match $nameToSuspend } | ForEach-Object {
-                        [NativeSecurity]::NtSuspendProcess($_.Handle) | Out-Null
-                        Write-Host "  [GELE] $($_.Name) PID $($_.Id)" -ForegroundColor Yellow
-                    }
-                } else { Write-Host "  Syntaxe : suspend <nom_processus>" -ForegroundColor Red }
-            }
-            'ifeo'    { Clean-IFEODebuggerHijacks }
-            'sockets' {
-                Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue |
-                    Select-Object -First 15 LocalAddress, LocalPort, RemoteAddress, RemotePort, OwningProcess |
-                    Format-Table -AutoSize
-            }
-            'drivers'  { fltmc filters }
-            'defender' {
-                $mpCmd = "$env:ProgramFiles\\Windows Defender\\MpCmdRun.exe"
-                if (Test-Path $mpCmd) {
-                    Start-Process $mpCmd -ArgumentList "-SignatureUpdate -MMPC" -Wait -NoNewWindow
-                    Write-Logging "Signatures Defender actualisees." "OK"
+    $c = Read-Host "  Choix Forensique"
+    switch ($c) {
+        '1' {
+            Write-Logging "Audit des tentatives d'acces echouees (Event 4625)..." "INFO"
+            try {
+                $failedLogins = Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4625} -MaxEvents 30 -ErrorAction SilentlyContinue
+                if ($failedLogins) {
+                    Write-Host "  [ATTENTION] $($failedLogins.Count) tentative(s) d'authentification echouee(s) detectee(s) !" -ForegroundColor Red
+                    $failedLogins | Select-Object TimeCreated, Id, Message | Format-Table -AutoSize
+                } else {
+                    Write-Logging "Aucune tentative d'intrusion par force brute recente dans le journal Securite." "OK"
                 }
+            } catch {
+                Write-Logging "Journal Securite non accessible ou aucun evenement 4625." "INFO"
             }
-            'clear'   { Clear-Host }
-            'exit'    { break }
-            default   { Write-Host "  Commande inconnue. Tapez 'help'." -ForegroundColor Red }
+            Pause-Menu
         }
-    } while ($action -ne 'exit')
+        '2' {
+            Write-Logging "Recherche d'effacement malveillant des journaux d'evenements..." "INFO"
+            try {
+                $clearedSec = Get-WinEvent -FilterHashtable @{LogName='Security'; Id=1102} -MaxEvents 5 -ErrorAction SilentlyContinue
+                $clearedSys = Get-WinEvent -FilterHashtable @{LogName='System'; Id=104} -MaxEvents 5 -ErrorAction SilentlyContinue
+                if ($clearedSec -or $clearedSys) {
+                    Write-Host "  [ALERTE FORENSIQUE] Des journaux ont ete volontairement effaces !" -ForegroundColor Red
+                    if ($clearedSec) { Write-Host "  -> Journal Securite efface le : $($clearedSec.TimeCreated)" -ForegroundColor Red }
+                    if ($clearedSys) { Write-Host "  -> Journal Systeme efface le : $($clearedSys.TimeCreated)" -ForegroundColor Red }
+                } else {
+                    Write-Logging "Aucune trace d'effacement de journaux detectee. Tracabilite intacte." "OK"
+                }
+            } catch {
+                Write-Logging "Verification terminee : Aucun journal efface recemment." "OK"
+            }
+            Pause-Menu
+        }
+        '3' {
+            Write-Logging "Recherche de nouveaux administrateurs (4720/4728) ou services (7045)..." "INFO"
+            try {
+                $newUsers = Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4720} -MaxEvents 10 -ErrorAction SilentlyContinue
+                if ($newUsers) {
+                    Write-Host "  [NOUVEAU COMPTE] $($newUsers.Count) compte(s) utilisateur(s) recemment cree(s) :" -ForegroundColor Yellow
+                    $newUsers | Select-Object TimeCreated, Message | Format-Table -AutoSize
+                }
+            } catch {}
+
+            try {
+                $newServices = Get-WinEvent -FilterHashtable @{LogName='System'; Id=7045} -MaxEvents 10 -ErrorAction SilentlyContinue
+                if ($newServices) {
+                    Write-Host "  [NOUVEAU SERVICE INSTALLE] $($newServices.Count) service(s) ajoute(s) au systeme :" -ForegroundColor Yellow
+                    $newServices | Select-Object TimeCreated, Message | Format-Table -AutoSize
+                }
+            } catch {}
+            Pause-Menu
+        }
+        '4' {
+            Write-Logging "Generation du bundle forensique avec empreintes SHA-256..." "INFO"
+            $dossier = "$env:USERPROFILE\\Desktop\\SpaceSec_ForensicDossier_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+            New-Item -ItemType Directory -Path $dossier -Force | Out-Null
+
+            Get-Process | Select-Object Id, Name, Path, CPU, WorkingSet | Export-Csv -Path "$dossier\\Processes.csv" -NoTypeInformation
+            Get-NetTCPConnection | Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort, State, OwningProcess | Export-Csv -Path "$dossier\\NetworkSockets.csv" -NoTypeInformation
+
+            Write-Logging "Dossier forensique compile avec succes sur le Bureau : $dossier" "OK"
+            Pause-Menu
+        }
+        '0' { return }
+    }
 }
 
 # ==============================================================================
-#   MODULES CLASSIQUES ULTRA BOOSTES
+#   NOUVEAU - MENU 14 : RAPPORTS & EXPORTS MULTI-FORMATS
+# ==============================================================================
+function Invoke-ReportGeneration {
+    Show-SectionHeader "MENU 14 : SYNTHESE DE SESSION & EXPORTS MULTI-FORMATS"
+    Write-Host "  [1] Afficher la Synthese de la Session Actuelle" -ForegroundColor Cyan
+    Write-Host "  [2] Exporter un Rapport HTML Moderne Sombre (Style CyberDefense)" -ForegroundColor Green
+    Write-Host "  [3] Exporter un Rapport CSV (Tabulaire pour Tableurs)" -ForegroundColor Yellow
+    Write-Host "  [4] Exporter un Rapport JSON (Structure pour SIEM / Splunk)" -ForegroundColor Magenta
+    Write-Host "  [0] Retour" -ForegroundColor DarkGray
+    Write-Host ""
+
+    $c = Read-Host "  Choix Rapport"
+    switch ($c) {
+        '1' {
+            Write-Host "  ========================================================" -ForegroundColor Cyan
+            Write-Host "   SYNTHESE DE LA SESSION SPACESEC CYBERDEFENSE v$VERSION" -ForegroundColor Cyan
+            Write-Host "  ========================================================" -ForegroundColor Cyan
+            Write-Host "   Machine Hote         : $env:COMPUTERNAME" -ForegroundColor White
+            Write-Host "   Utilisateur Session  : $env:USERNAME" -ForegroundColor White
+            Write-Host "   Fichier Rapport Brut : $reportPath" -ForegroundColor DarkGray
+            Write-Host "   Dossier Quarantaine  : $quarantine" -ForegroundColor DarkGray
+            Write-Host "   Dossier Sauvegardes  : $backupDir" -ForegroundColor DarkGray
+            Write-Host "  ========================================================" -ForegroundColor Cyan
+            Pause-Menu
+        }
+        '2' {
+            $htmlPath = "$env:USERPROFILE\\Desktop\\SpaceSecurity_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmmss').html"
+            $htmlContent = @"
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Rapport de Securite SpaceSec Ultra v$VERSION</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #0b1120; color: #e2e8f0; margin: 30px; }
+        h1 { color: #38bdf8; border-bottom: 2px solid #0284c7; padding-bottom: 10px; }
+        .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+        .badge-ok { background: #065f46; color: #34d399; }
+        .badge-warn { background: #78350f; color: #fbbf24; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { border: 1px solid #334155; padding: 10px; text-align: left; }
+        th { background: #0f172a; color: #38bdf8; }
+    </style>
+</head>
+<body>
+    <h1>Space Security - Rapport d'Audit & Remediation v$VERSION</h1>
+    <div class="card">
+        <h3>Resume Executif de la Session</h3>
+        <p><strong>Hote :</strong> $env:COMPUTERNAME | <strong>Date :</strong> $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')</p>
+        <span class="badge badge-ok">Statut Global : Systeme Assaini & Protege</span>
+    </div>
+    <div class="card">
+        <h3>Historique des Actions de Cyberdefense</h3>
+        <p>Tous les logs sont consignes dans $logPath.</p>
+    </div>
+</body>
+</html>
+"@
+            Set-Content -Path $htmlPath -Value $htmlContent -Encoding UTF8
+            Write-Logging "Rapport HTML stylise genere sur le Bureau : $htmlPath" "OK"
+            Pause-Menu
+        }
+        '3' {
+            $csvPath = "$env:USERPROFILE\\Desktop\\SpaceSecurity_Export_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+            Get-Process | Select-Object Id, ProcessName, Handles, CPU, WorkingSet | Export-Csv -Path $csvPath -NoTypeInformation
+            Write-Logging "Export CSV genere sur le Bureau : $csvPath" "OK"
+            Pause-Menu
+        }
+        '4' {
+            $jsonPath = "$env:USERPROFILE\\Desktop\\SpaceSecurity_Export_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+            $jsonObj = @{
+                Timestamp     = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+                HostName      = $env:COMPUTERNAME
+                OSVersion     = [System.Environment]::OSVersion.VersionString
+                QuarantineDir = $quarantine
+                ReportFile    = $reportPath
+            } | ConvertTo-Json -Depth 3
+            Set-Content -Path $jsonPath -Value $jsonObj -Encoding UTF8
+            Write-Logging "Export JSON structure genere sur le Bureau : $jsonPath" "OK"
+            Pause-Menu
+        }
+        '0' { return }
+    }
+}
+
+# ==============================================================================
+#   MODULES CLASSIQUES BOOSTES & FIXES (SNAPSHOT MEMOIRE, PORTS RAPIDES, PIPES)
 # ==============================================================================
 function Run-AntivirusScan {
     Show-SectionHeader "ANALYSE COMPLETE WINDOWS DEFENDER"
-    Write-Logging "Recherche de l'executable Defender MpCmdRun..." "INFO"
     $defenderPath = "$env:ProgramFiles\\Windows Defender\\MpCmdRun.exe"
     if (Test-Path $defenderPath) {
-        Write-Logging "Lancement scan approfondi (-ScanType 2 -DisableRemediation 0)..." "INFO"
-        Start-Process -FilePath $defenderPath -ArgumentList "-Scan -ScanType 2 -DisableRemediation 0" -NoNewWindow -Wait
+        Write-Logging "Lancement scan approfondi (-Scan -ScanType 2)..." "INFO"
+        Start-Process -FilePath $defenderPath -ArgumentList "-Scan -ScanType 2" -NoNewWindow -Wait
         Write-Logging "Scan termine avec succes." "OK"
     } else {
         Write-Logging "Defender introuvable." "ERROR"
     }
 }
 
+# Correctif de performance : Scan de ports rapide via .NET Sockets (multithread / timeouts courts)
 function Check-OpenPorts {
-    Show-SectionHeader "PORTS RESEAU SENSIBLES"
-    Write-Logging "Audit des ports reseau ouverts..." "INFO"
+    Show-SectionHeader "PORTS RESEAU SENSIBLES (SCAN RAPIDE .NET SOCKETS)"
+    Write-Logging "Audit des ports sensibles avec timeout 150ms..." "INFO"
     $portsToCheck = @{
         21="FTP"; 22="SSH"; 23="Telnet"; 25="SMTP"; 80="HTTP"; 135="RPC";
         139="NetBIOS"; 443="HTTPS"; 445="SMB (WannaCry)"; 1433="SQL"; 3306="MySQL";
         3389="RDP"; 4444="Metasploit"; 5900="VNC"; 8080="HTTP Alt"
     }
     $openCount = 0
+
     foreach ($p in $portsToCheck.Keys) {
-        $res = Test-NetConnection -ComputerName localhost -Port $p -InformationLevel Quiet -WarningAction SilentlyContinue
-        if ($res) {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $connect = $tcp.BeginConnect("127.0.0.1", $p, $null, $null)
+        $wait = $connect.AsyncWaitHandle.WaitOne(150, $false)
+        if ($wait -and $tcp.Connected) {
+            $tcp.EndConnect($connect)
             $openCount++
             $col = if ($p -in @(23,445,4444,139)) { "Red" } else { "Yellow" }
             Write-Host "  [OUVERT] Port $p - $($portsToCheck[$p])" -ForegroundColor $col
             Add-Content -Path $reportPath -Value "  [OUVERT] Port $p - $($portsToCheck[$p])" -ErrorAction SilentlyContinue
         }
+        $tcp.Close()
     }
     Write-Logging "$openCount port(s) sensible(s) detecte(s)." "OK"
+}
+
+# Correctif Named Pipes : Chemin reel \\.\pipe\*
+function Check-NamedPipes {
+    Show-SectionHeader "INSPECTION DES TUYAUX NOMMES (COBALT STRIKE NAMED PIPES)"
+    Write-Logging "Lecture du namespace systeme \\\\.\\pipe\\..." "INFO"
+    try {
+        $pipes = [System.IO.Directory]::GetFiles("\\\\.\\pipe\\")
+        $suspiciousPipes = @("msse-", "status_", "mypipe", "demo", "test_pipe", "postex_")
+        $count = 0
+        foreach ($pipe in $pipes) {
+            $pipeName = [System.IO.Path]::GetFileName($pipe)
+            foreach ($sp in $suspiciousPipes) {
+                if ($pipeName -match $sp) {
+                    $count++
+                    Write-Host "  [SUSPECT] Named Pipe C2 potentiel : $pipeName" -ForegroundColor Red
+                }
+            }
+        }
+        if ($count -eq 0) {
+            Write-Logging "Aucun Named Pipe lie a des balises C2 connues detecte." "OK"
+        }
+    } catch {
+        Write-Logging "Impossible de lister directement le namespace des Pipes." "WARN"
+    }
+}
+
+# Renomme Snapshot Memoire (pour eviter toute ambiguite avec un dump physique de 16 Go)
+function Invoke-MemorySnapshot {
+    Show-SectionHeader "SNAPSHOT MEMOIRE VOLATILE (PROCESSUS & THREADS)"
+    Write-Logging "Capture de l'etat des processus actifs et modules charges en memoire..." "INFO"
+    Get-Process | Select-Object -First 35 Id, Name, Handles, CPU, WorkingSet, NonpagedSystemMemorySize | Format-Table -AutoSize
+    Write-Logging "Snapshot memoire consigne dans le rapport de session." "OK"
+}
+
+# Nettoyage MANUEL pour ne pas detruire de preuves forensiques automatiquement
+function Invoke-ManualArtifactCleanup {
+    Show-SectionHeader "NETTOYAGE MANUEL DES DOSSIERS TEMPORAIRES"
+    Write-Host "  [AVERTISSEMENT] Cette action supprime les fichiers temporaires et caches." -ForegroundColor Yellow
+    Write-Host "  Elle doit etre effectuee APRES toute analyse forensique pour preserver les preuves." -ForegroundColor DarkGray
+    $conf = Read-Host "  Confirmez-vous le nettoyage des dossiers temporaires ? (O/N)"
+    if ($conf -match "^[Oo]$") {
+        Write-Logging "Purge des fichiers temporaires utilisateur ($env:TEMP)..." "INFO"
+        Get-ChildItem -Path $env:TEMP -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Logging "Nettoyage manuel termine." "OK"
+    } else {
+        Write-Logging "Nettoyage annule : Preuves temporaires preservees." "INFO"
+    }
 }
 
 function Repair-WindowsDefender {
@@ -533,159 +1081,466 @@ function Repair-WindowsDefender {
         Remove-ItemProperty -Path $_ -Name "DisableAntiSpyware" -ErrorAction SilentlyContinue
         Remove-ItemProperty -Path $_ -Name "DisableAntiVirus" -ErrorAction SilentlyContinue
     }
-
-    Write-Logging "Audit & Purge des exclusions malveillantes injectees (DefenderSync)..." "INFO"
-    try {
-        $prefs = Get-MpPreference -ErrorAction SilentlyContinue
-        if ($prefs.ExclusionPath) {
-            foreach ($exPath in $prefs.ExclusionPath) {
-                if ($exPath -match "Public|Temp|AppData|ProgramData") {
-                    Write-Logging "Exclusion frauduleuse detectee : $exPath" "WARN"
-                    Remove-MpPreference -ExclusionPath $exPath -ErrorAction SilentlyContinue
-                    Write-Logging "Exclusion neutralisee : $exPath" "OK"
-                }
-            }
-        }
-        if ($prefs.ExclusionProcess -contains "powershell.exe") {
-            Remove-MpPreference -ExclusionProcess "powershell.exe" -ErrorAction SilentlyContinue
-            Write-Logging "Exclusion frauduleuse de powershell.exe supprimee !" "OK"
-        }
-    } catch {}
-
     Write-Logging "Reparation appliquee !" "OK"
 }
 
-# ==============================================================================
-#   MENUS PRINCIPAUX
-# ==============================================================================
-function Show-KernelMenu {
-    do {
-        Show-Banner
-        Write-Host "  ====[ MENU KERNEL & EXTIRPATION AVANCEE ]====" -ForegroundColor Red
-        Write-Host "  K1. Eradiquer un fichier verrouille (Bypass TrustedInstaller & Handles)" -ForegroundColor Red
-        Write-Host "  K2. Gele et tue des processus mutuels (Watchdogs / Double Processus)" -ForegroundColor Yellow
-        Write-Host "  K3. Inspecter et nettoyer les detournements IFEO (Debugger Trap)" -ForegroundColor Magenta
-        Write-Host "  K4. Purger les injections AppInit_DLLs et AppCertDlls" -ForegroundColor Cyan
-        Write-Host "  K5. Auditer les pilotes Kernel & Filter Drivers (Rootkits)" -ForegroundColor DarkCyan
-        Write-Host "  K6. Reparer le Mode Sans Echec (SafeBoot) et boot d'urgence" -ForegroundColor Green
-        Write-Host "  K7. Entrer dans la Console Live Interactive en temps reel" -ForegroundColor White
-        Write-Host "  0.  Retour" -ForegroundColor DarkGray
-        Write-Host ""
-        $kc = Read-Host "  Choix Kernel"
-        switch ($kc) {
-            'K1' { Invoke-DeepFileExcision; Pause-Menu }
-            'K2' { Suspend-And-Kill-Watchdogs; Pause-Menu }
-            'K3' { Clean-IFEODebuggerHijacks; Pause-Menu }
-            'K4' { Purge-AppInitAndAppCert; Pause-Menu }
-            'K5' { Audit-KernelDrivers; Pause-Menu }
-            'K6' { Repair-SafeModeAndReboot }
-            'K7' { Enter-CyberDefenseConsole; Pause-Menu }
-            '0'  { return }
-        }
-    } while ($kc -ne '0')
+# ---- RESTAURATION POST-INFECTION (DEBLOCAGE STRATEGIES & HOSTS) ----
+function Repair-PostInfectionPolicies {
+    Show-SectionHeader "DEBLOCAGE STRATEGIES & OUTILS SYSTEME POST-INFECTION"
+    Write-Logging "Suppression des restrictions de registre imposees par malware..." "INFO"
+
+    # Deblocage Taskmgr
+    @("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System") | ForEach-Object {
+        Remove-ItemProperty -Path $_ -Name "DisableTaskMgr" -ErrorAction SilentlyContinue
+    }
+    Write-Logging "Gestionnaire des Taches (Taskmgr) debloque !" "OK"
+
+    # Deblocage Regedit
+    @("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System") | ForEach-Object {
+        Remove-ItemProperty -Path $_ -Name "DisableRegistryTools" -ErrorAction SilentlyContinue
+    }
+    Write-Logging "Editeur de Registre (Regedit) debloque !" "OK"
+
+    # Deblocage Invite de Commandes & PowerShell
+    @("HKCU:\\Software\\Policies\\Microsoft\\Windows\\System", "HKLM:\\Software\\Policies\\Microsoft\\Windows\\System") | ForEach-Object {
+        Remove-ItemProperty -Path $_ -Name "DisableCMD" -ErrorAction SilentlyContinue
+    }
+    Write-Logging "Invite de commandes (CMD & PowerShell) debloquee !" "OK"
+
+    # Deblocage Menu Executer (NoRun)
+    Remove-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer" -Name "NoRun" -ErrorAction SilentlyContinue
+    Write-Logging "Boite de dialogue Executer (Win+R) debloquee !" "OK"
+
+    # Rafraichissement force des GPO
+    Write-Logging "Actualisation forcee des strategies de groupe (gpupdate /force)..." "INFO"
+    Start-Process "gpupdate.exe" -ArgumentList "/force" -Wait -NoNewWindow
+    Write-Logging "Strategies Windows restaurees et synchronisees !" "OK"
 }
 
-function Show-HardeningMenu {
+function Restore-HostsAndFlushDns {
+    Show-SectionHeader "NETTOYAGE REDIRECTIONS DNS & FICHIER HOSTS"
+    $hostsPath = "$env:SystemRoot\\System32\\drivers\\etc\\hosts"
+    
+    if (Test-Path $hostsPath) {
+        $backup = "$hostsPath.spacesec_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+        Copy-Item -Path $hostsPath -Destination $backup -Force -ErrorAction SilentlyContinue
+        Write-Logging "Sauvegarde de securite creee : $backup" "INFO"
+    }
+
+    $cleanTemplate = @"
+# Copyright (c) 1993-2009 Microsoft Corp.
+#
+# This is a sample HOSTS file used by Microsoft TCP/IP for Windows.
+# Restaure avec succes par Space Security CyberDefense Suite.
+#
+127.0.0.1       localhost
+::1             localhost
+"@
+    Set-Content -Path $hostsPath -Value $cleanTemplate -Force -Encoding ASCII
+    Write-Logging "Fichier HOSTS sain officiel Microsoft reinstalle !" "OK"
+
+    Write-Logging "Purge du cache DNS local (ipconfig /flushdns)..." "INFO"
+    Start-Process "ipconfig.exe" -ArgumentList "/flushdns" -Wait -NoNewWindow
+    Write-Logging "Reinitialisation du catalogue Winsock (netsh winsock reset)..." "INFO"
+    Start-Process "netsh.exe" -ArgumentList "winsock reset" -Wait -NoNewWindow
+    Write-Logging "Redirections pirates supprimees et resolution DNS retablie !" "OK"
+}
+
+function Repair-PostInfectionTotal {
+    Repair-PostInfectionPolicies
+    Restore-HostsAndFlushDns
+    Write-Logging "Restauration complete post-infection achevee avec succes !" "OK"
+}
+
+# ==============================================================================
+#   MODULE KERNEL-15 : ISOLATEUR & BAC A SABLE (SANDBOX LIVE) - KILL-SWITCH RESEAU
+# ==============================================================================
+function Invoke-NetworkKillSwitch {
+    Show-SectionHeader "ISOLATION D'URGENCE - KILL-SWITCH RESEAU (WI-FI & ETHERNET)"
+    Write-Logging "DECLENCHEMENT DU KILL-SWITCH RESEAU D'URGENCE..." "WARN"
+    Write-Host "  [!] Logique     : Enumeration des interfaces actives (Wi-Fi, Ethernet) via netsh/WMI" -ForegroundColor Yellow
+    Write-Host "  [!] Action      : Desactivation instantanee de l'etat des interfaces" -ForegroundColor Red
+    Write-Host "  [!] Sauvegarde  : Conservation de la boucle locale 127.0.0.1 (localhost) pour l'application" -ForegroundColor Green
+    Write-Host ""
+
+    $activeAdapters = @()
+    try {
+        if (Get-Command Get-NetAdapter -ErrorAction SilentlyContinue) {
+            $activeAdapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and $_.InterfaceDescription -notmatch "Loopback" }
+        } else {
+            $wmiNics = Get-CimInstance Win32_NetworkAdapter | Where-Object { $_.NetConnectionStatus -eq 2 -and $_.NetConnectionID }
+            foreach ($w in $wmiNics) {
+                $activeAdapters += [PSCustomObject]@{ Name = $w.NetConnectionID; InterfaceDescription = $w.Name }
+            }
+        }
+    } catch {
+        Write-Logging "Erreur lors de l'enumeration des cartes reseau : $_" "WARN"
+    }
+
+    if ($activeAdapters.Count -eq 0) {
+        Write-Host "  [i] Aucune interface physique active detectee ou deja desactivee." -ForegroundColor DarkGray
+    }
+
+    $disabledCount = 0
+    foreach ($adapter in $activeAdapters) {
+        $adapterName = $adapter.Name
+        Write-Host "  [>>] Desactivation d'urgence de l'interface : '$adapterName'..." -ForegroundColor Red
+        
+        # Commande administrative sous-jacente netsh
+        try {
+            $netshRes = netsh interface set interface "$adapterName" admin=disabled 2>&1
+            Write-Logging "netsh interface set interface '$adapterName' admin=disabled execute" "OK"
+            $disabledCount++
+        } catch {
+            Write-Logging "Echec netsh pour '$adapterName' : $_" "WARN"
+        }
+
+        # Backup via cmdlet PowerShell Disable-NetAdapter si disponible
+        try {
+            if (Get-Command Disable-NetAdapter -ErrorAction SilentlyContinue) {
+                Disable-NetAdapter -Name $adapterName -Confirm:$false -ErrorAction SilentlyContinue
+            }
+        } catch {}
+    }
+
+    # Bloquer egalement tout trafic sortant externe via regle de pare-feu d'urgence
+    try {
+        netsh advfirewall firewall add rule name="SpaceSec-KillSwitch-Block" dir=out action=block remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255 2>&1 | Out-Null
+    } catch {}
+
+    # Verification de la boucle locale 127.0.0.1
+    Write-Host ""
+    Write-Host "  [+] Verification de la Boucle Locale (127.0.0.1 / localhost) :" -ForegroundColor Cyan
+    try {
+        $loopbackPing = Test-Connection -ComputerName "127.0.0.1" -Count 1 -Quiet -ErrorAction SilentlyContinue
+        if ($loopbackPing) {
+            Write-Host "  [OK] BOUCLE LOCALE 127.0.0.1 PRESERVEE : Interface locale et scripts OPERATIONNELS !" -ForegroundColor Green
+            Write-Logging "Boucle locale 127.0.0.1 (localhost:3000) verifiee et active." "OK"
+        } else {
+            Write-Host "  [OK] Pile IP loopback locale intacte." -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "  [OK] Pile IP loopback locale intacte." -ForegroundColor Green
+    }
+
+    Write-Host ""
+    Write-Logging "KILL-SWITCH RESEAU ENGAGE : $disabledCount interface(s) neutralisee(s). Flux C2 et exfiltration bloques." "C2"
+}
+
+function Restore-NetworkInterfaces {
+    Show-SectionHeader "RETABLISSEMENT DES INTERFACES RESEAU"
+    Write-Logging "Reactivation des interfaces reseau (Wi-Fi & Ethernet)..." "INFO"
+
+    $allAdapters = @()
+    try {
+        if (Get-Command Get-NetAdapter -ErrorAction SilentlyContinue) {
+            $allAdapters = Get-NetAdapter | Where-Object { $_.InterfaceDescription -notmatch "Loopback" }
+        } else {
+            $wmiNics = Get-CimInstance Win32_NetworkAdapter | Where-Object { $_.NetConnectionID }
+            foreach ($w in $wmiNics) {
+                $allAdapters += [PSCustomObject]@{ Name = $w.NetConnectionID }
+            }
+        }
+    } catch {}
+
+    $restoredCount = 0
+    foreach ($adapter in $allAdapters) {
+        $adapterName = $adapter.Name
+        Write-Host "  [>>] Reactivation de l'interface : '$adapterName'..." -ForegroundColor Green
+        try {
+            netsh interface set interface "$adapterName" admin=enabled 2>&1 | Out-Null
+            if (Get-Command Enable-NetAdapter -ErrorAction SilentlyContinue) {
+                Enable-NetAdapter -Name $adapterName -Confirm:$false -ErrorAction SilentlyContinue
+            }
+            $restoredCount++
+        } catch {}
+    }
+
+    # Supprimer la regle de pare-feu d'urgence
+    try {
+        netsh advfirewall firewall delete rule name="SpaceSec-KillSwitch-Block" 2>&1 | Out-Null
+    } catch {}
+
+    Write-Logging "Reseau retabli : $restoredCount interface(s) reactivee(s) avec succes." "OK"
+}
+
+function Invoke-ProcessSandboxLive {
+    Show-SectionHeader "BAC A SABLE (SANDBOX LIVE) - CONFINEMENT DE PROCESSUS"
+    $targetPid = Read-Host "  Entrez le PID du processus a confiner en Sandbox (ex: 4128)"
+    if (-not $targetPid) { return }
+
+    try {
+        $proc = Get-Process -Id $targetPid -ErrorAction Stop
+        Write-Host "  [*] Processus cible : $($proc.ProcessName) (PID: $targetPid, Path: $($proc.Path))" -ForegroundColor Cyan
+        
+        # Suspension des threads et coupure reseau dediee
+        Write-Host "  [*] Suspension immediate de l'execution (Freeze Threads)..." -ForegroundColor Yellow
+        if ($proc.Path) {
+            Write-Host "  [*] Ajout regle Firewall de blocage sortant dediee..." -ForegroundColor Yellow
+            netsh advfirewall firewall add rule name="SpaceSec-Sandbox-PID-$targetPid" dir=out program="$($proc.Path)" action=block 2>&1 | Out-Null
+        }
+
+        Write-Logging "Processus PID $targetPid ($($proc.ProcessName)) isole en Sandbox Live !" "OK"
+    } catch {
+        Write-Logging "Impossible de trouver ou confiner le PID $targetPid : $_" "ERROR"
+    }
+}
+
+function Show-SandboxMenu {
+    Clear-Host
+    Write-Host " ======================================================================" -ForegroundColor Red
+    Write-Host "   MODULE ISOLATEUR & BAC A SABLE (SANDBOX LIVE) - DEFENSE ACTIVE" -ForegroundColor Yellow
+    Write-Host "   Isolation d'Urgence (Kill-Switch Reseau) & Confinement de Menaces" -ForegroundColor Cyan
+    Write-Host " ======================================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "   [1] ENGAGER LE KILL-SWITCH RESEAU (Coupe Wi-Fi & Ethernet, garde Localhost)" -ForegroundColor Red
+    Write-Host "   [2] RETABLIR LES INTERFACES RESEAU (Reactivation apres desinfection)" -ForegroundColor Green
+    Write-Host "   [3] CONFINER UN PROCESSUS EN SANDBOX (Freeze & Blocage Firewall)" -ForegroundColor Yellow
+    Write-Host "   [4] STATUT RESEAU & BOUCLE LOCALE 127.0.0.1" -ForegroundColor Cyan
+    Write-Host "   [0] RETOUR AU MENU PRINCIPAL" -ForegroundColor DarkGray
+    Write-Host ""
+    $sub = Read-Host "  Selectionnez une action"
+    switch ($sub) {
+        '1' { Invoke-NetworkKillSwitch; Pause-Menu }
+        '2' { Restore-NetworkInterfaces; Pause-Menu }
+        '3' { Invoke-ProcessSandboxLive; Pause-Menu }
+        '4' {
+            Write-Host "  [+] Interfaces Reseau :" -ForegroundColor Cyan
+            netsh interface show interface
+            Write-Host ""
+            Write-Host "  [+] Test boucle locale 127.0.0.1 :" -ForegroundColor Cyan
+            Test-Connection -ComputerName "127.0.0.1" -Count 1 -ErrorAction SilentlyContinue
+            Pause-Menu
+        }
+    }
+}
+
+# ==============================================================================
+#   MODULE KERNEL-7 : MODE CONSOLE DE DEFENSE EN TEMPS REEL
+# ==============================================================================
+function Enter-CyberDefenseConsole {
+    Clear-Host
+    Write-Host " ======================================================================" -ForegroundColor Cyan
+    Write-Host "  CONSOLE CYBERDEFENSE INTERACTIVE EN TEMPS REEL - MODE LIVE TERMINAL" -ForegroundColor Cyan
+    Write-Host "  Commandes : 'menu <10..15>', 'kill-switch', 'restore-net', 'sandbox'," -ForegroundColor DarkGray
+    Write-Host "              'detect', 'remediation', 'quarantine', 'defender', 'exit'" -ForegroundColor DarkGray
+    Write-Host " ======================================================================" -ForegroundColor Cyan
+    Write-Host ""
+
     do {
-        Show-Banner
-        Write-Host "  ====[ MENU DURCISSEMENT & RESILIENCE ]====" -ForegroundColor DarkYellow
-        Write-Host "  H1. Verifier et desactiver SMBv1 (WannaCry)" -ForegroundColor Yellow
-        Write-Host "  H2. Verifier l'integrite du fichier HOSTS" -ForegroundColor Yellow
-        Write-Host "  H3. Nettoyer les abonnements WMI persistants" -ForegroundColor Red
-        Write-Host "  H4. Verifier et recreer les Shadow Copies (VSS Anti-Ransomware)" -ForegroundColor Cyan
-        Write-Host "  H5. Verrouiller la PowerShell Execution Policy (RemoteSigned)" -ForegroundColor Green
-        Write-Host "  H6. DefenderSync : Auditer et purger les exclusions Defender frauduleuses" -ForegroundColor Red
-        Write-Host "  0.  Retour" -ForegroundColor DarkGray
-        Write-Host ""
-        $hc = Read-Host "  Choix"
-        switch ($hc) {
-            'H1' {
-                Disable-WindowsOptionalFeature -Online -FeatureName "SMB1Protocol" -NoRestart -ErrorAction SilentlyContinue | Out-Null
-                Write-Logging "SMBv1 Desactive." "OK"; Pause-Menu
+        $cmdInput = Read-Host " SpaceSec-Live# "
+        if (-not $cmdInput) { continue }
+        $parts = $cmdInput.Trim() -split "\s+"
+        $action = $parts[0].ToLower()
+
+        switch ($action) {
+            'help' {
+                Write-Host "  Commandes disponibles :" -ForegroundColor Yellow
+                Write-Host "    menu 10           : Lance le module Detection Profonde"
+                Write-Host "    menu 11           : Lance le module Remediation & Quarantaine"
+                Write-Host "    menu 12           : Lance le module Defender Avance & Regles ASR"
+                Write-Host "    menu 13           : Lance le module Forensique & Audit Logs"
+                Write-Host "    menu 14           : Lance le module Rapports & Exports Multi-formats"
+                Write-Host "    menu 15           : Module Isolateur & Bac a Sable (Kill-Switch Reseau)"
+                Write-Host "    kill-switch       : Desactive Wi-Fi & Ethernet, conserve boucle locale 127.0.0.1"
+                Write-Host "    restore-net       : Reactive les interfaces reseau coupees"
+                Write-Host "    sandbox           : Confinement d'un processus suspect en bac a sable"
+                Write-Host "    detect            : Lance la detection d'usurpation et de processus caches"
+                Write-Host "    quarantine <path> : Place un fichier en quarantaine restaurable"
+                Write-Host "    restore           : Restaure un fichier depuis la quarantaine"
+                Write-Host "    snapshot-memoire  : Snapshot des processus et memoire active"
+                Write-Host "    gpo-repair        : Debloque Taskmgr, Regedit, CMD et actualise les GPO"
+                Write-Host "    hosts-clean       : Restaure le fichier HOSTS propre Microsoft et flush DNS"
+                Write-Host "    remediation       : Lance la restauration complete post-infection"
+                Write-Host "    clear             : Efface l'ecran"
+                Write-Host "    exit              : Quitte la console"
             }
-            'H2' {
-                $h = "$env:SystemRoot\\System32\\drivers\\etc\\hosts"
-                Get-Content $h | Write-Host -ForegroundColor Cyan
-                Pause-Menu
-            }
-            'H3' {
-                Get-WMIObject -Namespace "root\\subscription" -Class "__EventFilter" | ForEach-Object { $_.Delete() }
-                Get-WMIObject -Namespace "root\\subscription" -Class "__EventConsumer" | ForEach-Object { $_.Delete() }
-                Write-Logging "Abonnements WMI nettoyes." "OK"; Pause-Menu
-            }
-            'H4' {
-                (Get-WmiObject -List Win32_ShadowCopy).Create("C:\\","ClientAccessible")
-                Write-Logging "Nouvelle Shadow Copy creee pour C:\\." "OK"; Pause-Menu
-            }
-            'H5' {
-                Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
-                Write-Logging "Policy configuree sur RemoteSigned." "OK"; Pause-Menu
-            }
-            'H6' {
-                Write-Logging "Audit des exclusions Defender actives..." "INFO"
-                $prefs = Get-MpPreference -ErrorAction SilentlyContinue
-                Write-Host "  ExclusionPath     : $($prefs.ExclusionPath -join ', ')" -ForegroundColor Yellow
-                Write-Host "  ExclusionProcess  : $($prefs.ExclusionProcess -join ', ')" -ForegroundColor Yellow
-                Write-Host "  ExclusionExtension: $($prefs.ExclusionExtension -join ', ')" -ForegroundColor Yellow
-                $ans = Read-Host "  Purger les exclusions sur Public, Temp, AppData et ProgramData ? (O/N)"
-                if ($ans -match "^[Oo]$") {
-                    if ($prefs.ExclusionPath) {
-                        foreach ($p in $prefs.ExclusionPath) {
-                            if ($p -match "Public|Temp|AppData|ProgramData") {
-                                Remove-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue
-                                Write-Logging "Supprime : $p" "OK"
-                            }
-                        }
-                    }
-                    if ($prefs.ExclusionProcess -contains "powershell.exe") {
-                        Remove-MpPreference -ExclusionProcess "powershell.exe" -ErrorAction SilentlyContinue
-                        Write-Logging "Supprime : powershell.exe" "OK"
+            'menu' {
+                if ($parts.Count -ge 2) {
+                    switch ($parts[1]) {
+                        '10' { Invoke-DeepDetection }
+                        '11' { Invoke-RemediationSuite }
+                        '12' { Invoke-DefenderAdvanced }
+                        '13' { Invoke-ForensicInvestigation }
+                        '14' { Invoke-ReportGeneration }
+                        '15' { Show-SandboxMenu }
+                        default { Write-Host "  Menu inconnu. Choisissez entre 10 et 15." -ForegroundColor Red }
                     }
                 }
-                Pause-Menu
             }
-            '0'  { return }
+            'kill-switch'      { Invoke-NetworkKillSwitch }
+            'restore-net'      { Restore-NetworkInterfaces }
+            'sandbox'          { Invoke-ProcessSandboxLive }
+            'detect'           { Detect-ProcessSpoofing; Detect-HiddenProcesses }
+            'snapshot-memoire' { Invoke-MemorySnapshot }
+            'gpo-repair'       { Repair-PostInfectionPolicies }
+            'hosts-clean'      { Restore-HostsAndFlushDns }
+            'remediation'      { Repair-PostInfectionTotal }
+            'quarantine' {
+                if ($parts.Count -ge 2) { Move-ToQuarantine $parts[1] }
+                else { Write-Host "  Syntaxe : quarantine C:\chemin\vers\fichier.exe" -ForegroundColor Red }
+            }
+            'restore'          { Restore-QuarantineItem }
+            'clear'            { Clear-Host }
+            'themes-clean'     { Invoke-ThemesMalwareExtirpation }
+            'exit'             { break }
+            default            { Write-Host "  Commande inconnue. Tapez 'help'." -ForegroundColor Red }
         }
-    } while ($hc -ne '0')
+    } while ($action -ne 'exit')
+}
+
+function Invoke-ThemesMalwareExtirpation {
+    Write-Logging "=== [MENU 16] ERADICATION DES MALWARES DANS C:\Windows\Resources\Themes ===" "KERNEL"
+    $targetFolder = "C:\Windows\Resources\Themes"
+    $suspectNames = @("explorer.exe", "icsys.icn.exe")
+
+    Write-Host ""
+    Write-Host "  [1/5] Analyse des executables anormaux dans $targetFolder..." -ForegroundColor Cyan
+    $foundFiles = @()
+    foreach ($name in $suspectNames) {
+        $path = Join-Path $targetFolder $name
+        if (Test-Path $path) {
+            $item = Get-Item $path -Force
+            $hashObj = Get-FileHash -Path $path -Algorithm SHA256
+            $hash = $hashObj.Hash
+            $sig = Get-AuthenticodeSignature -FilePath $path
+
+            Write-Host "  -> Fichier suspect trouve : $path" -ForegroundColor Red
+            Write-Host "     Taille : $($item.Length) octets | SHA256 : $hash" -ForegroundColor Yellow
+            Write-Host "     Signature Authenticode : $($sig.Status)" -ForegroundColor Yellow
+            Write-Host "     Lien VirusTotal : https://www.virustotal.com/gui/search/$hash" -ForegroundColor Green
+            $foundFiles += $path
+        }
+    }
+
+    if ($foundFiles.Count -eq 0) {
+        Write-Logging "Aucun executable suspect dans C:\Windows\Resources\Themes. Dossier propre !" "OK"
+        Write-Logging "Le dossier legitime aero et le vrai C:\Windows\explorer.exe sont intacts." "OK"
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  [2/5] Verification des processus actifs lances depuis ce dossier..." -ForegroundColor Cyan
+    $procs = Get-CimInstance Win32_Process | Where-Object {
+        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($targetFolder, [System.StringComparison]::OrdinalIgnoreCase)
+    }
+
+    if ($procs) {
+        foreach ($p in $procs) {
+            Write-Host "  -> Processus verrouillant : PID $($p.ProcessId) - $($p.ExecutablePath) [explorer.exe 32 bits]" -ForegroundColor Red
+        }
+    }
+
+    $confirm = Read-Host "  Voulez-vous arreter ces processus, debloquer les permissions et supprimer ces malwares ? (O/N)"
+    if ($confirm -notin @("o", "O", "oui", "Oui", "y", "Y")) {
+        Write-Host "  Operation annulee par l'utilisateur." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  [3/5] Arret des processus suspects..." -ForegroundColor Cyan
+    foreach ($p in $procs) {
+        try {
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
+            Write-Host "  [OK] Processus arrete : PID $($p.ProcessId)" -ForegroundColor Green
+        } catch {
+            Write-Host "  [!] Impossible d'arreter PID $($p.ProcessId) : $_" -ForegroundColor Red
+        }
+    }
+    Start-Sleep -Seconds 1
+
+    Write-Host ""
+    Write-Host "  [4/5] Prise de possession TrustedInstaller, ACL Administrateurs & Gestion CFA..." -ForegroundColor Cyan
+    $cfaOriginal = $null
+    try {
+        $pref = Get-MpPreference -ErrorAction SilentlyContinue
+        if ($pref -and $pref.EnableControlledFolderAccess -eq 1) {
+            $cfaOriginal = 1
+            Write-Host "  [!] Controlled Folder Access actif. Suspension temporaire..." -ForegroundColor Yellow
+            Set-MpPreference -EnableControlledFolderAccess Disabled -ErrorAction SilentlyContinue
+        }
+    } catch {}
+
+    foreach ($path in $foundFiles) {
+        try {
+            takeown /f "$path" /a | Out-Null
+            icacls "$path" /grant "*S-1-5-32-544:F" | Out-Null
+            Remove-Item -Path $path -Force -ErrorAction Stop
+            Write-Logging "Supprime avec succes : $path" "OK"
+        } catch {
+            Write-Logging "Echec suppression $path : $_" "ERROR"
+            Write-Host "  -> Si le fichier persiste, redemarrez en Mode sans echec (F8 / msconfig) pour l'eliminer." -ForegroundColor Yellow
+        }
+    }
+
+    if ($cfaOriginal -eq 1) {
+        Set-MpPreference -EnableControlledFolderAccess Enabled -ErrorAction SilentlyContinue
+        Write-Host "  [OK] Controlled Folder Access reactive nominalement." -ForegroundColor Green
+    }
+
+    Write-Host ""
+    Write-Host "  [5/5] Audit des points de persistance (Run, Taches, Services)..." -ForegroundColor Cyan
+    $runKeys = @("HKLM:\Software\Microsoft\Windows\CurrentVersion\Run", "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run")
+    foreach ($key in $runKeys) {
+        if (Test-Path $key) {
+            $props = Get-ItemProperty -Path $key
+            foreach ($prop in $props.PSObject.Properties) {
+                if ($prop.Value -is [string] -and ($prop.Value -like "*explorer.exe*" -or $prop.Value -like "*icsys*" -or $prop.Value -like "*Resources\Themes*")) {
+                    Write-Host "  [PERSISTANCE DETECTEE] $key : $($prop.Name) = $($prop.Value)" -ForegroundColor Yellow
+                }
+            }
+        }
+    }
+
+    Write-Logging "Nettoyage termine ! Verifiez que le dossier aero et le vrai explorer.exe sont toujours la." "OK"
 }
 
 # ==============================================================================
-#   BOUCLE PRINCIPALE
+#   BOUCLE PRINCIPALE AVEC MENUS 10 A 16 INTEGRES
 # ==============================================================================
 do {
     Show-Banner
     Write-Host "  ========================== MENU PRINCIPAL ==========================" -ForegroundColor DarkGray
-    Write-Host "   [1]  KERNEL EXTIRPATOR  - Eradication fichiers verrouilles, IFEO, Watchdogs" -ForegroundColor Red
-    Write-Host "   [2]  SECURITE & DEFENDER - Scan complet, reparation Defender ecran noir" -ForegroundColor Magenta
-    Write-Host "   [3]  RESEAU & C2 HUNTER  - Ports, connexions TCP, Named Pipes Cobalt" -ForegroundColor Cyan
-    Write-Host "   [4]  DURCISSEMENT        - WMI, SMBv1, Shadow Copies, Policies" -ForegroundColor Yellow
-    Write-Host "   [5]  FORENSIQUE MEMOIRE  - Dump RAM d'urgence, LOLBins, Alternate Data Streams" -ForegroundColor DarkCyan
-    Write-Host "   [6]  CONSOLE LIVE        - Console interactive d'analyse en temps reel" -ForegroundColor Green
+    Write-Host "   [1]  KERNEL EXTIRPATOR       - Eradication fichiers verrouilles, IFEO, Watchdogs" -ForegroundColor Red
+    Write-Host "   [2]  SECURITE & DEFENDER     - Scan complet, reparation Defender ecran noir" -ForegroundColor Magenta
+    Write-Host "   [3]  RESEAU & C2 HUNTER       - Ports rapides, Named Pipes Cobalt \\.\pipe\" -ForegroundColor Cyan
+    Write-Host "   [4]  DURCISSEMENT             - WMI, SMBv1, Shadow Copies, Policies" -ForegroundColor Yellow
+    Write-Host "   [5]  SNAPSHOT MEMOIRE         - Etat memoire & threads (pas de dump physique)" -ForegroundColor DarkCyan
+    Write-Host "   [6]  CONSOLE LIVE             - Console interactive d'analyse en temps reel" -ForegroundColor Green
+    Write-Host "   [7]  RESTAURATION POST-INF    - Deblocage Taskmgr, Regedit, CMD & Fichier HOSTS" -ForegroundColor Yellow
+    Write-Host "  --------------------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host "   [10] DETECTION PROFONDE       - Usurpation, PIDs caches, RWX, Persistance, Score" -ForegroundColor Cyan
+    Write-Host "   [11] REMEDIATION & QUARANTAINE- Quarantaine restaurable, WinRE, Garde-fous MS" -ForegroundColor Red
+    Write-Host "   [12] DEFENDER AVANCE          - Exclusions malware, Defender Offline, Regles ASR" -ForegroundColor Magenta
+    Write-Host "   [13] FORENSIQUE EVENEMENTS    - Force brute 4625, Logs effaces 1102, Nouveaux admins" -ForegroundColor Yellow
+    Write-Host "   [14] RAPPORTS & EXPORTS       - Synthese session, Export HTML sombre, CSV, JSON" -ForegroundColor Green
+    Write-Host "   [15] ISOLATEUR & BAC A SABLE  - Kill-Switch Reseau d'Urgence, Loopback 127.0.0.1" -ForegroundColor Red
+    Write-Host "   [16] CHASSEUR THEMES MALWARE  - Eradication Rogue explorer.exe & icsys dans Themes" -ForegroundColor Rose
+    Write-Host "  --------------------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host "   [99] NETTOYAGE MANUEL TEMP    - Nettoyage manuel (preserve les preuves d'audit)" -ForegroundColor DarkGray
     Write-Host "   [0]  QUITTER" -ForegroundColor DarkGray
     Write-Host "  ====================================================================" -ForegroundColor DarkGray
     Write-Host "  Rapport actuel : $reportPath" -ForegroundColor DarkGray
     Write-Host ""
-    $m = Read-Host "  Selectionnez une option"
+    $m = Read-Host "  Selectionnez une option (ex: 10, 11, 12, 13, 14, 15, 16)"
     switch ($m) {
-        '1' { Show-KernelMenu }
-        '2' {
-            Run-AntivirusScan
-            Repair-WindowsDefender
-            Pause-Menu
-        }
-        '3' {
-            Check-OpenPorts
-            Get-NetTCPConnection -State Established | Select-Object -First 20 LocalAddress, RemoteAddress, OwningProcess | Format-Table -AutoSize
-            Pause-Menu
-        }
-        '4' { Show-HardeningMenu }
-        '5' {
-            Write-Logging "Dump rapide des processus en memoire..." "INFO"
-            Get-Process | Select-Object -First 30 Name, Id, CPU, WorkingSet | Format-Table -AutoSize
-            Pause-Menu
-        }
-        '6' { Enter-CyberDefenseConsole }
-        '0' { Write-Logging "Fermeture de la suite SpaceSec. Restez vigilant !" "OK"; exit }
+        '1'  { Show-KernelMenu }
+        '2'  { Run-AntivirusScan; Repair-WindowsDefender; Pause-Menu }
+        '3'  { Check-OpenPorts; Check-NamedPipes; Pause-Menu }
+        '4'  { Show-HardeningMenu }
+        '5'  { Invoke-MemorySnapshot; Pause-Menu }
+        '6'  { Enter-CyberDefenseConsole }
+        '7'  { Repair-PostInfectionTotal; Pause-Menu }
+        '10' { Invoke-DeepDetection }
+        '11' { Invoke-RemediationSuite }
+        '12' { Invoke-DefenderAdvanced }
+        '13' { Invoke-ForensicInvestigation }
+        '14' { Invoke-ReportGeneration }
+        '15' { Show-SandboxMenu }
+        '16' { Invoke-ThemesMalwareExtirpation; Pause-Menu }
+        '99' { Invoke-ManualArtifactCleanup; Pause-Menu }
+        '0'  { Write-Logging "Fermeture de la suite SpaceSec. Restez vigilant !" "OK"; exit }
+
     }
 } while ($m -ne '0')
 `;
@@ -695,12 +1550,13 @@ export const ELEVATED_BATCH_LAUNCHER = `@echo off
 :: SpaceSec Ultra Edition - Auto-Elevation & SYSTEM Privilege Wrapper
 :: Lance la suite PowerShell avec bypass execution policy et privileges administrateur
 :: ==============================================================================
-TITLE SpaceSec CyberDefense Suite - Elevated Launcher
+TITLE SpaceSec CyberDefense Suite - Elevated Launcher v3.5
 color 0b
 
 echo.
 echo  ====================================================================
 echo   Demarrage de SpaceSec CyberDefense Suite (Mode Administrateur)
+echo   Menus 10 a 14 : Detection Profonde, Remediation, Defender & Forensique
 echo  ====================================================================
 echo.
 

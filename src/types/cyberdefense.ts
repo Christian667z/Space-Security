@@ -6,9 +6,13 @@ export type TabId =
   | 'heuristic'
   | 'console'
   | 'deep-excision'
+  | 'deep-detection'
+  | 'themes-hunter'
+  | 'sandbox-isolation'
   | 'forensics'
   | 'network'
   | 'wifi'
+  | 'remediation'
   | 'hardening'
   | 'script-hub'
   | 'ip-locator';
@@ -111,7 +115,7 @@ export interface ThreatTimelineEvent {
 export interface ThreatItem {
   id: string;
   name: string;
-  category: 'Rootkit' | 'Trojan' | 'Persistence' | 'C2' | 'Privilege' | 'Memory';
+  category: 'Rootkit' | 'Trojan' | 'Persistence' | 'C2' | 'Privilege' | 'Memory' | 'Kernel' | 'Network' | 'Defender';
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
   targetPath: string;
   mitreTechnique: string;
@@ -119,6 +123,7 @@ export interface ThreatItem {
   trustedInstallerLocked: boolean;
   status: 'ACTIVE' | 'QUARANTINED' | 'SCHEDULED_BOOT_DELETE' | 'NEUTRALIZED' | 'DISMISSED';
   description?: string;
+  detectedAt?: string;
 }
 
 export type BulkThreatActionType =
@@ -166,6 +171,7 @@ export interface ConsoleLogMessage {
   level: 'OK' | 'INFO' | 'WARN' | 'ERROR' | 'KERNEL';
   text: string;
   tag?: string;
+  operatorName?: string;
 }
 
 export interface HardeningMetric {
@@ -270,63 +276,52 @@ export interface IpLocationReport {
   googleStreetViewUrl: string;
   openStreetMapUrl: string;
   groundingUrls?: Array<{ uri: string; title: string }>;
+  isSimulatedHops?: boolean;
+  tracerouteNotice?: string;
+  measuredPingMs?: number | null;
+  forensicIntegrityNotice?: string;
+  addressPrecision?: 'EXACT_COORDINATES' | 'CITY_POP' | 'REGIONAL_POP' | 'LOCAL_RFC1918';
   error?: string;
 }
 
-export interface FileEntropyChunk {
-  offset: number;
-  entropy: number;
-  isPackedOrEncrypted: boolean;
-}
-
-export interface FileEntropyReport {
-  success: boolean;
-  fileName: string;
-  filePath?: string;
-  fileSizeBytes: number;
-  entropy: number; // 0.00 to 8.00 bits/byte (Shannon entropy)
-  byteDistribution?: number[]; // 256 array (frequency per byte 0-255)
-  chunks: FileEntropyChunk[];
-  verdict: 'RANSOMWARE_ENCRYPTED' | 'PACKED_OBFUSCATED' | 'HIGH_DENSITY' | 'STANDARD_BINARY' | 'LOW_PLAINTEXT';
-  verdictReason: string;
-  ransomwareProbability: number; // 0 - 100%
-  isObfuscated: boolean;
-  isEncrypted: boolean;
-  sha256: string;
-  error?: string;
-}
-
-export interface RegistryPersistenceItem {
+export interface NetworkInterfaceInfo {
   id: string;
-  hive: 'HKCU' | 'HKLM';
-  keyPath: string;
-  entryName: string;
-  commandValue: string;
-  category: 'RUN' | 'RUNONCE' | 'WINLOGON' | 'SERVICES' | 'SCHEDULED_TASK' | 'IFEO' | 'STARTUP_FOLDER';
-  riskLevel: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'SAFE';
-  status: 'SUSPICIOUS' | 'LEGITIMATE' | 'MONITORED';
-  mitreTechnique: string;
-  reason: string;
-  binaryExists?: boolean;
-  authenticodeStatus?: string;
-  signer?: string;
-  remediationCmd: string;
+  name: string;
+  displayName: string;
+  type: 'Wi-Fi' | 'Ethernet' | 'Virtual' | 'Loopback' | 'Cellular' | 'Other';
+  status: 'Up' | 'Down' | 'Disabled' | 'Unknown';
+  adminStatus: 'Enabled' | 'Disabled';
+  mac: string;
+  ipAddresses: string[];
+  speedMbps?: number;
+  isLoopback: boolean;
+  isPhysical: boolean;
+  rxBytes?: number;
+  txBytes?: number;
 }
 
-export interface DigitalSignatureInspectionItem {
-  id: string;
-  binaryName: string;
-  expectedPath: string;
-  actualPath: string;
-  pid?: number;
-  sha256: string;
-  fileSizeBytes: number;
-  signatureStatus: 'VALID_MICROSOFT' | 'VALID_THIRD_PARTY' | 'NOT_SIGNED' | 'HASH_MISMATCH' | 'SELF_SIGNED' | 'UNKNOWN';
-  signerName: string;
-  isSpoofed: boolean;
-  spoofingReason?: string;
-  mitreTechnique: string;
-  riskLevel: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'VERIFIED';
-  verifiedAt: string;
-  killOrRemediateCmd: string;
+export interface SandboxProcessItem {
+  pid: number;
+  name: string;
+  path: string;
+  status: 'RUNNING' | 'FROZEN' | 'ISOLATED' | 'SANDBOXED' | 'TERMINATED';
+  isolatedAt?: string;
+  networkBlocked: boolean;
+  cpuRestricted: boolean;
+  threatScore: number;
+  details?: string;
 }
+
+export interface KillSwitchStatus {
+  isActive: boolean;
+  engagedAt?: string;
+  disabledInterfaces: string[];
+  loopbackProtected: boolean;
+  localhostPort: number;
+  interfaces: NetworkInterfaceInfo[];
+  totalActiveInterfaces: number;
+  externalAccessBlocked: boolean;
+  sandboxedProcesses: SandboxProcessItem[];
+  appliedCommands: string[];
+}
+

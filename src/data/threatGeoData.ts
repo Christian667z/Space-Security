@@ -36,6 +36,13 @@ export interface ThreatGeoLocation {
   intel: string;
   asOrganization: string;
   lastPacketTime: string;
+  targetPort?: number;
+  payloadSignature?: string;
+  firstDetected?: string;
+  lastBeaconTime?: string;
+  associatedProcess?: string;
+  c2Infrastructure?: string;
+  asnOrg?: string;
 }
 
 // Curated active C2 and malicious connection locations (starts empty on clean system)
