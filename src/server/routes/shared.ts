@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, resolveAuthenticatedOperator } from '../auth.ts';
+import { requireAuth, requireRole, resolveAuthenticatedOperator } from '../auth.ts';
 import { sharedState, connectedClients, getActiveOperators, applyStateMutation } from '../state.ts';
 import { sharedMutateSchema, validateBody } from '../validators.ts';
 
@@ -17,8 +17,8 @@ sharedRouter.get('/state', (req, res) => {
   });
 });
 
-// POST /api/shared/mutate (SECURED: requireAuth + validateBody(sharedMutateSchema))
-sharedRouter.post('/mutate', requireAuth, validateBody(sharedMutateSchema), (req, res) => {
+// POST /api/shared/mutate (SECURED: requireAuth + requireRole('admin', 'analyste') + validateBody(sharedMutateSchema))
+sharedRouter.post('/mutate', requireAuth, requireRole('admin', 'analyste'), validateBody(sharedMutateSchema), (req, res) => {
   const { action, payload } = req.body;
   const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
   applyStateMutation(action, payload, authenticatedOp);

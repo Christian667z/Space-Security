@@ -89,11 +89,12 @@ intelRouter.get('/health', (req, res) => {
 });
 
 // GET /api/auth/token
-intelRouter.get('/auth/token', (req, res) => {
+intelRouter.get('/auth/token', requireAuth, (req, res) => {
+  const session = (req as any).session;
   res.json({
     success: true,
-    token: getLocalAuthToken(),
-    mode: process.env.IS_ELECTRON === 'true' ? 'ELECTRON_LOCAL_IPC' : 'WEB_DEVELOPMENT',
+    token: session ? session.id : 'AUTHENTICATED_SESSION',
+    mode: process.env.IS_ELECTRON === 'true' ? 'ELECTRON_LOCAL_IPC' : 'WEB_AUTHENTICATED',
   });
 });
 

@@ -69,7 +69,7 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
 
     try {
       await initAuthToken();
-      const wsUrl = getWsUrl();
+      const wsUrl = await getWsUrl();
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -132,6 +132,20 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
             const leftOp = data.operator?.name || 'Un opérateur';
             if (onSystemLog) {
               onSystemLog('WARN', `[COLLABORATION] ${leftOp} s'est déconnecté. Opérateurs restants : ${count}.`, 'COLLAB');
+            }
+          } else if (data.type === 'RBAC_ERROR') {
+            if (onNotification) {
+              onNotification({
+                title: 'Privilèges Insuffisants (RBAC)',
+                description: data.error || 'Cette action requiert des privilèges supérieurs (Rôle Analyste ou Administrateur requis).',
+                severity: 'HIGH',
+                category: 'Threat',
+                source: 'RBAC-SHIELD',
+                targetTab: 'overview',
+              });
+            }
+            if (onSystemLog) {
+              onSystemLog('WARN', `[CONTRÔLE D'ACCÈS RBAC] ${data.error}`, 'RBAC');
             }
           } else if (data.type === 'STATE_DELTA') {
             const { action, payload, senderOperator, state } = data;

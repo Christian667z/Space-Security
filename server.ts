@@ -38,10 +38,21 @@ import {
 import { generateEdrAgentPowerShell } from './src/data/edrAgentScript.ts';
 import {
   requireAuth,
+  requireRole,
+  requireEdrAuth,
   getLocalAuthToken,
+  getEdrAgentToken,
+  isValidToken,
+  createSession,
+  getSession,
+  touchSession,
+  revokeSession,
+  createWebSocketTicket,
+  validateWebSocketRequest,
   validateWebSocketConnection,
   corsAndCsrfProtection,
   resolveAuthenticatedOperator,
+  type OperatorRole,
 } from './src/server/auth.ts';
 import { checkHashReputation, checkIpReputation } from './src/server/threatIntel.ts';
 import { backgroundScheduler } from './src/server/scheduler.ts';
@@ -482,6 +493,7 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
     id: string;
     name: string;
     role: string;
+    rawRole?: OperatorRole;
     ip: string;
     connectedAt: string;
     status: 'ONLINE' | 'IDLE';
@@ -650,8 +662,8 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
     }
   });
 
-  // API 2.1: Direct Sync for Client Windows Machine (Secured with requireAuth & Zod)
-  app.post('/api/system/specs/sync', requireAuth, validateBody(specsSyncSchema), async (req, res) => {
+  // API 2.1: Direct Sync for Client Windows Machine (Secured with requireAuth, requireRole & Zod)
+  app.post('/api/system/specs/sync', requireAuth, requireRole('admin', 'analyste'), validateBody(specsSyncSchema), async (req, res) => {
     try {
       const payload = req.body || {};
       if (payload.hostname && payload.hostname !== 'localhost') {
@@ -688,8 +700,8 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
     }
   });
 
-  // API 2: Kill Process (Fin de tâche - Protégé par requireAuth, rate limit, validation Zod & opérateur infalsifiable)
-  app.post('/api/system/kill', requireAuth, sensitiveActionLimiter, validateBody(killProcessSchema), async (req, res, next) => {
+  // API 2: Kill Process (Fin de tâche - Protégé par requireAuth, requireRole('admin'), rate limit, validation Zod & opérateur infalsifiable)
+  app.post('/api/system/kill', requireAuth, requireRole('admin'), sensitiveActionLimiter, validateBody(killProcessSchema), async (req, res, next) => {
     const { pid } = req.body;
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
 
@@ -1720,7 +1732,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  app.post('/api/remediation/policies/repair', requireAuth, sensitiveActionLimiter, async (req, res) => {
+  app.post('/api/remediation/policies/repair', requireAuth, requireRole('admin'), sensitiveActionLimiter, async (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const isWin32 = os.platform() === 'win32';
@@ -1795,7 +1807,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  app.post('/api/remediation/hosts/restore', requireAuth, sensitiveActionLimiter, async (req, res) => {
+  app.post('/api/remediation/hosts/restore', requireAuth, requireRole('admin'), sensitiveActionLimiter, async (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const isWin32 = os.platform() === 'win32';
@@ -2218,7 +2230,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
-  app.post('/api/remediation/quarantine/restore', requireAuth, sensitiveActionLimiter, validateBody(quarantineRestoreSchema), (req, res) => {
+  app.post('/api/remediation/quarantine/restore', requireAuth, requireRole('admin'), sensitiveActionLimiter, validateBody(quarantineRestoreSchema), (req, res) => {
     const { id } = req.body;
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     const dbItems = dbManager.getQuarantine();
@@ -2246,7 +2258,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
-  app.post('/api/remediation/winre', requireAuth, sensitiveActionLimiter, (req, res) => {
+  app.post('/api/remediation/winre', requireAuth, requireRole('admin'), sensitiveActionLimiter, (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     dbManager.addAuditLog({
       id: `log-winre-${Date.now()}`,
@@ -2396,8 +2408,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // Menu 14: Report Multi-Format Export Generator (Secured with requireAuth & Zod)
-  app.post('/api/reports/generate', requireAuth, validateBody(reportGenerateSchema), (req, res) => {
+  // Menu 14: Report Multi-Format Export Generator (Secured with requireAuth, requireRole & Zod)
+  app.post('/api/reports/generate', requireAuth, requireRole('admin', 'analyste'), validateBody(reportGenerateSchema), (req, res) => {
     const format = req.body?.format || 'html'; // 'html' | 'csv' | 'json'
     const now = new Date();
     const timestamp = now.toLocaleString('fr-FR');
@@ -2692,10 +2704,10 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // POST: Execute Emergency Network Kill-Switch (SECURED: requireAuth + sensitiveActionLimiter)
+  // POST: Execute Emergency Network Kill-Switch (SECURED: requireAuth + requireRole('admin') + sensitiveActionLimiter)
   // Logic: Lists active Wi-Fi, Ethernet, and external interfaces, and instantly disables them.
   // Preserves 127.0.0.1 / localhost loopback so the web interface and Node server stay 100% operational.
-  app.post('/api/network/kill-switch', requireAuth, sensitiveActionLimiter, async (req, res) => {
+  app.post('/api/network/kill-switch', requireAuth, requireRole('admin'), sensitiveActionLimiter, async (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const isWin32 = os.platform() === 'win32';
@@ -2791,8 +2803,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     return toRestore;
   }
 
-  // POST: Restore Network Interfaces (SECURED: requireAuth + sensitiveActionLimiter)
-  app.post('/api/network/restore', requireAuth, sensitiveActionLimiter, async (req, res) => {
+  // POST: Restore Network Interfaces (SECURED: requireAuth + requireRole('admin') + sensitiveActionLimiter)
+  app.post('/api/network/restore', requireAuth, requireRole('admin'), sensitiveActionLimiter, async (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const toRestore = await restoreNetworkInterfacesInternal();
@@ -2822,7 +2834,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
   // POST: Toggle specific interface (e.g. Wi-Fi only, Ethernet only)
   // POST: Toggle specific interface (SECURED: Strict sanitization & parameterized netsh)
-  app.post('/api/network/toggle-interface', requireAuth, async (req, res, next) => {
+  app.post('/api/network/toggle-interface', requireAuth, requireRole('admin'), async (req, res, next) => {
     try {
       const { interfaceName, enable } = req.body;
       const safeName = sanitizeInterfaceName(interfaceName);
@@ -2867,8 +2879,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // POST: Sandbox Process Containment (SECURED: Validated PID & Sanitized Path)
-  app.post('/api/sandbox/isolate-process', requireAuth, async (req, res, next) => {
+  // POST: Sandbox Process Containment (SECURED: requireAuth + requireRole('admin') + Validated PID & Sanitized Path)
+  app.post('/api/sandbox/isolate-process', requireAuth, requireRole('admin'), async (req, res, next) => {
     try {
       const { pid, name, path: procPath } = req.body;
       // CRITICAL: Strictly validate PID as positive integer and sanitize executable path
@@ -2936,8 +2948,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // POST: Terminate or Release Sandboxed Process (SECURED: Parameterized taskkill)
-  app.post('/api/sandbox/terminate-process', requireAuth, async (req, res, next) => {
+  // POST: Terminate or Release Sandboxed Process (SECURED: requireAuth + requireRole('admin') + Parameterized taskkill)
+  app.post('/api/sandbox/terminate-process', requireAuth, requireRole('admin'), async (req, res, next) => {
     try {
       const safePid = validateAndParsePid(req.body.pid);
       const isWin32 = os.platform() === 'win32';
@@ -3010,6 +3022,10 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
   // Centralized State Mutation Handler (Synchronizes Memory, SQLite & WebSockets)
   function applyStateMutation(action: string, payload: any, operator: any, originWs?: WebSocket) {
+    if (operator?.role === 'lecture_seule' || operator?.rawRole === 'lecture_seule') {
+      logger.warn({ action, operator: operator?.name }, '[RBAC] Mutation d\'état rejetée : rôle lecture_seule non autorisé');
+      return;
+    }
     const verifiedOpName = operator?.name || 'Analyste SOC Local';
     const verifiedOpIp = operator?.ip || '127.0.0.1';
 
@@ -3176,10 +3192,11 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
-  // REST API: Mutate shared state (SECURED: requireAuth + sensitiveActionLimiter + validateBody(sharedMutateSchema))
+  // REST API: Mutate shared state (SECURED: requireAuth + requireRole('admin', 'analyste') + sensitiveActionLimiter + validateBody(sharedMutateSchema))
   app.post(
     '/api/shared/mutate',
     requireAuth,
+    requireRole('admin', 'analyste'),
     sensitiveActionLimiter,
     validateBody(sharedMutateSchema),
     (req, res) => {
@@ -3190,10 +3207,11 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   );
 
-  // REST API: Unified Backend Command Execution & Auditing Engine (SECURED: requireAuth + sensitiveActionLimiter + validateBody(executeCommandSchema))
+  // REST API: Unified Backend Command Execution & Auditing Engine (SECURED: requireAuth + requireRole('admin') + sensitiveActionLimiter + validateBody(executeCommandSchema))
   app.post(
     '/api/console/execute',
     requireAuth,
+    requireRole('admin'),
     sensitiveActionLimiter,
     validateBody(executeCommandSchema),
     async (req, res) => {
@@ -3452,8 +3470,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // API 8-B: Themes Folder Malware Cleaner (SECURED: requireAuth + sensitiveActionLimiter)
-  app.post('/api/malware/themes-clean', requireAuth, sensitiveActionLimiter, async (req, res) => {
+  // API 8-B: Themes Folder Malware Cleaner (SECURED: requireAuth + requireRole('admin') + sensitiveActionLimiter)
+  app.post('/api/malware/themes-clean', requireAuth, requireRole('admin'), sensitiveActionLimiter, async (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const isWin = os.platform() === 'win32';
@@ -3744,16 +3762,133 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
-  // 2. Local Authentication Token Handshake (Renderer / Web Client)
-  app.get('/api/auth/token', (req, res) => {
-    res.json({
-      success: true,
-      token: getLocalAuthToken(),
-      mode: process.env.IS_ELECTRON === 'true' ? 'ELECTRON_LOCAL_IPC' : 'WEB_DEVELOPMENT',
+  // =========================================================================
+  // AUTHENTICATION & SESSION MANAGEMENT SUITE
+  // =========================================================================
+
+  // 1. Session Login / Elevation (Admin, Analyst, or Guest Read-Only)
+  app.post('/api/auth/login', (req, res) => {
+    const { token, name, role } = req.body || {};
+    if (token && isValidToken(token)) {
+      const chosenRole = (role === 'analyste' || role === 'lecture_seule' ? role : 'admin') as OperatorRole;
+      const opName = (typeof name === 'string' && name.trim()) || 'Administrateur SOC';
+      const session = createSession({ name: opName, role: chosenRole }, req.ip);
+      logger.info({ sessionId: session.id, operator: session.operator.name, role: session.operator.role }, '[Auth] Connexion administrateur réussie via Master Token');
+      return res.json({
+        success: true,
+        message: 'Authentification réussie.',
+        token: session.id,
+        session: {
+          id: session.id,
+          operator: session.operator,
+          expiresAt: session.expiresAt,
+        },
+      });
+    }
+
+    if (!token) {
+      // Create guest read-only observer session
+      const opName = (typeof name === 'string' && name.trim()) || 'Observateur SOC';
+      const session = createSession({ name: opName, role: 'lecture_seule' }, req.ip);
+      logger.info({ sessionId: session.id, operator: session.operator.name }, '[Auth] Session observateur lecture seule créée');
+      return res.json({
+        success: true,
+        message: 'Session observateur créée (accès lecture seule).',
+        token: session.id,
+        session: {
+          id: session.id,
+          operator: session.operator,
+          expiresAt: session.expiresAt,
+        },
+      });
+    }
+
+    logger.warn({ ip: req.ip }, '[Auth] Échec de connexion : jeton de sécurité invalide');
+    return res.status(401).json({
+      success: false,
+      error: 'Jeton de sécurité invalide.',
+      code: 'INVALID_CREDENTIALS',
     });
   });
 
-  // 3. User Preferences (Settings) Persistence via SQLite
+  // 2. Client Session Bootstrap / Refresh
+  app.post('/api/auth/session', (req, res) => {
+    const authHeader = req.headers.authorization;
+    const customHeader = req.headers['x-spacesec-token'] as string | undefined;
+    const sessionHeader = req.headers['x-session-id'] as string | undefined;
+
+    let candidateToken = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.substring(7).trim() : (customHeader || sessionHeader);
+
+    if (candidateToken) {
+      const existing = getSession(candidateToken);
+      if (existing) {
+        touchSession(candidateToken);
+        return res.json({ success: true, session: existing, token: existing.id });
+      }
+      if (isValidToken(candidateToken)) {
+        const adminSession = createSession({ name: 'Administrateur SOC', role: 'admin' }, req.ip);
+        return res.json({ success: true, session: adminSession, token: adminSession.id });
+      }
+    }
+
+    // In Desktop Electron mode on loopback, grant local desktop admin session
+    if (process.env.IS_ELECTRON === 'true') {
+      const clientIp = req.ip || req.socket.remoteAddress || '';
+      if (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp.includes('127.0.0.1')) {
+        const desktopSession = createSession({ name: 'Administrateur SOC (Bureau Electron)', role: 'admin' }, '127.0.0.1');
+        return res.json({ success: true, session: desktopSession, token: desktopSession.id });
+      }
+    }
+
+    // Default guest session (read-only)
+    const guestSession = createSession({ name: 'Observateur SOC', role: 'lecture_seule' }, req.ip);
+    return res.json({ success: true, session: guestSession, token: guestSession.id });
+  });
+
+  // 3. Inspect Current Session Details
+  app.get('/api/auth/session', requireAuth, (req, res) => {
+    const operator = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
+    res.json({
+      success: true,
+      operator,
+      session: (req as any).session || null,
+    });
+  });
+
+  // 4. Issue Single-Use WebSocket Authentication Ticket (expires in 60s, consumed on connect)
+  app.post('/api/auth/ws-ticket', requireAuth, (req, res) => {
+    const operator = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
+    const ticket = createWebSocketTicket(operator, 60);
+    res.json({
+      success: true,
+      ticket,
+      expiresIn: 60,
+      role: operator.role,
+    });
+  });
+
+  // 5. Session Logout
+  app.post('/api/auth/logout', requireAuth, (req, res) => {
+    const session = (req as any).session;
+    if (session && session.id) {
+      revokeSession(session.id);
+    }
+    res.json({ success: true, message: 'Session révoquée avec succès.' });
+  });
+
+  // 6. Authenticated Token Verification Endpoint (Protected: never hands out secret unauthenticated)
+  app.get('/api/auth/token', requireAuth, (req, res) => {
+    const session = (req as any).session;
+    const operator = (req as any).authenticatedOperator;
+    res.json({
+      success: true,
+      token: session ? session.id : 'AUTHENTICATED_SESSION',
+      role: operator ? operator.role : 'admin',
+      mode: process.env.IS_ELECTRON === 'true' ? 'ELECTRON_LOCAL_IPC' : 'WEB_AUTHENTICATED',
+    });
+  });
+
+  // 7. User Preferences (Settings) Persistence via SQLite
   app.get('/api/settings', (req, res) => {
     res.json({
       success: true,
@@ -3761,7 +3896,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
-  app.post('/api/settings', requireAuth, sensitiveActionLimiter, validateBody(settingsUpdateSchema), (req, res) => {
+  app.post('/api/settings', requireAuth, requireRole('admin'), sensitiveActionLimiter, validateBody(settingsUpdateSchema), (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     const updated = dbManager.updateSettings(req.body);
     for (const [k, v] of Object.entries(req.body)) {
@@ -3915,8 +4050,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 3. EDR Agent Registration Handshake
-  app.post('/api/edr/register', validateBody(edrRegisterSchema), (req, res) => {
+  // 3. EDR Agent Registration Handshake (SECURED: requireEdrAuth)
+  app.post('/api/edr/register', requireEdrAuth, validateBody(edrRegisterSchema), (req, res) => {
     try {
       const forwarded = req.headers['x-forwarded-for'];
       const callerIp = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress || '';
@@ -3963,8 +4098,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 4. EDR Agent Heartbeat (Keepalive + Command Pulling)
-  app.post('/api/edr/heartbeat', validateBody(edrHeartbeatSchema), (req, res) => {
+  // 4. EDR Agent Heartbeat (Keepalive + Command Pulling - SECURED: requireEdrAuth)
+  app.post('/api/edr/heartbeat', requireEdrAuth, validateBody(edrHeartbeatSchema), (req, res) => {
     try {
       const { endpointId, cpuUsagePercent, ramUsagePercent, activeThreatsCount, networkIsolated } = req.body;
       const existing = dbManager.getEndpoint(endpointId);
@@ -3994,8 +4129,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 5. Ingestion of Real-time EDR Telemetry Events
-  app.post('/api/edr/telemetry', validateBody(edrTelemetrySchema), (req, res) => {
+  // 5. Ingestion of Real-time EDR Telemetry Events (SECURED: requireEdrAuth)
+  app.post('/api/edr/telemetry', requireEdrAuth, validateBody(edrTelemetrySchema), (req, res) => {
     try {
       const { endpointId, hostname, events } = req.body;
       const savedEvents = [];
@@ -4075,8 +4210,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 6. Create Remote Remediation Command (SECURED: requireAuth + sensitiveActionLimiter)
-  app.post('/api/edr/commands', requireAuth, sensitiveActionLimiter, validateBody(edrCommandCreateSchema), (req, res) => {
+  // 6. Create Remote Remediation Command (SECURED: requireAuth + requireRole('admin') + sensitiveActionLimiter)
+  app.post('/api/edr/commands', requireAuth, requireRole('admin'), sensitiveActionLimiter, validateBody(edrCommandCreateSchema), (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const { endpointId, type, payload } = req.body;
@@ -4116,8 +4251,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 7. Acknowledge Command Execution by Agent
-  app.post('/api/edr/commands/:id/ack', validateBody(edrCommandAckSchema), (req, res) => {
+  // 7. Acknowledge Command Execution by Agent (SECURED: requireEdrAuth)
+  app.post('/api/edr/commands/:id/ack', requireEdrAuth, validateBody(edrCommandAckSchema), (req, res) => {
     try {
       const { status, result } = req.body;
       dbManager.updateEdrCommand(req.params.id, status, result);
@@ -4144,8 +4279,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 8. Toggle Host Network Isolation (SECURED: requireAuth + sensitiveActionLimiter)
-  app.post('/api/edr/endpoints/:id/isolate', requireAuth, sensitiveActionLimiter, (req, res) => {
+  // 8. Toggle Host Network Isolation (SECURED: requireAuth + requireRole('admin') + sensitiveActionLimiter)
+  app.post('/api/edr/endpoints/:id/isolate', requireAuth, requireRole('admin'), sensitiveActionLimiter, (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const endpoint = dbManager.getEndpoint(req.params.id);
@@ -4191,8 +4326,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 9. Decommission Endpoint (SECURED: requireAuth + sensitiveActionLimiter)
-  app.delete('/api/edr/endpoints/:id', requireAuth, sensitiveActionLimiter, (req, res) => {
+  // 9. Decommission Endpoint (SECURED: requireAuth + requireRole('admin') + sensitiveActionLimiter)
+  app.delete('/api/edr/endpoints/:id', requireAuth, requireRole('admin'), sensitiveActionLimiter, (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const endpoint = dbManager.getEndpoint(req.params.id);
@@ -4219,12 +4354,13 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 10. Generate / Download EDR Agent PowerShell Script
-  app.get('/api/edr/agent-script', (req, res) => {
+  // 10. Generate / Download EDR Agent PowerShell Script (SECURED: requireAuth + requireRole('admin', 'analyste') + Scoped EDR Token)
+  app.get('/api/edr/agent-script', requireAuth, requireRole('admin', 'analyste'), (req, res) => {
     const host = req.headers.host || `localhost:${PORT}`;
     const protocol = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
     const fullServerUrl = `${protocol}://${host}`;
-    const token = getLocalAuthToken();
+    // Security: Use dedicated scoped EDR Agent Token rather than leaking the master administrative token
+    const token = getEdrAgentToken();
     const script = generateEdrAgentPowerShell(fullServerUrl, token);
 
     if (req.query.download === 'true') {
@@ -4237,8 +4373,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     res.send(script);
   });
 
-  // 11. Quick Deployment One-Liner Command
-  app.get('/api/edr/oneliner', (req, res) => {
+  // 11. Quick Deployment One-Liner Command (SECURED: requireAuth + requireRole('admin', 'analyste'))
+  app.get('/api/edr/oneliner', requireAuth, requireRole('admin', 'analyste'), (req, res) => {
     const host = req.headers.host || `localhost:${PORT}`;
     const protocol = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
     const fullServerUrl = `${protocol}://${host}`;
@@ -4251,8 +4387,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
-  // 6. Structured Forensic Log File Export (SECURED: requireAuth + sensitiveActionLimiter)
-  app.get('/api/logs/download', requireAuth, sensitiveActionLimiter, (req, res) => {
+  // 6. Structured Forensic Log File Export (SECURED: requireAuth + requireRole('admin', 'analyste') + sensitiveActionLimiter)
+  app.get('/api/logs/download', requireAuth, requireRole('admin', 'analyste'), sensitiveActionLimiter, (req, res) => {
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     logger.info({ operator: authenticatedOp.name, ip: req.ip }, '[ForensicAudit] Téléchargement du journal forensique autorisé');
     const logFile = getLogFilePath();
@@ -4306,9 +4442,10 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
   wss.on('connection', (ws, req) => {
-    // Validate WebSocket Authentication Token
-    if (!validateWebSocketConnection(req.url)) {
-      logger.warn({ ip: req.socket.remoteAddress, url: req.url }, '[WebSocket] Connexion non autorisée rejetée');
+    // Validate WebSocket Authentication (via single-use ticket, headers, or desktop IPC)
+    const operator = validateWebSocketRequest(req);
+    if (!operator) {
+      logger.warn({ ip: req.socket.remoteAddress, url: req.url }, '[WebSocket] Connexion non autorisée rejetée (ticket ou jeton manquant)');
       ws.close(4401, 'Unauthorized');
       return;
     }
@@ -4317,14 +4454,18 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     const activeCount = connectedClients.size;
     sharedState.activeUsersCount = activeCount;
 
-    const opNum = operatorSequence++;
-    const opTitles = ['Analyste Principal SOC', 'Ingénieur Réponse à Incident', 'Opérateur Kernel & Forensics', 'Spécialiste Threat Hunting'];
-    const opRole = opNum === 1 ? opTitles[0] : opTitles[(opNum - 1) % opTitles.length];
+    const roleTitle = operator.role === 'admin'
+      ? 'Administrateur SOC'
+      : operator.role === 'analyste'
+      ? 'Analyste SOC'
+      : 'Observateur SOC (Lecture seule)';
+
     const opSession: OperatorClient = {
-      id: `OP-${opNum.toString().padStart(2, '0')}`,
-      name: `Analyste #${opNum}`,
-      role: opRole,
-      ip: req.socket.remoteAddress || 'Poste Local',
+      id: operator.id,
+      name: operator.name,
+      role: roleTitle,
+      rawRole: operator.role,
+      ip: operator.ip || req.socket.remoteAddress || '127.0.0.1',
       connectedAt: new Date().toLocaleTimeString('fr-FR'),
       status: 'ONLINE',
     };
@@ -4357,6 +4498,20 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       try {
         const msg = JSON.parse(data.toString());
         if (msg.type === 'MUTATE') {
+          // RBAC Check: Read-only observer cannot mutate server state
+          if (operator.role === 'lecture_seule' || opSession.rawRole === 'lecture_seule') {
+            logger.warn(
+              { operator: opSession.name, action: msg.action },
+              '[WebSocket] Message MUTATE rejeté : privilèges insuffisants (rôle lecture_seule)'
+            );
+            ws.send(JSON.stringify({
+              type: 'RBAC_ERROR',
+              error: 'Privilèges insuffisants : le profil lecture_seule n\'est pas autorisé à modifier l\'état partagé.',
+              code: 'FORBIDDEN_ROLE',
+            }));
+            return;
+          }
+
           // Strict Zod validation of action whitelist, payload schema, and status enums
           const validationResult = sharedMutateSchema.safeParse({
             action: msg.action,
@@ -4448,7 +4603,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-  const bindHost = process.env.IS_ELECTRON === 'true' ? '127.0.0.1' : '0.0.0.0';
+  const bindHost = process.env.HOST || '127.0.0.1';
 
   return new Promise((resolve) => {
     httpServer.listen(PORT, bindHost, () => {

@@ -6,6 +6,7 @@ export interface OperatorClient {
   id: string;
   name: string;
   role: string;
+  rawRole?: string;
   ip: string;
   connectedAt: string;
   status: 'ONLINE' | 'IDLE';

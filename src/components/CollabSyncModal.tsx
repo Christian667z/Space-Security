@@ -379,7 +379,7 @@ export const CollabSyncModal: React.FC<CollabSyncModalProps> = ({
         {/* Footer */}
         <div className="px-6 py-3.5 bg-slate-900/80 border-t border-slate-800 flex items-center justify-between text-xs">
           <span className="text-slate-400 font-mono">
-            Serveur autoritaire : <span className="text-cyan-400">0.0.0.0:3000/ws</span>
+            Serveur autoritaire : <span className="text-cyan-400">127.0.0.1:3000/ws</span>
           </span>
           <button
             onClick={onClose}
