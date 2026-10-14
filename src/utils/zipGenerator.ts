@@ -1,64 +1,41 @@
 import JSZip from 'jszip';
 import { BOOSTED_POWERSHELL_SCRIPT, ELEVATED_BATCH_LAUNCHER, EMERGENCY_SAFEBOOT_LAUNCHER } from '../data/powershellScript';
 import { CSHARP_EXTIRPATOR_CODE } from '../data/csharpExtirpator';
-import { CLAUDE_THEMES_REMOVAL_SCRIPT } from '../data/themesMalwareScript';
 
 export const README_GUIDE_CONTENT = `================================================================================
-  SPACESEC CYBERDEFENSE SUITE & KERNEL EXTIRPATOR v3.5 - EDITION ULTRA
-  Auteur initial : Space [Goat Asta] | Boostee pour Ingenieurs Cybersecurite
+  SPACESEC CYBERDEFENSE SUITE & KERNEL EXTIRPATOR v3.0 - EDITION ULTRA
+  Auteur original : Space [Goat Asta] | Boostee pour Ingenieurs Cybersecurite
 ================================================================================
 
-NOUVEAUTES & MENUS 10 A 14 :
------------------------------
-[10] DETECTION PROFONDE :
-     - Usurpation de processus Windows (spoofing de nom, parent anormal).
-     - Processus caches (recherche brute-force PID 4..65535 vs API Windows).
-     - Code injecte en memoire (zones RWX PAGE_EXECUTE_READWRITE & Reflective DLL).
-     - Persistance complete (Run, Winlogon, IFEO, LSA, BootExecute, WMI, Startup).
-     - Services et pilotes noyau suspects & taches planifiees non signees.
-     - Scan heuristique global par score (0 a 100) avec penalites MITRE.
+CONTENU DE CE PACK ZIP :
+-----------------------
+1. SpaceSecurity_ULTRA_v3_Kernel.ps1
+   -> Script principal PowerShell ultra-booste.
+   -> Contient 25+ modules de cyberdefense :
+      - Eradication des fichiers verrouilles par TrustedInstaller / Handles noyau
+      - Destruction planifiee au boot via Session Manager (PendingFileRenameOperations)
+      - Suspension atomique de watchdogs / processus mutuels (NtSuspendProcess P/Invoke)
+      - Reparation de Windows Defender, vidage des cles de sabotage et mise a jour
+      - Purge des pieges de debogueur IFEO (Image File Execution Options)
+      - Traque des connexions C2 (Metasploit 4444, Cobalt Strike Named Pipes)
+      - Detection des LOLBins (certutil, bitsadmin, mshta) et flux NTFS alternatifs (ADS)
+      - Desactivation SMBv1, purge abonnements WMI et creation de Shadow Copies VSS
+      - Mode Console Interactive en temps reel integre directement dans PowerShell
 
-[11] REMEDIATION & QUARANTAINE RESTAURABLE :
-     - Quarantaine securisee et restaurable avec manifeste JSON et revocation ACL.
-     - Eradication forcee au redemarrage noyau via PendingFileRenameOperations.
-     - Redemarrage programme en WinRE (Environnement de Recuperation Windows).
-     - Garde-fous certifie Microsoft : verification Authenticode pour empecher la suppression de fichiers systeme.
-     - Sauvegarde preventive des processus, cles et services avant toute modification.
+2. KernelFileExtirpator.cs (Module C# Natif)
+   -> Code source C# de production autonome avec MoveFileEx P/Invoke,
+      elevation SeDebug/SeTakeOwnership/SeRestore/SeBackup, bypass TrustedInstaller
+      via takeown/icacls/SetNamedSecurityInfo, killer de watchdogs via NtSuspendProcess
+      et Restart Manager API.
 
-[12] DEFENDER AVANCE :
-     - Audit et purge des exclusions frauduleuses (chemins Public/Temp, extensions).
-     - Lancement de l'analyse hors-ligne Windows Defender Offline (WDO).
-     - Activation des regles ASR (Attack Surface Reduction) anti-vol d'identifiants LSASS.
-     - Historique detaille des menaces et alertes Defender.
+3. RunAs_SpaceSecurity_Admin.bat
+   -> Lanceur d'auto-elevation en Administrateur.
+   -> Contourne automatiquement la restriction d'execution (-ExecutionPolicy Bypass).
+   -> Recommande pour lancer la suite sans taper de commande.
 
-[13] FORENSIQUE & LOGS :
-     - Detection des attaques par force brute (Event ID 4625).
-     - Detection des tentatives d'effacement de journaux (Event ID 1102 & 104).
-     - Detection de creation de comptes admins (Event ID 4720, 4728) et nouveaux services (7045).
-     - Collecte de preuves avec hachage cryptographique SHA-256.
-
-[14] RAPPORTS & EXPORTS :
-     - Synthese de session interactive en temps reel.
-     - Export de rapports HTML moderne sombre, CSV pour tableur et JSON pour SIEM.
-
-CORRECTIFS APPLIQUES DANS CETTE VERSION :
------------------------------------------
-- Menu SOS : V5 declenche desormais le protocole d'urgence reel et V6 connecte la console live.
-- Faux positifs : Mots-cles 'rat'/'nc' filtres avec regex et liste blanche (Narrator, Configuration).
-- Quarantaine d'abord : Fini les suppressions aveugles; les fichiers sont isoles avec confirmation.
-- Snapshot memoire : Renomme 'Snapshot memoire' (evite la fausse promesse d'une image RAM physique).
-- Scan de ports : Multithreading avec timeouts courts de 150ms (.NET Sockets).
-- Named Pipes : Chemin corrige sur le namespace reel \\\\.\\pipe\\.
-- Detection C2 : Exclusion des adresses IP privees RFC 1918 et loopback pour cibler uniquement les balises externes.
-- Nettoyage : Prefetch et Temp ne sont plus supprimes automatiquement pour preserver les preuves forensiques.
-
-CONTENU DU PACK :
------------------
-1. SpaceSecurity_ULTRA_v3_Kernel.ps1  - Script principal avec menus 10 a 14.
-2. KernelFileExtirpator.cs             - Code source C# natif autonome.
-3. RunAs_SpaceSecurity_Admin.bat       - Lanceur avec auto-elevation UAC.
-4. Emergency_SafeBoot_Clean.bat        - Outil de secours SafeMode minimal.
-5. README_MODE_D_EMPLOI.txt            - Ce guide d'utilisation.
+4. Emergency_SafeBoot_Clean.bat
+   -> Outil de secours pour configurer un redemarrage chirurgical en Mode Sans Echec
+      minimal (via bcdedit) si un malware bloque completement la session normale.
 
 --------------------------------------------------------------------------------
 MODE D'EMPLOI ET LANCEMENT RAPIDE :
@@ -75,6 +52,30 @@ METHODE B (Ligne de commande PowerShell directe) :
    cd "$env:USERPROFILE\\Desktop\\SpaceSec"
 3. Lancez la commande suivante :
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\SpaceSecurity_ULTRA_v3_Kernel.ps1
+
+--------------------------------------------------------------------------------
+COMMENT DETRUIRE UN FICHIER VERROUILLE QUE WINDOWS REFUSE D'EFFACER :
+--------------------------------------------------------------------------------
+1. Dans le menu de la suite, tapez "1" (KERNEL EXTIRPATOR).
+2. Choisissez "K1" (Eradiquer un fichier verrouille).
+3. Collez le chemin complet du fichier (ex: C:\\Windows\\System32\\drivers\\malware.sys).
+4. Le script va :
+   - Reinitialiser les attributs de fichier (Normal).
+   - Prendre possession du fichier grace aux privileges SeTakeOwnershipPrivilege (takeown).
+   - Vous accorder le controle total en ecrasant les restrictions TrustedInstaller (icacls).
+   - Tuer l'arbre de processus associe.
+   - Si le fichier reste maintenu en memoire par un pilote, l'inscrire dans
+     PendingFileRenameOperations et l'ecraser a 0 octet.
+   - Au prochain redemarrage, Windows detruira physiquement le fichier avant le chargement
+     de tout logiciel malveillant !
+
+--------------------------------------------------------------------------------
+SUPPORT & RAPPORT D'AUDIT :
+--------------------------------------------------------------------------------
+A chaque execution, un rapport detaille horodate est automatiquement genere sur
+votre Bureau :
+  -> SpaceSecurity_UltraReport_YYYYMMDD_HHMMSS.txt
+  -> SpaceSecurity_Kernel_Log.txt
 ================================================================================
 `;
 
@@ -83,7 +84,6 @@ export async function generateAndDownloadZip(): Promise<void> {
 
   // Add files to zip
   zip.file('SpaceSecurity_ULTRA_v3_Kernel.ps1', BOOSTED_POWERSHELL_SCRIPT);
-  zip.file('supprimer_malware_themes.ps1', CLAUDE_THEMES_REMOVAL_SCRIPT);
   zip.file('KernelFileExtirpator.cs', CSHARP_EXTIRPATOR_CODE);
   zip.file('RunAs_SpaceSecurity_Admin.bat', ELEVATED_BATCH_LAUNCHER);
   zip.file('Emergency_SafeBoot_Clean.bat', EMERGENCY_SAFEBOOT_LAUNCHER);
@@ -100,7 +100,7 @@ export async function generateAndDownloadZip(): Promise<void> {
   const url = URL.createObjectURL(zipBlob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'SpaceSec_CyberDefense_Ultra_v3.5.zip';
+  link.download = 'SpaceSec_CyberDefense_Ultra_v3.zip';
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

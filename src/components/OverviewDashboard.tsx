@@ -35,16 +35,12 @@ import {
   Undo2,
 } from 'lucide-react';
 import { TabId, ThreatItem } from '../types/cyberdefense';
+import { ThreatHeatmap } from './ThreatHeatmap';
+import { ThreatIntensityMap } from './ThreatIntensityMap';
+import { ThreatCategoryDonutChart } from './ThreatCategoryDonutChart';
+import { VulnerabilityRadarChart } from './VulnerabilityRadarChart';
+import { SharedCommandModal } from './SharedCommandModal';
 import { calculateSecurityScore } from '../utils/pdfReportGenerator';
-import { ErrorBoundary } from './ErrorBoundary';
-
-// Code-Splitting: Lazy load heavy D3 TopoJSON and Recharts visualizers
-const ThreatHeatmap = React.lazy(() => import('./ThreatHeatmap').then(m => ({ default: m.ThreatHeatmap })));
-const ThreatIntensityMap = React.lazy(() => import('./ThreatIntensityMap').then(m => ({ default: m.ThreatIntensityMap })));
-const ThreatCategoryDonutChart = React.lazy(() => import('./ThreatCategoryDonutChart').then(m => ({ default: m.ThreatCategoryDonutChart })));
-const VulnerabilityRadarChart = React.lazy(() => import('./VulnerabilityRadarChart').then(m => ({ default: m.VulnerabilityRadarChart })));
-const HealthScoreEvolutionChart = React.lazy(() => import('./HealthScoreEvolutionChart').then(m => ({ default: m.HealthScoreEvolutionChart })));
-const SharedCommandModal = React.lazy(() => import('./SharedCommandModal').then(m => ({ default: m.SharedCommandModal })));
 
 interface OverviewDashboardProps {
   onNavigateTab: (tab: TabId) => void;
@@ -488,52 +484,25 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
         </div>
       </div>
 
-      {/* Security HealthScore 30-Day Evolution Chart (Recharts) */}
-      <ErrorBoundary moduleName="Évolution du Score de Santé (Recharts)">
-        <React.Suspense fallback={<div className="h-64 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement de l'Évolution du Score...</div>}>
-          <HealthScoreEvolutionChart
-            threats={threats}
-            onRunInConsole={onRunInConsole}
-            onNavigateTab={onNavigateTab}
-          />
-        </React.Suspense>
-      </ErrorBoundary>
-
       {/* Machine Vulnerability Radar Chart (Recharts: Services, Patchs, Ports Audits) */}
-      <ErrorBoundary moduleName="Radar des Vulnérabilités (Recharts)">
-        <React.Suspense fallback={<div className="h-64 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement du Radar des Vulnérabilités...</div>}>
-          <VulnerabilityRadarChart
-            threats={threats}
-            onNavigateTab={onNavigateTab}
-            onRunInConsole={onRunInConsole}
-          />
-        </React.Suspense>
-      </ErrorBoundary>
+      <VulnerabilityRadarChart
+        threats={threats}
+        onNavigateTab={onNavigateTab}
+        onRunInConsole={onRunInConsole}
+      />
 
       {/* Threat Distribution Donut Chart (Recharts) */}
-      <ErrorBoundary moduleName="Distribution des Menaces (Donut Recharts)">
-        <React.Suspense fallback={<div className="h-64 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement de la Distribution des Menaces...</div>}>
-          <ThreatCategoryDonutChart
-            threats={threats}
-            selectedCategory={categoryFilter}
-            onSelectCategory={setCategoryFilter}
-          />
-        </React.Suspense>
-      </ErrorBoundary>
+      <ThreatCategoryDonutChart
+        threats={threats}
+        selectedCategory={categoryFilter}
+        onSelectCategory={setCategoryFilter}
+      />
 
       {/* Threat Heatmap: System Areas Visualizer (Kernel, Registry, Startup, Filesystem) */}
-      <ErrorBoundary moduleName="Heatmap des Zones Système">
-        <React.Suspense fallback={<div className="h-64 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement de la Heatmap Système...</div>}>
-          <ThreatHeatmap onRunInConsole={onRunInConsole} onNavigateTab={onNavigateTab} threats={threats} />
-        </React.Suspense>
-      </ErrorBoundary>
+      <ThreatHeatmap onRunInConsole={onRunInConsole} />
 
       {/* Threat Intensity Map: D3-based Heatmap Visualizing Geographical Origin of Malicious C2 Connections */}
-      <ErrorBoundary moduleName="Cartographie Forensique C2 (D3 / TopoJSON)">
-        <React.Suspense fallback={<div className="h-96 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement de la Cartographie Mondiale D3...</div>}>
-          <ThreatIntensityMap onRunInConsole={onRunInConsole} onNavigateTab={onNavigateTab} threats={threats} />
-        </React.Suspense>
-      </ErrorBoundary>
+      <ThreatIntensityMap onRunInConsole={onRunInConsole} onNavigateTab={onNavigateTab} />
 
       {/* Visual Threat Timeline Mini Preview & Gateway */}
       <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
@@ -558,109 +527,87 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
         </div>
 
         {/* Milestone Steps Visual Strip */}
-        {/* Milestone Steps Visual Strip */}
-        {(() => {
-          const hasActiveKernel = threats.some(t => (t.category === 'Kernel' || t.category === 'Rootkit' || t.trustedInstallerLocked) && t.status === 'ACTIVE');
-          const hasActiveC2 = threats.some(t => (t.category === 'C2' || t.category === 'Network' || t.targetPath.includes('4444')) && t.status === 'ACTIVE');
-          const hasActivePersistence = threats.some(t => (t.category === 'Persistence' || t.targetPath.includes('bits') || t.targetPath.includes('WMI')) && t.status === 'ACTIVE');
-          const hasActiveTrojan = threats.some(t => (t.category === 'Trojan' || t.targetPath.includes('Themes') || t.targetPath.includes('icsys')) && t.status === 'ACTIVE');
-
-          return (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
-              <div 
-                onClick={() => onNavigateTab('timeline')}
-                className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-cyan-800 cursor-pointer transition-colors space-y-1 group"
-              >
-                <div className="flex items-center justify-between text-[11px] font-mono">
-                  <span className="text-cyan-400 font-bold">1. SCAN T0</span>
-                  <span className="text-emerald-400">OK</span>
-                </div>
-                <div className="text-xs font-semibold text-slate-200 group-hover:text-cyan-300">
-                  Élévation Privilèges NT
-                </div>
-                <div className="text-[10px] text-slate-500 font-mono">
-                  SeDebug & SeTakeOwnership
-                </div>
-              </div>
-
-              <div 
-                onClick={() => onNavigateTab('timeline')}
-                className={`p-3 bg-slate-950 rounded-lg border cursor-pointer transition-colors space-y-1 group ${
-                  hasActiveTrojan ? 'border-rose-900/80 hover:border-rose-600' : 'border-slate-800 hover:border-amber-800'
-                }`}
-              >
-                <div className="flex items-center justify-between text-[11px] font-mono">
-                  <span className={hasActiveTrojan ? 'text-rose-400 font-bold' : 'text-amber-400 font-bold'}>2. DÉTECTION T+2s</span>
-                  <span className={hasActiveTrojan ? 'text-rose-400 font-bold' : 'text-emerald-400'}>
-                    {hasActiveTrojan ? 'ACTIF' : 'PURGÉ'}
-                  </span>
-                </div>
-                <div className="text-xs font-semibold text-slate-200 group-hover:text-amber-300">
-                  Malware & Themes Mimic
-                </div>
-                <div className="text-[10px] text-slate-500 font-mono">
-                  {hasActiveTrojan ? 'Binaire hostile détecté' : '0 injection résiduelle'}
-                </div>
-              </div>
-
-              <div 
-                onClick={() => onNavigateTab('timeline')}
-                className={`p-3 bg-slate-950 rounded-lg border cursor-pointer transition-colors space-y-1 group ${
-                  hasActiveC2 ? 'border-rose-900/80 hover:border-rose-600' : 'border-slate-800 hover:border-emerald-800'
-                }`}
-              >
-                <div className="flex items-center justify-between text-[11px] font-mono">
-                  <span className={hasActiveC2 ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}>3. ALERTE T+5s</span>
-                  <span className={hasActiveC2 ? 'text-rose-400 font-bold' : 'text-emerald-400'}>
-                    {hasActiveC2 ? 'ALERTE C2' : 'CONFINÉ'}
-                  </span>
-                </div>
-                <div className="text-xs font-semibold text-slate-200 group-hover:text-rose-300">
-                  Balisage Sockets & Ports
-                </div>
-                <div className="text-[10px] text-slate-500 font-mono">
-                  {hasActiveC2 ? 'Socket C2 sortant actif' : 'Trafic réseau intègre'}
-                </div>
-              </div>
-
-              <div 
-                onClick={() => onNavigateTab('timeline')}
-                className={`p-3 bg-slate-950 rounded-lg border cursor-pointer transition-colors space-y-1 group ${
-                  hasActiveKernel ? 'border-purple-900/80 hover:border-purple-600' : 'border-slate-800 hover:border-emerald-800'
-                }`}
-              >
-                <div className="flex items-center justify-between text-[11px] font-mono">
-                  <span className={hasActiveKernel ? 'text-purple-400 font-bold' : 'text-emerald-400 font-bold'}>4. EXCISION T+18s</span>
-                  <span className={hasActiveKernel ? 'text-purple-400 font-bold' : 'text-emerald-400'}>
-                    {hasActiveKernel ? 'VERROU' : 'NETTOYÉ'}
-                  </span>
-                </div>
-                <div className="text-xs font-semibold text-slate-200 group-hover:text-purple-300">
-                  Dépossession TrustedInstaller
-                </div>
-                <div className="text-[10px] text-slate-500 font-mono">
-                  {hasActiveKernel ? 'Fichier verrouillé par driver' : 'Pilotes WHQL intègres'}
-                </div>
-              </div>
-
-              <div 
-                onClick={() => onNavigateTab('timeline')}
-                className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-emerald-800 cursor-pointer transition-colors space-y-1 group"
-              >
-                <div className="flex items-center justify-between text-[11px] font-mono">
-                  <span className="text-emerald-400 font-bold">5. SÉCURISÉ T+25s</span>
-                  <span className="text-emerald-400">Vérifié</span>
-                </div>
-                <div className="text-xs font-semibold text-slate-200 group-hover:text-emerald-300">
-                  Durcissement & Defender
-                </div>
-                <div className="text-[10px] text-slate-500 font-mono">
-                  {hasActivePersistence ? 'Persistance BITS surveillée' : 'Persistance & GPO intègres'}
-                </div>
-              </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
+          <div 
+            onClick={() => onNavigateTab('timeline')}
+            className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-cyan-800 cursor-pointer transition-colors space-y-1 group"
+          >
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-cyan-400 font-bold">1. SCAN T0</span>
+              <span className="text-emerald-400">OK</span>
             </div>
-          );
-        })()}
+            <div className="text-xs font-semibold text-slate-200 group-hover:text-cyan-300">
+              Élévation Privilèges NT
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono">
+              SeDebug & SeTakeOwnership
+            </div>
+          </div>
+
+          <div 
+            onClick={() => onNavigateTab('timeline')}
+            className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-amber-800 cursor-pointer transition-colors space-y-1 group"
+          >
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-amber-400 font-bold">2. DÉTECTION T+2s</span>
+              <span className="text-amber-400">LOLBin</span>
+            </div>
+            <div className="text-xs font-semibold text-slate-200 group-hover:text-amber-300">
+              Abus certutil.exe
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono">
+              Téléchargement furtif en cache
+            </div>
+          </div>
+
+          <div 
+            onClick={() => onNavigateTab('timeline')}
+            className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-rose-800 cursor-pointer transition-colors space-y-1 group"
+          >
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-rose-400 font-bold">3. ALERTE T+5s</span>
+              <span className="text-rose-400">C2 Beacon</span>
+            </div>
+            <div className="text-xs font-semibold text-slate-200 group-hover:text-rose-300">
+              Balisage Port 4444
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono">
+              Netstat Sockets TCP
+            </div>
+          </div>
+
+          <div 
+            onClick={() => onNavigateTab('timeline')}
+            className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-purple-800 cursor-pointer transition-colors space-y-1 group"
+          >
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-purple-400 font-bold">4. EXCISION T+18s</span>
+              <span className="text-purple-400">Kernel</span>
+            </div>
+            <div className="text-xs font-semibold text-slate-200 group-hover:text-purple-300">
+              Dépossession TrustedInstaller
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono">
+              PendingFileRenameOperations
+            </div>
+          </div>
+
+          <div 
+            onClick={() => onNavigateTab('timeline')}
+            className="p-3 bg-slate-950 rounded-lg border border-slate-800 hover:border-emerald-800 cursor-pointer transition-colors space-y-1 group"
+          >
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-emerald-400 font-bold">5. SÉCURISÉ T+25s</span>
+              <span className="text-emerald-400">Vérifié</span>
+            </div>
+            <div className="text-xs font-semibold text-slate-200 group-hover:text-emerald-300">
+              Purge WMI & Defender
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono">
+              Désactivation SMBv1 (WannaCry)
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Main Grid: Active Threats + Modular Navigator */}
@@ -1368,18 +1315,12 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
       </div>
 
       {/* Shared Command Runner Modal */}
-      {isSharedCommandModalOpen && (
-        <ErrorBoundary moduleName="Modal des Commandes Partagées">
-          <React.Suspense fallback={null}>
-            <SharedCommandModal
-              isOpen={isSharedCommandModalOpen}
-              onClose={() => setIsSharedCommandModalOpen(false)}
-              selectedThreats={selectedThreatsList}
-              onExecuteSharedCommand={handleExecuteSharedCommand}
-            />
-          </React.Suspense>
-        </ErrorBoundary>
-      )}
+      <SharedCommandModal
+        isOpen={isSharedCommandModalOpen}
+        onClose={() => setIsSharedCommandModalOpen(false)}
+        selectedThreats={selectedThreatsList}
+        onExecuteSharedCommand={handleExecuteSharedCommand}
+      />
     </div>
   );
 };

@@ -1,7 +1,6 @@
 {
   "appId": "com.spacesecurity.cyberdefense",
   "productName": "Space Security",
-  "copyright": "Copyright © 2026 Space Security. Tous droits réservés.",
   "directories": {
     "output": "dist-package"
   },
@@ -13,7 +12,6 @@
   "nodeGypRebuild": false,
   "npmRebuild": false,
   "win": {
-    "icon": "build/icon.ico",
     "target": [
       {
         "target": "nsis",
@@ -24,18 +22,7 @@
         "arch": ["x64"]
       }
     ],
-    "requestedExecutionLevel": "requireAdministrator",
-    "publisherName": "Space Security Cybersecurity Labs",
-    "verifyUpdateCodeSignature": true,
-    "signingHashAlgorithms": ["sha256"],
-    "rfc3161TimeStampServer": "http://timestamp.digicert.com",
-    "signAndEditExecutable": true,
-    "legalTrademarks": "Space Security™",
-    "sign": "scripts/sign-windows.cjs"
-  },
-  "linux": {
-    "icon": "build/icon.png",
-    "target": ["AppImage", "tar.gz"]
+    "requestedExecutionLevel": "requireAdministrator"
   },
   "nsis": {
     "oneClick": false,

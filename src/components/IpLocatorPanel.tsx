@@ -26,7 +26,6 @@ import {
   Lock,
 } from 'lucide-react';
 import { IpLocationReport, TracerouteHop } from '../types/cyberdefense';
-import { apiFetch } from '../utils/api';
 
 interface IpLocatorPanelProps {
   initialIp?: string;
@@ -80,7 +79,8 @@ export const IpLocatorPanel: React.FC<IpLocatorPanelProps> = ({
     setError(null);
     try {
       const trimmed = targetIp.trim();
-      const res = await apiFetch(`/api/ip/geolocate?ip=${encodeURIComponent(trimmed)}`);
+      const baseUrl = typeof window !== 'undefined' && window.location.protocol === 'file:' ? 'http://127.0.0.1:3000' : '';
+      const res = await fetch(`${baseUrl}/api/ip/geolocate?ip=${encodeURIComponent(trimmed)}`);
       if (!res.ok) {
         throw new Error(`Erreur réseau (${res.status}) lors de la résolution de l'IP`);
       }
@@ -343,22 +343,22 @@ export const IpLocatorPanel: React.FC<IpLocatorPanelProps> = ({
               </div>
             </div>
 
-            {/* Card 3: Infrastructure Réseau & POP */}
+            {/* Card 3: Endroit Précis / Bâtiment / Installation */}
             <div className="bg-slate-900/90 border border-sky-800/60 rounded-xl p-4 shadow-md relative overflow-hidden bg-gradient-to-br from-slate-900/90 to-sky-950/20">
               <div className="flex items-center justify-between text-xs text-sky-400 font-mono mb-2">
                 <span className="flex items-center gap-1.5">
                   <Navigation className="w-3.5 h-3.5 text-sky-400" />
-                  INFRASTRUCTURE & POP
+                  ENDROIT EXACT CONNECTÉ
                 </span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-700/60">
-                  POP FAI / AS
+                  PRÉCIS
                 </span>
               </div>
               <div className="text-sm font-bold text-sky-200 font-sans leading-tight truncate" title={report.placeFacility}>
                 {report.placeFacility || 'Point de Présence Réseau'}
               </div>
               <div className="text-xs text-slate-300 font-mono mt-1 truncate" title={report.placeAddress}>
-                📍 Zone IP : {report.placeAddress}
+                📍 {report.placeRoad ? `${report.placeRoad}, ${report.city}` : report.placeAddress}
               </div>
             </div>
 
@@ -522,18 +522,10 @@ export const IpLocatorPanel: React.FC<IpLocatorPanelProps> = ({
 
               {/* Exact Address Box */}
               <div className="mt-4 bg-slate-950/90 border border-slate-800 rounded-lg p-3.5">
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-800/80">
-                    BGP / RIR OFFICIEL
-                  </span>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
-                    PRÉCISION : POP OPÉRATEUR (VILLE)
-                  </span>
-                </div>
                 <div className="text-xs font-mono text-slate-400 mb-1 flex items-center justify-between">
                   <span className="flex items-center gap-1.5 text-sky-400">
                     <Navigation className="w-3.5 h-3.5" />
-                    ZONE GÉOGRAPHIQUE DU FOURNISSEUR D'ACCÈS
+                    ADRESSE COMPLÈTE & POINT D'ACCÈS DU FOURNISSEUR
                   </span>
                   <button
                     onClick={() => copyToClipboard(report.placeAddress, 'full_address')}
@@ -653,20 +645,9 @@ export const IpLocatorPanel: React.FC<IpLocatorPanelProps> = ({
                     </div>
                   )}
 
-                  <div className="flex items-start justify-between border-b border-slate-800/80 pb-2">
-                    <span className="text-slate-400 font-mono">Ping ICMP Réel :</span>
-                    <span className="font-mono font-bold">
-                      {report.measuredPingMs !== undefined && report.measuredPingMs !== null ? (
-                        <span className="text-emerald-400">{report.measuredPingMs.toFixed(1)} ms (Mesuré)</span>
-                      ) : (
-                        <span className="text-amber-400 text-[11px]">Non mesuré / Filtré par pare-feu</span>
-                      )}
-                    </span>
-                  </div>
-
                   <div className="flex items-start justify-between">
-                    <span className="text-slate-400 font-mono">Latence Théorique (RTT) :</span>
-                    <span className="text-cyan-400 font-mono font-bold">
+                    <span className="text-slate-400 font-mono">Latence Estimée (RTT) :</span>
+                    <span className="text-emerald-400 font-mono font-bold">
                       ~{report.estLatencyMs} ms ({report.distanceKm} km physiques)
                     </span>
                   </div>
@@ -733,36 +714,15 @@ export const IpLocatorPanel: React.FC<IpLocatorPanelProps> = ({
                 <div>
                   <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2 font-mono uppercase">
                     <Activity className="w-4 h-4 text-emerald-400" />
-                    Topologie & Modèle de Transit Réseau ({report.hops.length} Nœuds)
+                    Traceroute & Route Réseau jusqu'à l'Endroit Cible ({report.hops.length} Sauts)
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Modélisation du cheminement BGP/ASN jusqu'à l'infrastructure distante dans {report.city}.
+                    Cheminement des paquets de votre poste local jusqu'au commutateur distant dans {report.city}.
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      onRunInConsole(`tracert ${report.ip}`);
-                      if (onNavigateTab) onNavigateTab('console');
-                    }}
-                    className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 rounded text-xs font-mono font-medium transition-colors cursor-pointer"
-                    title="Exécuter un tracert ICMP réel depuis la machine hôte"
-                  >
-                    <Terminal className="w-3.5 h-3.5" />
-                    <span>Lancer tracert réel (Console)</span>
-                  </button>
-                  <div className="text-xs font-mono text-cyan-400 bg-cyan-950/60 border border-cyan-800/60 px-2.5 py-1 rounded">
-                    {report.measuredPingMs ? `Ping : ${report.measuredPingMs.toFixed(1)} ms` : `RTT Est. : ~${report.estLatencyMs} ms`}
-                  </div>
+                <div className="text-xs font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded">
+                  RTT Total : ~{report.estLatencyMs} ms
                 </div>
-              </div>
-
-              {/* Forensic Transparency Notice */}
-              <div className="mb-4 p-3 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] font-mono text-slate-300 flex items-center gap-2.5">
-                <Info className="w-4 h-4 text-cyan-400 shrink-0" />
-                <span>
-                  {report.tracerouteNotice || "Modèle topologique de transit BGP / ASN estimé. Les sondes physiques ICMP hop-by-hop sont limitées sans privilèges bruts/root."}
-                </span>
               </div>
 
               <div className="overflow-x-auto">

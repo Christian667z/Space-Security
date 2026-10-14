@@ -165,23 +165,6 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
               setThreats(prev =>
                 prev.map(t => (idSet.has(t.id) ? { ...t, status: 'ACTIVE' } : t))
               );
-            } else if (action === 'RECORD_SCANNED_THREATS') {
-              const incoming: ThreatItem[] = Array.isArray(payload.threats) ? payload.threats : [];
-              if (incoming.length > 0) {
-                setThreats(prev => {
-                  const existingIds = new Set(prev.map(t => t.id));
-                  const toAdd = incoming.filter(t => !existingIds.has(t.id));
-                  return toAdd.length > 0 ? [...toAdd, ...prev] : prev;
-                });
-              }
-            } else if (action === 'ADD_THREAT') {
-              const t: ThreatItem = payload;
-              if (t && t.id) {
-                setThreats(prev => {
-                  if (prev.some(existing => existing.id === t.id)) return prev;
-                  return [t, ...prev];
-                });
-              }
             } else if (action === 'ADD_LOG') {
               setLogs(prev => {
                 if (prev.some(l => l.id === payload.id)) return prev;
@@ -424,18 +407,6 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
     sendMutation('RESET_THREATS', {});
   }, [sendMutation]);
 
-  const recordScannedThreats = useCallback((scannedThreats: ThreatItem[]) => {
-    if (!Array.isArray(scannedThreats) || scannedThreats.length === 0) return;
-    // 1. Optimistic local update
-    setThreats(prev => {
-      const existingIds = new Set(prev.map(t => t.id));
-      const toAdd = scannedThreats.filter(t => !existingIds.has(t.id));
-      return toAdd.length > 0 ? [...toAdd, ...prev] : prev;
-    });
-    // 2. Transmit to server & all other clients
-    sendMutation('RECORD_SCANNED_THREATS', { threats: scannedThreats });
-  }, [sendMutation]);
-
   return {
     threats,
     setThreats,
@@ -452,7 +423,6 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
     mutateBulkThreatStatus,
     massDismissThreats,
     restoreThreats,
-    recordScannedThreats,
     addSharedLog,
     clearSharedLogs,
     blockIp,

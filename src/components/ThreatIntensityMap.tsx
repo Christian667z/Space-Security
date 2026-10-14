@@ -44,18 +44,14 @@ import {
 } from '../data/threatGeoData';
 import { apiFetch } from '../utils/api';
 
-import { ThreatItem } from '../types/cyberdefense';
-
 interface ThreatIntensityMapProps {
   onRunInConsole: (command: string) => void;
   onNavigateTab?: (tab: any) => void;
-  threats?: ThreatItem[];
 }
 
 export const ThreatIntensityMap: React.FC<ThreatIntensityMapProps> = ({
   onRunInConsole,
   onNavigateTab,
-  threats = [],
 }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -185,49 +181,12 @@ export const ThreatIntensityMap: React.FC<ThreatIntensityMapProps> = ({
     }
   }, [targetHost.latitude, targetHost.longitude]);
 
-  // Filtered threats merged with live threats state
+  // Filtered threats
   const currentThreats = useMemo(() => {
-    const extractedOrigins: ThreatGeoLocation[] = [];
-    threats.forEach(t => {
-      const match = t.targetPath.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
-      if (match && match[1]) {
-        const ip = match[1];
-        if (!DETECTED_MALICIOUS_ORIGINS.some(orig => orig.ip === ip) && !extractedOrigins.some(e => e.ip === ip)) {
-          extractedOrigins.push({
-            id: `geo-${t.id}`,
-            ip,
-            country: 'C2 Distant Identifié',
-            countryCode: 'RU',
-            city: 'Moscou (AS208443)',
-            latitude: 55.7558,
-            longitude: 37.6173,
-            threatType: 'C2_BEACON',
-            threatIntensity: 90,
-            targetPort: 4444,
-            payloadSignature: t.mitreTechnique,
-            status: t.status === 'NEUTRALIZED' ? 'BLOCKED' : 'ACTIVE',
-            bandwidthKbps: 120,
-            firstDetected: t.detectedAt || 'Récent',
-            lastBeaconTime: 'Il y a 3s',
-            associatedProcess: t.name,
-            c2Infrastructure: 'Serveur C2 Hostile Actif',
-            asnOrg: 'Hostile Autonomous System',
-          });
-        }
-      }
-    });
-
-    const combined = [...DETECTED_MALICIOUS_ORIGINS, ...extractedOrigins];
-
-    return combined.map(t => {
-      const matchingLiveThreat = threats.find(lt => lt.targetPath.includes(t.ip));
-      const isNeutralized = matchingLiveThreat && matchingLiveThreat.status === 'NEUTRALIZED';
-
-      return {
-        ...t,
-        status: (blockedIps.has(t.ip) || isNeutralized) ? ('BLOCKED' as const) : t.status,
-      };
-    }).filter(t => {
+    return DETECTED_MALICIOUS_ORIGINS.map(t => ({
+      ...t,
+      status: blockedIps.has(t.ip) ? ('BLOCKED' as const) : t.status,
+    })).filter(t => {
       if (filterType === 'ALL') return true;
       if (filterType === 'ACTIVE') return t.status === 'ACTIVE';
       if (filterType === 'BLOCKED') return t.status === 'BLOCKED';
@@ -235,7 +194,7 @@ export const ThreatIntensityMap: React.FC<ThreatIntensityMapProps> = ({
       if (filterType === 'EXFIL') return t.threatType === 'DATA_EXFIL';
       return true;
     });
-  }, [threats, blockedIps, filterType]);
+  }, [blockedIps, filterType]);
 
   // Dynamic statistics
   const activeCount = currentThreats.filter(t => t.status === 'ACTIVE').length;

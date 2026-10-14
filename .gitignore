@@ -10,9 +10,3 @@ coverage/
 release/
 dist/
 dist-electron/
-dist-package/
-certs/
-*.pfx
-*.p12
-*.cer
-*.key

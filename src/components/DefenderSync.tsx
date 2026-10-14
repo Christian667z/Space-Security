@@ -29,7 +29,6 @@ import { apiFetch } from '../utils/api';
 interface DefenderSyncProps {
   onRunInConsole: (command: string) => void;
   onMutateThreatStatus?: (threatId: string, targetPath: string, status: ThreatItem['status']) => void;
-  onRecordScannedThreats?: (threats: ThreatItem[]) => void;
 }
 
 export type ExclusionType = 'PATH' | 'PROCESS' | 'EXTENSION';
@@ -47,7 +46,7 @@ export interface DefenderExclusionItem {
   status: 'ACTIVE' | 'PURGED' | 'SCANNED';
 }
 
-export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole, onMutateThreatStatus, onRecordScannedThreats }) => {
+export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole, onMutateThreatStatus }) => {
   const [isAuditing, setIsAuditing] = useState<boolean>(false);
   const [auditProgress, setAuditProgress] = useState<number>(100);
   const [filterType, setFilterType] = useState<'ALL' | 'PATH' | 'PROCESS' | 'EXTENSION' | 'MALICIOUS_ONLY'>('ALL');
@@ -77,35 +76,16 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole, onMu
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          const generatedThreats: ThreatItem[] = [];
-
           if (data.status) {
-            const isRealtime = Boolean(data.status.realtime);
-            setDefenderRealtimeActive(isRealtime);
+            setDefenderRealtimeActive(Boolean(data.status.realtime));
             setSignaturesAgeDays(typeof data.status.signatureAgeDays === 'number' ? data.status.signatureAgeDays : 0);
-
-            if (!isRealtime) {
-              generatedThreats.push({
-                id: 'real-threat-def-disabled',
-                name: 'Protection en Temps Réel Microsoft Defender Inactive',
-                category: 'Defender',
-                severity: 'HIGH',
-                targetPath: 'Windows Defender Engine',
-                mitreTechnique: 'T1562.001 - Disable Security Tools',
-                lockedBySystem: false,
-                trustedInstallerLocked: false,
-                description: 'La protection en temps réel ou le service antivirus principal de Windows est désactivé.',
-                status: 'ACTIVE',
-              });
-            }
           }
           if (data.exclusions) {
             const list: DefenderExclusionItem[] = [];
             let idx = 1;
             (data.exclusions.paths || []).forEach((p: string) => {
-              const threatId = `threat-def-ex-${idx}`;
               list.push({
-                id: `ex-path-${idx}`,
+                id: `ex-path-${idx++}`,
                 type: 'PATH',
                 value: p,
                 threatLevel: 'SUSPICIOUS',
@@ -115,19 +95,6 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole, onMu
                 addedTimestamp: 'Configurée sur l\'hôte',
                 status: 'ACTIVE',
               });
-              generatedThreats.push({
-                id: threatId,
-                name: `Exclusion Antivirus : ${p}`,
-                category: 'Defender',
-                severity: 'MEDIUM',
-                targetPath: p,
-                mitreTechnique: 'T1562.001 - Disable or Modify Tools',
-                lockedBySystem: false,
-                trustedInstallerLocked: false,
-                description: `Dossier whitelisté dans les exclusions de l'antivirus Windows Defender : ${p}`,
-                status: 'ACTIVE',
-              });
-              idx++;
             });
             (data.exclusions.processes || []).forEach((proc: string) => {
               list.push({
@@ -157,16 +124,12 @@ export const DefenderSync: React.FC<DefenderSyncProps> = ({ onRunInConsole, onMu
             });
             setExclusions(list);
           }
-
-          if (generatedThreats.length > 0 && onRecordScannedThreats) {
-            onRecordScannedThreats(generatedThreats);
-          }
         }
       }
     } catch (e) {
       console.warn('Defender fetch error:', e);
     }
-  }, [onRecordScannedThreats]);
+  }, []);
 
   useEffect(() => {
     fetchDefenderStatus();

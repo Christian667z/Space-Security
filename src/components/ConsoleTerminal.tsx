@@ -220,25 +220,12 @@ export const ConsoleTerminal: React.FC<ConsoleTerminalProps> = ({
         />
         <button
           type="submit"
-          className="flex items-center gap-1 px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded transition-colors text-xs cursor-pointer"
+          className="flex items-center gap-1 px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded transition-colors text-xs"
         >
           <span>Exécuter</span>
           <CornerDownLeft className="w-3 h-3" />
         </button>
       </form>
-
-      {/* Quick Keyboard Shortcuts Hint Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-1.5 bg-slate-950/90 border-t border-slate-900 text-[10px] text-slate-500 font-mono">
-        <div className="flex items-center gap-3">
-          <span>Raccourcis Clavier :</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-slate-800 text-cyan-400 font-bold">Alt+S</kbd> Scan</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-slate-800 text-cyan-400 font-bold">Alt+C</kbd> Clear</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-slate-800 text-cyan-400 font-bold">Alt+E</kbd> Export PDF</span>
-        </div>
-        <span className="hidden sm:inline text-slate-500">
-          Appuyez sur <kbd className="px-1 py-0.5 rounded bg-slate-800 text-slate-400 font-bold">?</kbd> ou <kbd className="px-1 py-0.5 rounded bg-slate-800 text-slate-400 font-bold">F1</kbd> pour le guide complet
-        </span>
-      </div>
     </div>
   );
 };

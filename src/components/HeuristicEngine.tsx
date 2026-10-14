@@ -51,7 +51,10 @@ import {
   ThreatItem,
 } from '../types/cyberdefense';
 import { SharedCommandModal } from './SharedCommandModal';
-import { ErrorBoundary } from './ErrorBoundary';
+import { FileEntropyAnalyzer } from './FileEntropyAnalyzer';
+import { RegistrySurveillancePanel } from './RegistrySurveillancePanel';
+import { DigitalSignatureInspector } from './DigitalSignatureInspector';
+import { ShieldCheck, FileText } from 'lucide-react';
 
 interface HeuristicEngineProps {
   onRunInConsole: (command: string) => void;
@@ -174,7 +177,7 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
 }) => {
   // Main telemetry states
   const [isStreaming, setIsStreaming] = useState<boolean>(true);
-  const [activeView, setActiveView] = useState<'OVERVIEW' | 'ENTROPY' | 'APIS' | 'CONFIDENCE_MATRIX'>('OVERVIEW');
+  const [activeView, setActiveView] = useState<'OVERVIEW' | 'ENTROPY' | 'REGISTRY' | 'SIGNATURES' | 'APIS' | 'CONFIDENCE_MATRIX'>('OVERVIEW');
   const [apiCategoryFilter, setApiCategoryFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   
@@ -661,8 +664,8 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
       {/* ========================================================================= */}
       {/* SECTION 2: VIEW SELECTOR TABS */}
       {/* ========================================================================= */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-        <div className="flex items-center gap-1 p-1 bg-slate-900 rounded-lg border border-slate-800">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+        <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-900 rounded-lg border border-slate-800">
           <button
             onClick={() => setActiveView('OVERVIEW')}
             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
@@ -671,17 +674,40 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            Vue Synthétique & Évolution
+            Vue Synthétique
           </button>
           <button
             onClick={() => setActiveView('ENTROPY')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5 ${
               activeView === 'ENTROPY'
                 ? 'bg-cyan-950 text-cyan-300 border border-cyan-800/80 shadow-sm'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            Scoring d'Entropie ({entropyMetrics.length})
+            <Binary className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Calcul d'Entropie & Ransomware</span>
+          </button>
+          <button
+            onClick={() => setActiveView('REGISTRY')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5 ${
+              activeView === 'REGISTRY'
+                ? 'bg-cyan-950 text-cyan-300 border border-cyan-800/80 shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <span>Surveillance Registre (Run/Winlogon)</span>
+          </button>
+          <button
+            onClick={() => setActiveView('SIGNATURES')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5 ${
+              activeView === 'SIGNATURES'
+                ? 'bg-cyan-950 text-cyan-300 border border-cyan-800/80 shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Inspecteur Signatures (Faux explorer.exe)</span>
           </button>
           <button
             onClick={() => setActiveView('APIS')}
@@ -691,7 +717,7 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            Appels API Suspects ({suspiciousApis.length})
+            Appels API ({suspiciousApis.length})
           </button>
           <button
             onClick={() => setActiveView('CONFIDENCE_MATRIX')}
@@ -701,7 +727,7 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            Matrice de Confiance ({threatConfidenceList.length})
+            Matrice ({threatConfidenceList.length})
           </button>
         </div>
 
@@ -777,80 +803,78 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
             </div>
 
             {/* Recharts Area Chart */}
-            <ErrorBoundary moduleName="Graphique Recharts Évolution Heuristique">
-              <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={history} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorConfidence" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.0} />
-                      </linearGradient>
-                      <linearGradient id="colorEntropy" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0} />
-                      </linearGradient>
-                      <linearGradient id="colorApi" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                    <XAxis
-                      dataKey="time"
-                      stroke="#64748b"
-                      fontSize={11}
-                      tickLine={false}
-                      fontFamily="JetBrains Mono, monospace"
-                    />
-                    <YAxis
-                      domain={[60, 100]}
-                      stroke="#64748b"
-                      fontSize={11}
-                      tickLine={false}
-                      fontFamily="JetBrains Mono, monospace"
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#0f172a',
-                        borderColor: '#334155',
-                        borderRadius: '8px',
-                        fontSize: '12px',
-                        color: '#f8fafc',
-                        fontFamily: 'JetBrains Mono, monospace',
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="confidence"
-                      name="Confiance Globale"
-                      stroke="#06b6d4"
-                      strokeWidth={2}
-                      fillOpacity={1}
-                      fill="url(#colorConfidence)"
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="entropyImpact"
-                      name="Impact Entropie"
-                      stroke="#f59e0b"
-                      strokeWidth={1.5}
-                      fillOpacity={1}
-                      fill="url(#colorEntropy)"
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="apiAnomalyImpact"
-                      name="Impact Appels API"
-                      stroke="#f43f5e"
-                      strokeWidth={1.5}
-                      fillOpacity={1}
-                      fill="url(#colorApi)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </ErrorBoundary>
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={history} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorConfidence" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.0} />
+                    </linearGradient>
+                    <linearGradient id="colorEntropy" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0} />
+                    </linearGradient>
+                    <linearGradient id="colorApi" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <XAxis
+                    dataKey="time"
+                    stroke="#64748b"
+                    fontSize={11}
+                    tickLine={false}
+                    fontFamily="JetBrains Mono, monospace"
+                  />
+                  <YAxis
+                    domain={[60, 100]}
+                    stroke="#64748b"
+                    fontSize={11}
+                    tickLine={false}
+                    fontFamily="JetBrains Mono, monospace"
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#0f172a',
+                      borderColor: '#334155',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      color: '#f8fafc',
+                      fontFamily: 'JetBrains Mono, monospace',
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="confidence"
+                    name="Confiance Globale"
+                    stroke="#06b6d4"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#colorConfidence)"
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="entropyImpact"
+                    name="Impact Entropie"
+                    stroke="#f59e0b"
+                    strokeWidth={1.5}
+                    fillOpacity={1}
+                    fill="url(#colorEntropy)"
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="apiAnomalyImpact"
+                    name="Impact Appels API"
+                    stroke="#f43f5e"
+                    strokeWidth={1.5}
+                    fillOpacity={1}
+                    fill="url(#colorApi)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </div>
 
           {/* Dual Panels: Top Entropy Sections vs Live API Ticker */}
@@ -1046,6 +1070,9 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
       {/* ========================================================================= */}
       {activeView === 'ENTROPY' && (
         <div className="space-y-6">
+          {/* Calcul d'Entropie & Détecteur de Ransomware / Obfuscation */}
+          <FileEntropyAnalyzer onRunInConsole={onRunInConsole} />
+
           <div className="p-5 bg-slate-900 border border-slate-800 rounded-xl space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
@@ -1185,6 +1212,20 @@ export const HeuristicEngine: React.FC<HeuristicEngineProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SECTION 4-B: VIEW CONTENT - REGISTRY PERSISTENCE SURVEILLANCE */}
+      {/* ========================================================================= */}
+      {activeView === 'REGISTRY' && (
+        <RegistrySurveillancePanel onRunInConsole={onRunInConsole} />
+      )}
+
+      {/* ========================================================================= */}
+      {/* SECTION 4-C: VIEW CONTENT - DIGITAL SIGNATURE INSPECTOR & SPOOFING */}
+      {/* ========================================================================= */}
+      {activeView === 'SIGNATURES' && (
+        <DigitalSignatureInspector onRunInConsole={onRunInConsole} />
       )}
 
       {/* ========================================================================= */}

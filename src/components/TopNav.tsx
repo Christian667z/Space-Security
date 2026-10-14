@@ -26,11 +26,6 @@ import {
   Globe,
   MapPin,
   Wifi,
-  WifiOff,
-  Wrench,
-  ShieldAlert,
-  Flame,
-  Keyboard,
 } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
@@ -44,7 +39,6 @@ interface TopNavProps {
   connectionStatus?: 'connected' | 'connecting' | 'disconnected';
   onOpenCollabModal?: () => void;
   onRunInConsole?: (command: string) => void;
-  onOpenShortcutsModal?: () => void;
 }
 
 interface NavItem {
@@ -77,7 +71,6 @@ export const TopNav: React.FC<TopNavProps> = ({
   connectionStatus = 'connected',
   onOpenCollabModal,
   onRunInConsole,
-  onOpenShortcutsModal,
 }) => {
   const [isMegaMenuOpen, setIsMegaMenuOpen] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
@@ -178,11 +171,11 @@ export const TopNav: React.FC<TopNavProps> = ({
         },
         {
           id: 'heuristic',
-          title: 'Moteur Heuristique',
-          category: 'Entropie & API Hooks',
-          shortDesc: 'Scoring temps réel de l\'entropie de Shannon et interception des crochets API suspects.',
+          title: 'Moteur Heuristique & Détection Live',
+          category: 'Entropie, Registre & Signatures',
+          shortDesc: 'Calcul d\'entropie de Shannon (ransomware/obfuscation), surveillance du Registre (Run/Winlogon) et inspecteur de signature Authenticode (faux explorer.exe).',
           icon: Binary,
-          tag: 'HEURISTIQUE',
+          tag: 'ENTROPIE & SPOOFING',
           tagClass: 'text-amber-400 bg-amber-950/70 border-amber-800/50',
         },
         {
@@ -213,33 +206,6 @@ export const TopNav: React.FC<TopNavProps> = ({
           tagClass: 'text-rose-400 bg-rose-950/70 border-rose-800/50',
         },
         {
-          id: 'themes-hunter',
-          title: 'Chasseur Thèmes (Rogue Explorer)',
-          category: 'Cas Forensique Réel',
-          shortDesc: 'Nettoyage des faux explorer.exe & icsys dans Resources\\Themes, bypass TrustedInstaller & Defender CFA.',
-          icon: Flame,
-          tag: 'CAS RÉEL',
-          tagClass: 'text-rose-400 bg-rose-950/70 border-rose-800/50',
-        },
-        {
-          id: 'deep-detection',
-          title: 'Détection Profonde (Menus 10-14)',
-          category: 'Menus 10 à 14',
-          shortDesc: 'Usurpation de processus, processus cachés brute-force PID, quarantaine restaurable & règles ASR.',
-          icon: ShieldAlert,
-          tag: 'MENUS 10-14',
-          tagClass: 'text-cyan-400 bg-cyan-950/70 border-cyan-800/50',
-        },
-        {
-          id: 'sandbox-isolation',
-          title: 'Isolateur & Bac à Sable (Sandbox Live)',
-          category: 'Kill-Switch Réseau & Confinement',
-          shortDesc: 'Coupure d\'urgence Wi-Fi/Ethernet (netsh/WMI), conservation 127.0.0.1 et bac à sable de processus.',
-          icon: WifiOff,
-          tag: 'KILL-SWITCH',
-          tagClass: 'text-rose-400 bg-rose-950/70 border-rose-800/50',
-        },
-        {
           id: 'forensics',
           title: 'Forensique RAM',
           category: 'Mémoire Volatile',
@@ -265,15 +231,6 @@ export const TopNav: React.FC<TopNavProps> = ({
           icon: Wifi,
           tag: 'SCAN WIFI',
           tagClass: 'text-indigo-400 bg-indigo-950/70 border-indigo-800/50',
-        },
-        {
-          id: 'remediation',
-          title: 'Restauration Post-Infection',
-          category: 'Déblocage GPO & Fichier HOSTS',
-          shortDesc: 'Déblocage Taskmgr, Regedit, CMD après attaque virale, assainissement du fichier HOSTS et flush DNS.',
-          icon: Wrench,
-          tag: 'RESTAURATION GPO',
-          tagClass: 'text-amber-400 bg-amber-950/70 border-amber-800/50',
         },
         {
           id: 'hardening',
@@ -520,27 +477,6 @@ export const TopNav: React.FC<TopNavProps> = ({
                   : 'Synchro En Cours'}
               </span>
               <Users className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            </button>
-
-            {/* Keyboard Shortcuts Trigger Button */}
-            <button
-              onClick={onOpenShortcutsModal}
-              title="Gestionnaire de Raccourcis Clavier (Appuyez sur ? ou F1) : Actions instantanées scan, clear, export-report"
-              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono transition-all border shadow-xs bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border-slate-800 hover:border-cyan-600/60 cursor-pointer"
-            >
-              <Keyboard className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Raccourcis</span>
-              <kbd className="px-1 py-0.2 text-[9px] rounded bg-slate-800 text-cyan-400 border border-slate-700 font-bold">?</kbd>
-            </button>
-
-            {/* Kill-Switch Quick Action Shortcut */}
-            <button
-              onClick={() => onSelectTab('sandbox-isolation')}
-              title="Isolateur & Kill-Switch Réseau d'Urgence : Couper le trafic sortant/entrant tout en maintenant localhost (Alt+K)"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all border shadow-sm bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/80 hover:border-rose-500"
-            >
-              <WifiOff className="w-3.5 h-3.5 text-rose-400" />
-              <span className="hidden md:inline">Kill-Switch</span>
             </button>
 
             {/* Primary Action: Download ZIP */}
