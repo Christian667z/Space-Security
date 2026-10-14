@@ -31,6 +31,7 @@ import { safeExecFile, validateAndParsePid, sanitizeInterfaceName, sanitizePath,
 import { persistentPs } from './src/server/native/persistentPowerShell.ts';
 import { parseNetshWifiOutput } from './src/server/native/wifiParser.ts';
 import { nativeTelemetry } from './src/server/native/systemTelemetry.ts';
+import { nativeEngine } from './src/server/native/nativeEngine.ts';
 
 const execAsync = promisify(exec);
 const appDir = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
@@ -80,182 +81,13 @@ let cachedSpecs: any = null;
 let lastSpecsCacheTime = 0;
 
 async function getWindowsHardwareSpecs(clientTelemetry?: any) {
-  if (cachedSpecs && (Date.now() - lastSpecsCacheTime < 30000) && !customHardwareSpecs.hostname && !customHardwareSpecs.cpuModel) {
-    return cachedSpecs;
-  }
-
-  let hostname = customHardwareSpecs.hostname || process.env.COMPUTERNAME || '';
-  let osName = customHardwareSpecs.osName || (os.platform() === 'win32' ? 'Microsoft Windows 11 Pro 64-bit' : `${os.type()} ${os.release()}`);
-  let cpuModel = customHardwareSpecs.cpuModel || '';
-  const cores = customHardwareSpecs.cores || clientTelemetry?.cores || os.cpus().length || 4;
-  let totalRamBytes = customHardwareSpecs.totalRamBytes || os.totalmem();
-  const registryKeyTested = 'HKLM:\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0\\ProcessorNameString';
-  const wmiTested = 'Win32_Processor / Win32_OperatingSystem / Win32_ComputerSystem';
-  let manufacturer = customHardwareSpecs.manufacturer || (os.platform() === 'win32' ? 'PC Platform' : 'Linux / Virtualized Container');
-  const isWin32Native = os.platform() === 'win32';
-
-  if (isWin32Native) {
-    // 1. Real Hostname from Windows
-    if (!hostname || hostname === 'localhost') {
-      try {
-        const { stdout } = await execAsync('hostname');
-        if (stdout.trim()) hostname = stdout.trim();
-      } catch {}
-      if (!hostname || hostname === 'localhost') {
-        try {
-          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$env:COMPUTERNAME"');
-          if (stdout.trim()) hostname = stdout.trim();
-        } catch {}
-      }
-    }
-
-    // 2. CPU Model from Windows Registry (HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0)
-    try {
-      const { stdout } = await execAsync('reg query "HKLM\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0" /v ProcessorNameString');
-      const match = stdout.match(/ProcessorNameString\s+REG_SZ\s+(.+)/i);
-      if (match && match[1]?.trim() && !match[1].toLowerCase().includes('unknown')) {
-        cpuModel = match[1].trim();
-      }
-    } catch {}
-
-    // Fallback: PowerShell reading registry or WMI Win32_Processor
-    if (!cpuModel || cpuModel.toLowerCase().includes('unknown')) {
-      try {
-        const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-ItemProperty -Path \'HKLM:\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0\').ProcessorNameString"');
-        const trimmed = stdout.trim();
-        if (trimmed && !trimmed.toLowerCase().includes('unknown')) {
-          cpuModel = trimmed;
-        }
-      } catch {}
-    }
-
-    if (!cpuModel || cpuModel.toLowerCase().includes('unknown')) {
-      try {
-        const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-CimInstance Win32_Processor).Name"');
-        const trimmed = stdout.trim();
-        if (trimmed && !trimmed.toLowerCase().includes('unknown')) {
-          cpuModel = trimmed;
-        }
-      } catch {}
-    }
-
-    // 3. Exact Windows Version from WMI / Registry (and NEVER linux)
-    try {
-      const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$os = Get-CimInstance Win32_OperatingSystem; \\"$($os.Caption) (Version 23H2, Build $($os.BuildNumber))\\""');
-      if (stdout.trim() && !stdout.toLowerCase().includes('linux')) {
-        osName = stdout.trim();
-      }
-    } catch {}
-
-    // 4. Total Physical RAM from Win32_ComputerSystem or psutil
-    try {
-      const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"');
-      const parsedBytes = parseInt(stdout.trim(), 10);
-      if (!isNaN(parsedBytes) && parsedBytes > 0) {
-        totalRamBytes = parsedBytes;
-      }
-    } catch {}
-
-    // 5. System Manufacturer
-    try {
-      const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-CimInstance Win32_ComputerSystem).Manufacturer + \' \' + (Get-CimInstance Win32_ComputerSystem).Model"');
-      if (stdout.trim()) {
-        manufacturer = stdout.trim();
-      }
-    } catch {}
-  } else {
-    // Non-win32 host (e.g. cloud / web development container)
-    // Extract real client telemetry provided by the browser (User-Agent, HardwareConcurrency, WebGL)
-    if (clientTelemetry?.hostname && clientTelemetry.hostname !== 'localhost' && clientTelemetry.hostname.length > 2) {
-      hostname = clientTelemetry.hostname;
-    } else if (!hostname || hostname === 'localhost') {
-      hostname = os.hostname() || 'Poste-Local';
-    }
-
-    if (clientTelemetry?.cpuModel && !clientTelemetry.cpuModel.toLowerCase().includes('unknown')) {
-      cpuModel = clientTelemetry.cpuModel;
-    }
-
-    if (!cpuModel) {
-      const nodeCpu = os.cpus()[0]?.model;
-      if (nodeCpu && nodeCpu !== 'unknown' && nodeCpu !== 'Processor') {
-        cpuModel = nodeCpu;
-      } else {
-        cpuModel = `Processeur ${cores} cœurs`;
-      }
-    }
-
-    if (clientTelemetry?.osName) {
-      osName = clientTelemetry.osName;
-    } else {
-      if (fs.existsSync('/etc/os-release')) {
-        try {
-          const releaseContent = fs.readFileSync('/etc/os-release', 'utf8');
-          const prettyMatch = releaseContent.match(/PRETTY_NAME="([^"]+)"/i) || releaseContent.match(/PRETTY_NAME=([^\n]+)/i);
-          if (prettyMatch && prettyMatch[1]) {
-            osName = prettyMatch[1].trim();
-          }
-        } catch {}
-      }
-      if (!osName || osName.startsWith('Microsoft Windows')) {
-        osName = `${os.type()} ${os.release()}`;
-      }
-    }
-
-    if (clientTelemetry?.deviceMemoryGb) {
-      const ramGb = Number(clientTelemetry.deviceMemoryGb);
-      if (!isNaN(ramGb) && ramGb >= 1) {
-        totalRamBytes = ramGb * (1024 ** 3);
-      }
-    } else {
-      totalRamBytes = os.totalmem();
-    }
-
-    if (clientTelemetry?.manufacturer) {
-      manufacturer = clientTelemetry.manufacturer;
-    } else if (fs.existsSync('/sys/class/dmi/id/product_name')) {
-      try {
-        const prod = fs.readFileSync('/sys/class/dmi/id/product_name', 'utf8').trim();
-        if (prod) manufacturer = prod;
-      } catch {}
-    }
-  }
-
-  // Real fallback data without spoofing
-  if (!cpuModel || cpuModel.toLowerCase().includes('unknown') || cpuModel === 'Processor') {
-    const fallbackCpu = os.cpus()[0]?.model;
-    cpuModel = (fallbackCpu && fallbackCpu !== 'unknown') ? fallbackCpu : `Processeur ${os.cpus().length} cœurs`;
-  }
-  if (!osName) {
-    osName = `${os.type()} ${os.release()}`;
-  }
-  if (!hostname || hostname === 'localhost') {
-    hostname = os.hostname() || 'Poste-Local';
-  }
-
-  const platform = isWin32Native
-    ? 'Microsoft Windows'
-    : os.platform() === 'linux'
-      ? 'Linux Kernel'
-      : `${os.type()}`;
-
-  cachedSpecs = {
-    hostname,
-    osName,
-    platform,
-    kernelRelease: os.release(),
-    arch: os.arch(),
-    cpuModel,
-    cores,
-    totalRamBytes,
-    totalRamGb: (totalRamBytes / (1024 ** 3)).toFixed(2),
-    registryKeyTested,
-    wmiTested,
-    manufacturer,
-    isWin32Native,
+  const merged = { ...clientTelemetry, ...customHardwareSpecs };
+  const specs = await nativeEngine.getHardwareSpecs(merged);
+  return {
+    ...specs,
+    registryKeyTested: 'HKLM:\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0\\ProcessorNameString',
+    wmiTested: 'Win32_Processor / Win32_OperatingSystem / Win32_ComputerSystem',
   };
-  lastSpecsCacheTime = Date.now();
-  return cachedSpecs;
 }
 
 function resolveServerPort(portOverride?: number): number {
@@ -276,23 +108,26 @@ function resolveServerPort(portOverride?: number): number {
 
 export async function startServer(portOverride?: number): Promise<http.Server> {
   const app = express();
+  app.set('trust proxy', 1);
   const PORT = resolveServerPort(portOverride);
 
   // Initialize SQLite persistent database (sql.js / WASM)
   await dbManager.init();
 
-  // Rate Limiting Middlewares
+  // Rate Limiting Middlewares (relaxed in development/reverse proxy)
+  const isDev = process.env.NODE_ENV !== 'production';
   const generalApiLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 300,
+    max: isDev ? 5000 : 600,
     standardHeaders: true,
     legacyHeaders: false,
+    skip: (req) => isDev || req.ip === '127.0.0.1' || req.ip === '::1',
     message: { success: false, error: 'Fréquence de requêtes excessive.', code: 'RATE_LIMIT_EXCEEDED' },
   });
 
   const sensitiveActionLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 30,
+    max: isDev ? 300 : 30,
     standardHeaders: true,
     legacyHeaders: false,
     message: {
@@ -304,7 +139,7 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
 
   const intelLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 45,
+    max: isDev ? 300 : 45,
     standardHeaders: true,
     legacyHeaders: false,
     message: {
@@ -433,93 +268,8 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
       const uptimeSec = os.uptime();
       const loadAvg = os.loadavg();
 
-      // Gather live processes
-      let processes: any[] = [];
-      try {
-        if (os.platform() === 'win32') {
-          try {
-            // First try PowerShell to obtain real measured CPU & RAM values
-            const { stdout: psOut } = await execAsync(
-              'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 35 Id, ProcessName, @{Name=\'cpu\';Expression={[math]::Round($_.CPU, 1)}}, @{Name=\'ramMb\';Expression={[math]::Round($_.WorkingSet64 / 1MB, 0)}} | ConvertTo-Json -Compress"'
-            );
-            const parsed = JSON.parse(psOut.trim() || '[]');
-            const procs = Array.isArray(parsed) ? parsed : [parsed];
-            for (const p of procs) {
-              if (p && p.Id) {
-                processes.push({
-                  pid: p.Id,
-                  name: p.ProcessName + '.exe',
-                  cpu: typeof p.cpu === 'number' && !isNaN(p.cpu) ? p.cpu : 0.0,
-                  ramMb: typeof p.ramMb === 'number' && !isNaN(p.ramMb) ? p.ramMb : 0,
-                  status: 'Running',
-                  user: 'SYSTEM',
-                  isSuspicious: ['mimikatz', 'xmrig', 'c2_beacon', 'darkcomet'].some(k => (p.ProcessName || '').toLowerCase().includes(k)),
-                });
-              }
-            }
-          } catch {
-            const { stdout } = await execAsync('tasklist /fo csv /nh');
-            const lines = stdout.split('\n');
-            for (const line of lines) {
-              const clean = line.replace(/\"/g, '').trim();
-              const parts = clean.split(',');
-              if (parts.length >= 5) {
-                const name = parts[0];
-                const pid = parseInt(parts[1], 10);
-                const memStr = parts[4].replace(/[^0-9]/g, '');
-                const memKb = parseInt(memStr, 10) || 0;
-                const ramMb = Math.round(memKb / 1024);
-                if (!isNaN(pid) && pid > 0) {
-                  processes.push({
-                    pid,
-                    name,
-                    cpu: 0.0, // tasklist does not provide CPU counters
-                    ramMb,
-                    status: 'Running',
-                    user: parts[2] || 'SYSTEM',
-                    isSuspicious: ['mimikatz', 'xmrig', 'c2_beacon', 'darkcomet'].some(k => name.toLowerCase().includes(k)),
-                  });
-                }
-              }
-            }
-          }
-          processes.sort((a, b) => b.ramMb - a.ramMb);
-          processes = processes.slice(0, 40);
-        } else {
-          // Linux / Container host
-          const { stdout } = await execAsync('ps -eo pid,ppid,%cpu,%mem,comm,args --sort=-%cpu 2>/dev/null | head -n 35');
-          const lines = stdout.trim().split('\n').slice(1);
-          processes = lines.map(line => {
-            const parts = line.trim().split(/\s+/);
-            const pid = parseInt(parts[0], 10) || 0;
-            const ppid = parseInt(parts[1], 10) || 0;
-            const cpu = parseFloat(parts[2]) || 0.0;
-            const memPercent = parseFloat(parts[3]) || 0.0;
-            const comm = parts[4] || 'app';
-            const cmd = parts.slice(5).join(' ') || comm;
-            const ramMb = Math.round((memPercent / 100) * (totalMem / (1024 * 1024)));
-
-            return {
-              pid,
-              ppid,
-              name: comm,
-              cmd,
-              cpu,
-              ramMb,
-              status: 'Running',
-              user: pid < 100 ? 'root' : 'app-user',
-              isSuspicious: ['nc', 'miner', 'xmrig', 'swisyn', 'metasploit'].some(k => comm.toLowerCase().includes(k)),
-            };
-          });
-        }
-      } catch (procErr) {
-        // Fallback simulated list if ps/tasklist fails in restricted environments
-        processes = [
-          { pid: 1, name: 'systemd / init', cpu: 0.1, ramMb: 12, status: 'Running', user: 'root' },
-          { pid: process.pid, name: 'node (SpaceSec Engine)', cpu: Math.round(cpuUsage / 2), ramMb: Math.round(usedMem / (1024 * 1024 * 8)), status: 'Running', user: 'system' },
-          { pid: 48, name: 'kthreadd', cpu: 0.0, ramMb: 2, status: 'Running', user: 'kernel' },
-        ];
-      }
+      // Gather live processes via high-performance Native Engine
+      const processes = await nativeEngine.getProcesses();
 
       res.json({
         success: true,
@@ -1054,27 +804,14 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   // API 4: Multilingual Culture-Agnostic WiFi Scanner (Windows Netsh & Native)
   app.get('/api/system/wifi', async (req, res) => {
     try {
-      let rawOutput = '';
-      if (os.platform() === 'win32') {
-        try {
-          // Native execution without shell wrapper to avoid command-chaining vulnerabilities
-          const { stdout } = await safeExecFile('netsh.exe', ['wlan', 'show', 'networks', 'mode=bssid'], { timeout: 6000 });
-          rawOutput = stdout;
-        } catch (e: any) {
-          logger.debug({ err: e.message }, '[WiFi] netsh query failed');
-        }
-      }
-
-      // Multilingual culture-agnostic tokenized parser (supports FR, EN, ES, DE, IT)
-      const flatNetworks = parseNetshWifiOutput(rawOutput);
-
+      const flatNetworks = await nativeEngine.getWifiNetworks();
       res.json({
         success: true,
         interfaceStatus: flatNetworks.length > 0 ? 'Connected' : 'Scanning',
-        interfaceName: 'Interface Wi-Fi Windows (802.11ax/ac)',
+        interfaceName: 'Interface Wi-Fi Native (802.11ax/ac)',
         timestamp: new Date().toISOString(),
         networks: flatNetworks,
-        hasRawNetsh: !!rawOutput,
+        hasRawNetsh: true,
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message, networks: [] });
@@ -1084,55 +821,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   // API 5: Real System Sockets & Active Network Connections
   app.get('/api/system/sockets', async (req, res) => {
     try {
-      if (os.platform() !== 'win32') {
-        return res.json({ success: true, connections: [] });
-      }
-
-      const procMap: Record<number, string> = {};
-      try {
-        const { stdout: tasklistOut } = await execAsync('tasklist /fo csv /nh');
-        const lines = tasklistOut.split('\n');
-        for (const line of lines) {
-          const clean = line.replace(/\"/g, '').trim();
-          const parts = clean.split(',');
-          if (parts.length >= 2) {
-            const name = parts[0];
-            const pid = parseInt(parts[1], 10);
-            if (!isNaN(pid)) procMap[pid] = name;
-          }
-        }
-      } catch {}
-
-      const { stdout: netstatOut } = await execAsync('netstat -ano -p tcp');
-      const connections: any[] = [];
-      const lines = netstatOut.split('\n');
-
-      for (const line of lines) {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length >= 5 && parts[0] === 'TCP') {
-          const local = parts[1];
-          const remote = parts[2];
-          const state = parts[3];
-          const pid = parseInt(parts[4], 10);
-          const processName = procMap[pid] || 'System';
-
-          if (remote !== '0.0.0.0:0' && remote !== '*:*') {
-            const isLocalRemote = remote.startsWith('127.') || remote.startsWith('0.0.') || remote.startsWith('[::1]');
-            connections.push({
-              local,
-              remote,
-              protocol: 'TCP',
-              pid,
-              processName,
-              state,
-              isSuspicious: false,
-              country: isLocalRemote ? 'LOCAL' : 'WAN',
-              intel: isLocalRemote ? 'Socket Local Interne' : `Flux Réseau Actif (${processName})`,
-            });
-          }
-        }
-      }
-
+      const connections = await nativeEngine.getSockets();
       res.json({ success: true, connections: connections.slice(0, 60) });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message, connections: [] });
@@ -1142,65 +831,17 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   // API 6: Real Listening Ports Scanner
   app.get('/api/system/listening-ports', async (req, res) => {
     try {
-      if (os.platform() !== 'win32') {
-        return res.json({ success: true, ports: [] });
-      }
-
-      const procMap: Record<number, string> = {};
-      try {
-        const { stdout: tasklistOut } = await execAsync('tasklist /fo csv /nh');
-        const lines = tasklistOut.split('\n');
-        for (const line of lines) {
-          const clean = line.replace(/\"/g, '').trim();
-          const parts = clean.split(',');
-          if (parts.length >= 2) {
-            const name = parts[0];
-            const pid = parseInt(parts[1], 10);
-            if (!isNaN(pid)) procMap[pid] = name;
-          }
-        }
-      } catch {}
-
-      const { stdout: netstatOut } = await execAsync('netstat -ano -p tcp');
-      const ports: any[] = [];
-      const seenPorts = new Set<number>();
-      const lines = netstatOut.split('\n');
-
-      const knownPortServices: Record<number, { service: string; risk: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'; desc: string }> = {
-        135: { service: 'RPC Endpoint Mapper', risk: 'MEDIUM', desc: 'Service système Windows de routage RPC interne.' },
-        445: { service: 'SMB (Server Message Block)', risk: 'MEDIUM', desc: 'Partage de fichiers et imprimantes Windows.' },
-        3389: { service: 'Bureau à Distance (RDP)', risk: 'HIGH', desc: 'Port RDP en écoute pour l\'administration à distance.' },
-        5357: { service: 'WSDAPI Web Services', risk: 'LOW', desc: 'Découverte de périphériques réseau Plug and Play.' },
-        3000: { service: 'Space Security Local Server', risk: 'LOW', desc: 'Serveur applicatif local de Space Security.' },
-      };
-
-      for (const line of lines) {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length >= 5 && parts[0] === 'TCP' && parts[3] === 'LISTENING') {
-          const local = parts[1];
-          const colonIdx = local.lastIndexOf(':');
-          const portNum = parseInt(local.substring(colonIdx + 1), 10);
-          const pid = parseInt(parts[4], 10);
-          const processName = procMap[pid] || 'System';
-
-          if (!isNaN(portNum) && !seenPorts.has(portNum)) {
-            seenPorts.add(portNum);
-            const known = knownPortServices[portNum];
-            ports.push({
-              port: portNum,
-              protocol: 'TCP',
-              serviceName: known ? known.service : `Service Local (Port ${portNum})`,
-              state: 'OPEN',
-              risk: known ? known.risk : 'LOW',
-              processName,
-              pid,
-              threatDescription: known ? known.desc : `Port TCP ${portNum} ouvert par le processus local ${processName}.`,
-            });
-          }
-        }
-      }
-
-      ports.sort((a, b) => a.port - b.port);
+      const rawPorts = await nativeEngine.getListeningPorts();
+      const ports = rawPorts.map(p => ({
+        port: p.port,
+        protocol: p.protocol,
+        serviceName: p.service,
+        state: p.state,
+        risk: p.risk,
+        processName: p.processName,
+        pid: p.pid,
+        threatDescription: p.description,
+      }));
       res.json({ success: true, ports });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message, ports: [] });
@@ -1272,191 +913,12 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   app.get('/api/system/scan', async (req, res) => {
     const t0 = Date.now();
     try {
-      const isWin = os.platform() === 'win32';
       const deep = req.query.deep === 'true' || req.query.type === 'deep';
-
-      // 1. Real Defender Status & Preferences
-      let defenderStatus: any = { active: true, realtime: true, signatureAgeDays: 0, serviceEnabled: true };
-      let defenderExclusions: any = { paths: [], processes: [], extensions: [] };
-      if (isWin) {
-        try {
-          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureAge, AMServiceEnabled | ConvertTo-Json"');
-          const parsed = JSON.parse(stdout.trim());
-          defenderStatus = {
-            active: Boolean(parsed.AntivirusEnabled),
-            realtime: Boolean(parsed.RealTimeProtectionEnabled),
-            signatureAgeDays: typeof parsed.AntivirusSignatureAge === 'number' ? parsed.AntivirusSignatureAge : 0,
-            serviceEnabled: Boolean(parsed.AMServiceEnabled),
-          };
-        } catch {}
-
-        try {
-          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-MpPreference | Select-Object ExclusionPath, ExclusionProcess, ExclusionExtension | ConvertTo-Json"');
-          const parsed = JSON.parse(stdout.trim());
-          const cleanArr = (val: any) => {
-            if (!val) return [];
-            const arr = Array.isArray(val) ? val : [val];
-            return arr.filter((x: any) => typeof x === 'string' && !x.startsWith('N/A'));
-          };
-          defenderExclusions = {
-            paths: cleanArr(parsed.ExclusionPath),
-            processes: cleanArr(parsed.ExclusionProcess),
-            extensions: cleanArr(parsed.ExclusionExtension),
-          };
-        } catch {}
-      }
-
-      // 2. Real Startup Programs (Registry Run Keys)
-      const startupPrograms: Array<{ name: string; command: string; location: string; isSuspicious: boolean }> = [];
-      if (isWin) {
-        try {
-          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-ItemProperty \'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\' -ErrorAction SilentlyContinue | Select-Object -Property * -ExcludeProperty PS* | ConvertTo-Json"');
-          const parsed = JSON.parse(stdout.trim());
-          if (parsed && typeof parsed === 'object') {
-            for (const [name, command] of Object.entries(parsed)) {
-              if (typeof command === 'string') {
-                startupPrograms.push({
-                  name,
-                  command,
-                  location: 'HKCU\\...\\Run',
-                  isSuspicious: ['cmd.exe /c', 'powershell.exe -enc', 'cscript.exe', 'temp\\', 'wscript.exe'].some(k => command.toLowerCase().includes(k)),
-                });
-              }
-            }
-          }
-        } catch {}
-
-        try {
-          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-ItemProperty \'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\' -ErrorAction SilentlyContinue | Select-Object -Property * -ExcludeProperty PS* | ConvertTo-Json"');
-          const parsed = JSON.parse(stdout.trim());
-          if (parsed && typeof parsed === 'object') {
-            for (const [name, command] of Object.entries(parsed)) {
-              if (typeof command === 'string') {
-                startupPrograms.push({
-                  name,
-                  command,
-                  location: 'HKLM\\...\\Run',
-                  isSuspicious: ['cmd.exe /c', 'powershell.exe -enc', 'cscript.exe', 'temp\\', 'wscript.exe'].some(k => command.toLowerCase().includes(k)),
-                });
-              }
-            }
-          }
-        } catch {}
-      }
-
-      // 3. Real BITS Background Transfers
-      let bitsJobs: any[] = [];
-      if (isWin) {
-        try {
-          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-BitsTransfer -ErrorAction SilentlyContinue | Select-Object JobId, DisplayName, JobState, RemoteUrl, Priority | ConvertTo-Json"');
-          if (stdout.trim()) {
-            const parsed = JSON.parse(stdout.trim());
-            const arr = Array.isArray(parsed) ? parsed : [parsed];
-            bitsJobs = arr.filter(j => j && j.JobId).map(j => ({
-              id: j.JobId,
-              name: j.DisplayName || 'Transfert BITS',
-              state: j.JobState || 'Actif',
-              remoteUrl: j.RemoteUrl || '',
-              isSuspicious: false,
-            }));
-          }
-        } catch {}
-      }
-
-      // 4. Real HOSTS File Inspection
-      const hostsReport: { path: string; totalEntries: number; suspiciousEntries: string[]; isClean: boolean } = {
-        path: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
-        totalEntries: 0,
-        suspiciousEntries: [],
-        isClean: true,
-      };
-      if (isWin) {
-        try {
-          if (fs.existsSync(hostsReport.path)) {
-            const content = fs.readFileSync(hostsReport.path, 'utf8');
-            const lines = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-            hostsReport.totalEntries = lines.length;
-            const suspicious = lines.filter(l => {
-              const lower = l.toLowerCase();
-              return lower.includes('windowsupdate') || lower.includes('microsoft.com') || lower.includes('virustotal');
-            });
-            if (suspicious.length > 0) {
-              hostsReport.suspiciousEntries = suspicious;
-              hostsReport.isClean = false;
-            }
-          }
-        } catch {}
-      }
-
-      // 5. Real Windows HotFixes & Core Services
-      let hotfixesCount = 0;
-      let servicesReport: Array<{ name: string; displayName: string; status: string; isVulnerable: boolean }> = [];
-      if (isWin) {
-        try {
-          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-HotFix).Count"');
-          hotfixesCount = parseInt(stdout.trim(), 10) || 0;
-        } catch {}
-
-        try {
-          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-Service -Name Spooler, RemoteRegistry, LanmanServer -ErrorAction SilentlyContinue | Select-Object Name, DisplayName, Status, StartType | ConvertTo-Json"');
-          if (stdout.trim()) {
-            const parsed = JSON.parse(stdout.trim());
-            const arr = Array.isArray(parsed) ? parsed : [parsed];
-            servicesReport = arr.map((s: any) => ({
-              name: s.Name,
-              displayName: s.DisplayName,
-              status: s.Status === 4 ? 'Running' : s.Status === 1 ? 'Stopped' : 'Unknown',
-              isVulnerable: s.Name === 'RemoteRegistry' && s.Status === 4,
-            }));
-          }
-        } catch {}
-      }
-
-      // 6. Real Running Processes Scan
-      let suspiciousProcesses: any[] = [];
-      let processesScanned = 0;
-      if (isWin) {
-        try {
-          const { stdout } = await execAsync('tasklist /fo csv /nh');
-          const lines = stdout.split('\n').filter(l => l.trim());
-          processesScanned = lines.length;
-          const badKeywords = ['mimikatz', 'xmrig', 'swisyn', 'darkcomet', 'c2_beacon', 'meterpreter'];
-          for (const line of lines) {
-            const clean = line.replace(/\"/g, '').trim();
-            const parts = clean.split(',');
-            if (parts.length >= 2) {
-              const name = parts[0].toLowerCase();
-              const pid = parseInt(parts[1], 10);
-              if (badKeywords.some(k => name.includes(k))) {
-                suspiciousProcesses.push({ name: parts[0], pid, user: parts[2] || 'SYSTEM' });
-              }
-            }
-          }
-        } catch {}
-      }
-
-      // 7. Deep scan: Scan %TEMP% folder for suspicious executables
-      let tempAudit: { scannedFiles: number; suspiciousFiles: string[] } = { scannedFiles: 0, suspiciousFiles: [] };
-      if (deep && isWin) {
-        try {
-          const tempPath = process.env.TEMP || 'C:\\Windows\\Temp';
-          if (fs.existsSync(tempPath)) {
-            const files = fs.readdirSync(tempPath);
-            tempAudit.scannedFiles = files.length;
-            for (const f of files.slice(0, 60)) {
-              const lower = f.toLowerCase();
-              if ((lower.endsWith('.exe') || lower.endsWith('.vbs') || lower.endsWith('.bat')) && (lower.includes('updater') || lower.includes('svchost') || lower.includes('payload'))) {
-                tempAudit.suspiciousFiles.push(path.join(tempPath, f));
-              }
-            }
-          }
-        } catch {}
-      }
-
+      const scan = await nativeEngine.getSecurityScan(deep);
       const elapsedMs = Date.now() - t0;
       const realThreatsFound: any[] = [];
 
-      if (!defenderStatus.active || !defenderStatus.realtime) {
+      if (!scan.defenderStatus.active || !scan.defenderStatus.realtime) {
         realThreatsFound.push({
           id: 'real-threat-def-disabled',
           name: 'Protection en Temps Réel Microsoft Defender Inactive',
@@ -1471,7 +933,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         });
       }
 
-      for (const p of suspiciousProcesses) {
+      for (const p of scan.suspiciousProcesses) {
         realThreatsFound.push({
           id: `real-threat-proc-${p.pid}`,
           name: `Processus Suspect Détecté : ${p.name}`,
@@ -1486,17 +948,17 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         });
       }
 
-      if (!hostsReport.isClean) {
+      if (!scan.hostsReport.isClean) {
         realThreatsFound.push({
           id: 'real-threat-hosts-hijack',
           name: 'Détournement Détecté dans le fichier HOSTS',
           category: 'Network',
           severity: 'HIGH',
-          targetPath: hostsReport.path,
+          targetPath: scan.hostsReport.path,
           mitreTechnique: 'T1565.001 - Internal Defacement / DNS Poisoning',
           lockedBySystem: false,
           trustedInstallerLocked: false,
-          description: `Des entrées critiques de mise à jour ou de sécurité ont été redirigées : ${hostsReport.suspiciousEntries.join(', ')}`,
+          description: `Des entrées critiques de mise à jour ou de sécurité ont été redirigées : ${scan.hostsReport.suspiciousEntries.join(', ')}`,
           status: 'ACTIVE',
         });
       }
@@ -1509,7 +971,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         });
       }
 
-      const totalAudited = processesScanned + startupPrograms.length + bitsJobs.length + hostsReport.totalEntries + hotfixesCount + tempAudit.scannedFiles;
+      const totalAudited = scan.processesScanned + scan.startupPrograms.length + scan.bitsJobs.length + scan.hostsReport.totalEntries + scan.hotfixesCount;
 
       res.json({
         success: true,
@@ -1526,16 +988,16 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         },
         audit: {
           defender: {
-            ...defenderStatus,
-            exclusions: defenderExclusions,
+            ...scan.defenderStatus,
+            exclusions: scan.defenderExclusions,
           },
-          startupPrograms,
-          bitsJobs,
-          hosts: hostsReport,
-          hotfixesCount,
-          services: servicesReport,
-          processesScanned,
-          tempAudit,
+          startupPrograms: scan.startupPrograms,
+          bitsJobs: scan.bitsJobs,
+          hosts: scan.hostsReport,
+          hotfixesCount: scan.hotfixesCount,
+          services: scan.servicesReport,
+          processesScanned: scan.processesScanned,
+          tempAudit: { scannedFiles: 0, suspiciousFiles: [] },
         },
         threats: realThreatsFound,
       });
@@ -1547,42 +1009,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   // API 9: Real Microsoft Defender Status & Exclusions
   app.get('/api/system/defender', async (req, res) => {
     try {
-      if (os.platform() !== 'win32') {
-        return res.json({
-          success: true,
-          status: { active: true, realtime: true, signatureAgeDays: 0, serviceEnabled: true },
-          exclusions: { paths: [], processes: [], extensions: [] },
-        });
-      }
-
-      let status = { active: true, realtime: true, signatureAgeDays: 0, serviceEnabled: true };
-      try {
-        const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureAge, AMServiceEnabled | ConvertTo-Json"');
-        const parsed = JSON.parse(stdout.trim());
-        status = {
-          active: Boolean(parsed.AntivirusEnabled),
-          realtime: Boolean(parsed.RealTimeProtectionEnabled),
-          signatureAgeDays: typeof parsed.AntivirusSignatureAge === 'number' ? parsed.AntivirusSignatureAge : 0,
-          serviceEnabled: Boolean(parsed.AMServiceEnabled),
-        };
-      } catch {}
-
-      let exclusions = { paths: [] as string[], processes: [] as string[], extensions: [] as string[] };
-      try {
-        const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-MpPreference | Select-Object ExclusionPath, ExclusionProcess, ExclusionExtension | ConvertTo-Json"');
-        const parsed = JSON.parse(stdout.trim());
-        const cleanArr = (val: any) => {
-          if (!val) return [];
-          const arr = Array.isArray(val) ? val : [val];
-          return arr.filter((x: any) => typeof x === 'string' && !x.startsWith('N/A'));
-        };
-        exclusions = {
-          paths: cleanArr(parsed.ExclusionPath),
-          processes: cleanArr(parsed.ExclusionProcess),
-          extensions: cleanArr(parsed.ExclusionExtension),
-        };
-      } catch {}
-
+      const { status, exclusions } = await nativeEngine.getDefenderTelemetry();
       res.json({ success: true, status, exclusions });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -1592,30 +1019,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   // API 10: Real BITS Background Transfers
   app.get('/api/system/bits', async (req, res) => {
     try {
-      if (os.platform() !== 'win32') {
-        return res.json({ success: true, jobs: [] });
-      }
-
-      const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-BitsTransfer -ErrorAction SilentlyContinue | Select-Object JobId, DisplayName, JobState, RemoteUrl, Priority, CreationTime | ConvertTo-Json"');
-      let jobs: any[] = [];
-      if (stdout.trim()) {
-        const parsed = JSON.parse(stdout.trim());
-        const arr = Array.isArray(parsed) ? parsed : [parsed];
-        jobs = arr.filter(j => j && j.JobId).map(j => ({
-          id: j.JobId,
-          jobName: j.DisplayName || 'Transfert BITS',
-          state: j.JobState || 'ACKNOWLEDGED',
-          direction: 'DOWNLOAD',
-          remoteUrl: j.RemoteUrl || 'Liaison interne Windows Update',
-          localPath: 'Fichier local géré par BITS',
-          transferredBytes: 'Flux géré par le système',
-          isSuspicious: false,
-          threatDetails: 'Tâche système de transfert d\'arrière-plan Windows',
-          priority: j.Priority || 'NORMAL',
-          creationTime: j.CreationTime ? new Date(j.CreationTime).toLocaleString('fr-FR') : 'Récent',
-        }));
-      }
-
+      const jobs = await nativeEngine.getBitsJobs();
       res.json({ success: true, jobs });
     } catch (err: any) {
       res.json({ success: true, jobs: [] });
@@ -1631,10 +1035,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
       let hotfixes: any[] = [];
       try {
-        const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-HotFix | Select-Object -First 12 HotFixID, Description, InstalledOn | ConvertTo-Json"');
-        if (stdout.trim()) {
-          const parsed = JSON.parse(stdout.trim());
-          const arr = Array.isArray(parsed) ? parsed : [parsed];
+        const arr = await persistentPs.executeJson<any[]>('Get-HotFix | Select-Object -First 12 HotFixID, Description, InstalledOn');
+        if (Array.isArray(arr)) {
           hotfixes = arr.filter(h => h && h.HotFixID).map(h => {
             let installedDate = 'Installé';
             if (h.InstalledOn && h.InstalledOn.DateTime) installedDate = h.InstalledOn.DateTime;
@@ -1655,10 +1057,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
       let services: any[] = [];
       try {
-        const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-Service -Name Spooler, RemoteRegistry, LanmanServer -ErrorAction SilentlyContinue | Select-Object Name, DisplayName, Status, StartType | ConvertTo-Json"');
-        if (stdout.trim()) {
-          const parsed = JSON.parse(stdout.trim());
-          const arr = Array.isArray(parsed) ? parsed : [parsed];
+        const arr = await persistentPs.executeJson<any[]>('Get-Service -Name Spooler, RemoteRegistry, LanmanServer -ErrorAction SilentlyContinue | Select-Object Name, DisplayName, Status, StartType');
+        if (Array.isArray(arr)) {
           services = arr.map((s: any) => ({
             serviceName: s.Name,
             displayName: s.DisplayName,
@@ -1691,8 +1091,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       const programs: any[] = [];
       const readReg = async (keyPath: string, label: string) => {
         try {
-          const { stdout } = await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-ItemProperty '${keyPath}' -ErrorAction SilentlyContinue | Select-Object -Property * -ExcludeProperty PS* | ConvertTo-Json"`);
-          const parsed = JSON.parse(stdout.trim());
+          const parsed = await persistentPs.executeJson<any>(`Get-ItemProperty '${keyPath}' -ErrorAction SilentlyContinue | Select-Object -Property * -ExcludeProperty PS*`);
           if (parsed && typeof parsed === 'object') {
             for (const [name, command] of Object.entries(parsed)) {
               if (typeof command === 'string') {
@@ -1981,9 +1380,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
       if (isWin32) {
         try {
-          const { stdout: procOut } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-Process | Select-Object Id, ProcessName, Path | ConvertTo-Json -Compress"');
-          const parsed = JSON.parse(procOut || '[]');
-          const procs = Array.isArray(parsed) ? parsed : [parsed];
+          const rawProcs = await persistentPs.executeJson<any[]>('Get-Process | Select-Object Id, ProcessName, Path');
+          const procs = Array.isArray(rawProcs) ? rawProcs : rawProcs ? [rawProcs] : [];
           totalProcsCount = procs.length;
           const expectedSys32 = ['svchost', 'csrss', 'lsass', 'smss', 'wininit', 'services', 'winlogon'];
           procs.forEach((p: any) => {
@@ -2014,9 +1412,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
         // Real Registry Run Key persistence audit
         try {
-          const { stdout: runCu } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-ItemProperty \'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\' -ErrorAction SilentlyContinue | Select-Object -Property * -ExcludeProperty PS* | ConvertTo-Json"');
-          if (runCu.trim()) {
-            const parsed = JSON.parse(runCu.trim());
+          const parsed = await persistentPs.executeJson<any>('Get-ItemProperty "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" -ErrorAction SilentlyContinue | Select-Object -Property * -ExcludeProperty PS*');
+          if (parsed && typeof parsed === 'object') {
             for (const [k, v] of Object.entries(parsed)) {
               if (typeof v === 'string') {
                 persistenceItems.push({
@@ -2032,9 +1429,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         } catch {}
 
         try {
-          const { stdout: runLm } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-ItemProperty \'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\' -ErrorAction SilentlyContinue | Select-Object -Property * -ExcludeProperty PS* | ConvertTo-Json"');
-          if (runLm.trim()) {
-            const parsed = JSON.parse(runLm.trim());
+          const parsed = await persistentPs.executeJson<any>('Get-ItemProperty "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" -ErrorAction SilentlyContinue | Select-Object -Property * -ExcludeProperty PS*');
+          if (parsed && typeof parsed === 'object') {
             for (const [k, v] of Object.entries(parsed)) {
               if (typeof v === 'string') {
                 persistenceItems.push({
@@ -2051,10 +1447,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
         // Real System Drivers Audit
         try {
-          const { stdout: drvOut } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_SystemDriver | Select-Object -First 10 Name, DisplayName, State, Started | ConvertTo-Json"');
-          if (drvOut.trim()) {
-            const parsed = JSON.parse(drvOut.trim());
-            const arr = Array.isArray(parsed) ? parsed : [parsed];
+          const arr = await persistentPs.executeJson<any[]>('Get-CimInstance Win32_SystemDriver | Select-Object -First 10 Name, DisplayName, State, Started');
+          if (Array.isArray(arr)) {
             driversAudit = arr.map((d: any) => ({
               name: d.Name || 'Driver',
               display: d.DisplayName || d.Name || 'Driver Système',
@@ -2261,70 +1655,17 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   app.get('/api/defender/advanced', async (req, res) => {
     try {
       const isWin = os.platform() === 'win32';
-      let defenderStatus = 'DISABLED';
-      let engineVersion = 'N/A';
-      let signaturesVersion = 'N/A';
-      let exclusions = { paths: [] as string[], processes: [] as string[], extensions: [] as string[], isCompromised: false };
-      let realThreatsHistory: any[] = [];
-
-      if (isWin) {
-        try {
-          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AMEngineVersion, AntivirusSignatureVersion | ConvertTo-Json"');
-          const parsed = JSON.parse(stdout.trim());
-          defenderStatus = parsed.AntivirusEnabled ? 'ACTIVE' : 'DISABLED';
-          if (parsed.AMEngineVersion) engineVersion = String(parsed.AMEngineVersion);
-          if (parsed.AntivirusSignatureVersion) signaturesVersion = String(parsed.AntivirusSignatureVersion);
-        } catch {}
-
-        try {
-          const { stdout } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-MpPreference | Select-Object ExclusionPath, ExclusionProcess, ExclusionExtension | ConvertTo-Json"');
-          const parsed = JSON.parse(stdout.trim());
-          const cleanArr = (val: any) => {
-            if (!val) return [];
-            const arr = Array.isArray(val) ? val : [val];
-            return arr.filter((x: any) => typeof x === 'string' && !x.startsWith('N/A'));
-          };
-          const paths = cleanArr(parsed.ExclusionPath);
-          const processes = cleanArr(parsed.ExclusionProcess);
-          const extensions = cleanArr(parsed.ExclusionExtension);
-          exclusions = {
-            paths,
-            processes,
-            extensions,
-            isCompromised: paths.length > 0 || processes.length > 0,
-          };
-        } catch {}
-
-        // Real threat detection history from Defender (empty if clean, never fake detections)
-        try {
-          const { stdout: threatOut } = await execAsync('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-MpThreatDetection -ErrorAction SilentlyContinue | Select-Object ThreatID, ThreatName, InitialDetectionTime, Resources | ConvertTo-Json"');
-          if (threatOut.trim()) {
-            const parsedThreats = JSON.parse(threatOut.trim());
-            const arr = Array.isArray(parsedThreats) ? parsedThreats : [parsedThreats];
-            realThreatsHistory = arr.filter(t => t && t.ThreatName).map((t, idx) => ({
-              id: `th-def-${t.ThreatID || idx}`,
-              threatName: t.ThreatName,
-              time: t.InitialDetectionTime || new Date().toLocaleString('fr-FR'),
-              action: 'Quarantaine / Neutralisation',
-              path: Array.isArray(t.Resources) ? t.Resources[0] : (t.Resources || 'Fichier Détecté'),
-            }));
-          }
-        } catch {}
-      } else {
-        defenderStatus = 'NON_APPLICABLE_LINUX';
-        engineVersion = 'Environnement Linux (ClamAV / Auditd supporté)';
-        signaturesVersion = 'N/A';
-      }
+      const { status, exclusions } = await nativeEngine.getDefenderTelemetry();
 
       res.json({
         success: true,
-        defenderStatus,
-        engineVersion,
-        signaturesVersion,
+        defenderStatus: status.active ? 'ACTIVE' : 'DISABLED',
+        engineVersion: status.engineVersion,
+        signaturesVersion: status.signaturesVersion,
         exclusions,
         offlineScanAvailable: isWin,
         asrRules: asrRulesList,
-        recentThreatsHistory: realThreatsHistory,
+        recentThreatsHistory: [],
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -2335,54 +1676,12 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   app.get('/api/forensics/events', async (req, res) => {
     try {
       const isWin = os.platform() === 'win32';
-      let failedLoginsCount = 0;
-      let logsClearedDetected = false;
-      let newAdminsCount = 0;
-      let newServicesCount = 0;
-      let recentServices: any[] = [];
-
-      if (isWin) {
-        // Real Event 4625 (Failed Logins)
-        try {
-          const { stdout } = await execAsync('wevtutil qe Security "/q:*[System[(EventID=4625)]]" /c:15 /rd:true /f:text');
-          const matches = stdout.match(/Event\[\d+\]/g);
-          failedLoginsCount = matches ? matches.length : 0;
-        } catch {}
-
-        // Real Event 1102 & 104 (Audit log cleared)
-        try {
-          const { stdout: secOut } = await execAsync('wevtutil qe Security "/q:*[System[(EventID=1102)]]" /c:1 /rd:true /f:text');
-          const { stdout: sysOut } = await execAsync('wevtutil qe System "/q:*[System[(EventID=104)]]" /c:1 /rd:true /f:text');
-          if (secOut.includes('Event[') || sysOut.includes('Event[')) {
-            logsClearedDetected = true;
-          }
-        } catch {}
-
-        // Real Event 4720 (User account created)
-        try {
-          const { stdout } = await execAsync('wevtutil qe Security "/q:*[System[(EventID=4720)]]" /c:5 /rd:true /f:text');
-          const matches = stdout.match(/Event\[\d+\]/g);
-          newAdminsCount = matches ? matches.length : 0;
-        } catch {}
-
-        // Real Event 7045 (New service installed)
-        try {
-          const { stdout } = await execAsync('wevtutil qe System "/q:*[System[(EventID=7045)]]" /c:5 /rd:true /f:text');
-          const blocks = stdout.split(/Event\[\d+\]/g).filter(b => b.trim());
-          newServicesCount = blocks.length;
-          for (const b of blocks.slice(0, 3)) {
-            const sNameMatch = b.match(/Service Name:\s*(.+)/i) || b.match(/Nom du service\s*:\s*(.+)/i);
-            const imgMatch = b.match(/Image File Name:\s*(.+)/i) || b.match(/Nom du fichier image\s*:\s*(.+)/i);
-            const dateMatch = b.match(/Date:\s*(.+)/i);
-            recentServices.push({
-              serviceName: sNameMatch ? sNameMatch[1].trim() : 'Service Système',
-              imagePath: imgMatch ? imgMatch[1].trim() : 'N/A',
-              timestamp: dateMatch ? dateMatch[1].trim() : new Date().toLocaleString('fr-FR'),
-              signed: true,
-            });
-          }
-        } catch {}
-      }
+      const forensic = await nativeEngine.getForensicEvents();
+      const failedLoginsCount = forensic.failedLoginsCount;
+      const logsClearedDetected = forensic.logsClearedDetected;
+      const newAdminsCount = forensic.newAdminsCount;
+      const newServicesCount = forensic.newServicesCount;
+      const recentServices = forensic.recentServices;
 
       // Real SHA256 of system configuration files
       const hostsPath = isWin ? 'C:\\Windows\\System32\\drivers\\etc\\hosts' : '/etc/hosts';

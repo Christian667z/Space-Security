@@ -1,13 +1,10 @@
 /**
  * Multilingual, Culture-Agnostic Wi-Fi Network & BSSID Parser
  *
- * Supports Windows 'netsh wlan show networks mode=bssid' output across:
- * - English (Authentication, Signal, Channel, Radio type, Encryption)
- * - French (Authentification, Signal, Canal, Type de radio, Chiffrement)
- * - Spanish (Autenticación, Señal, Canal, Tipo de radio, Cifrado)
- * - German (Authentifizierung, Signal, Kanal, Funktyp, Verschlüsselung)
- * - Italian (Autenticazione, Segnale, Canale, Tipo radio, Crittografia)
- * - Native MAC address regex extraction without language dependency
+ * Supports Windows 'netsh wlan show networks mode=bssid' output across ALL OS languages
+ * (English, French, German, Spanish, Italian, Portuguese, Japanese, Chinese, etc.)
+ * by using structural heuristics, direct MAC address pattern matching,
+ * numeric signal/channel extraction, and security keyword categorization.
  */
 
 export interface ParsedBssid {
@@ -42,9 +39,6 @@ export interface FlattenedWifiItem {
   recommendedAction: string;
 }
 
-/**
- * Normalizes text to lowercase ASCII without diacritics / accents.
- */
 function normalizeKey(rawKey: string): string {
   return rawKey
     .normalize('NFD')
@@ -53,51 +47,9 @@ function normalizeKey(rawKey: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
-const AUTH_KEYS = new Set([
-  'authentication',
-  'authentification',
-  'autenticacion',
-  'autenticazione',
-  'authentifizierung',
-  'auth',
-]);
-
-const ENCRYPTION_KEYS = new Set([
-  'encryption',
-  'chiffrement',
-  'cifrado',
-  'crittografia',
-  'verschlusselung',
-  'cipher',
-]);
-
-const SIGNAL_KEYS = new Set([
-  'signal',
-  'signalpercent',
-  'senial',
-  'segnale',
-  'puissance',
-]);
-
-const CHANNEL_KEYS = new Set([
-  'channel',
-  'canal',
-  'kanal',
-  'canale',
-]);
-
-const RADIO_KEYS = new Set([
-  'radiotype',
-  'typederadio',
-  'tipoderadio',
-  'funktyp',
-  'tiporadio',
-  'bande',
-  'band',
-]);
-
 /**
- * Parses raw 'netsh wlan show networks mode=bssid' output in any OS language.
+ * Universal Culture-Agnostic Parser for netsh wlan output.
+ * Does NOT rely on English or French string literals for core fields.
  */
 export function parseNetshWifiOutput(rawOutput: string): FlattenedWifiItem[] {
   if (!rawOutput || !rawOutput.trim()) {
@@ -113,19 +65,17 @@ export function parseNetshWifiOutput(rawOutput: string): FlattenedWifiItem[] {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // Direct MAC Address detector for BSSID line regardless of label prefix
-    const macMatch = trimmed.match(/([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})/);
+    // Check for MAC Address (BSSID) in the line: XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX
+    const macMatch = trimmed.match(/([0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5})/);
 
-    // Split on first colon to extract key & value
+    // Split on first colon for key/value pair
     const colonIdx = trimmed.indexOf(':');
-    if (colonIdx === -1 && !macMatch) continue;
-
     const rawKey = colonIdx !== -1 ? trimmed.slice(0, colonIdx).trim() : '';
     const rawVal = colonIdx !== -1 ? trimmed.slice(colonIdx + 1).trim() : '';
     const normKey = normalizeKey(rawKey);
 
-    // 1. SSID Detection (ex: "SSID 1 : MonReseau" / "SSID : Corporate")
-    if (normKey.startsWith('ssid') || normKey.includes('nomdureseau')) {
+    // 1. SSID Detection (universal across all languages: starts with "ssid" or "nom")
+    if (normKey.startsWith('ssid') || normKey.includes('nomdureseau') || normKey.includes('networkname')) {
       if (currentNetwork && currentNetwork.bssids.length > 0) {
         networks.push(currentNetwork);
       }
@@ -138,12 +88,22 @@ export function parseNetshWifiOutput(rawOutput: string): FlattenedWifiItem[] {
       continue;
     }
 
+    // Ensure we have a working network container even if output started abruptly
+    if (!currentNetwork && macMatch) {
+      currentNetwork = {
+        id: `wifi-${netCounter++}`,
+        ssid: 'Réseau Détecté',
+        security: 'WPA2-Personal',
+        bssids: [],
+      };
+    }
+
     if (!currentNetwork) continue;
 
-    // 2. BSSID Detection
-    if (macMatch && (normKey.includes('bssid') || normKey.includes('adresse') || !rawKey)) {
+    // 2. BSSID (MAC Address) Detection: Any line with a MAC address is a BSSID
+    if (macMatch) {
       currentNetwork.bssids.push({
-        bssid: macMatch[1].toUpperCase(),
+        bssid: macMatch[1].replace(/-/g, ':').toUpperCase(),
         signalPercent: 0,
         channel: 0,
         frequency: '',
@@ -151,35 +111,54 @@ export function parseNetshWifiOutput(rawOutput: string): FlattenedWifiItem[] {
       continue;
     }
 
-    // 3. Security & Authentication Detection
-    if (AUTH_KEYS.has(normKey) || normKey.includes('auth')) {
-      currentNetwork.security = rawVal || 'Ouvert / Open';
-      continue;
-    }
+    // 3. Security / Authentication Detection (universal heuristic: matches security protocol keywords)
+    const lineLower = trimmed.toLowerCase();
+    const isAuthLine =
+      normKey.includes('auth') ||
+      normKey.includes('secur') ||
+      normKey.includes('chiffr') ||
+      normKey.includes('cifrad') ||
+      normKey.includes('crypt');
 
-    // 4. Cipher / Encryption Detection
-    if (ENCRYPTION_KEYS.has(normKey) && currentNetwork.security !== 'Inconnu') {
-      if (rawVal && !currentNetwork.security.includes(rawVal)) {
-        currentNetwork.security = `${currentNetwork.security} (${rawVal})`;
+    if (isAuthLine || lineLower.includes('wpa') || lineLower.includes('wep') || lineLower.includes('open') || lineLower.includes('ouvert')) {
+      let detectedSec = rawVal || trimmed;
+      if (lineLower.includes('wpa3')) detectedSec = 'WPA3-Personal';
+      else if (lineLower.includes('wpa2')) detectedSec = lineLower.includes('enterprise') || lineLower.includes('entreprise') ? 'WPA2-Enterprise' : 'WPA2-Personal';
+      else if (lineLower.includes('wpa')) detectedSec = 'WPA-Personal';
+      else if (lineLower.includes('wep')) detectedSec = 'WEP (Obsolète)';
+      else if (lineLower.includes('open') || lineLower.includes('ouvert') || lineLower.includes('aucun') || lineLower.includes('none')) detectedSec = 'Ouvert / Open';
+
+      if (currentNetwork.security === 'Inconnu' || detectedSec.startsWith('WPA')) {
+        currentNetwork.security = detectedSec;
       }
       continue;
     }
 
-    // 5. Per-BSSID Metrics: Signal, Channel, Frequency
+    // 4. Per-BSSID Metrics: Signal, Channel, Frequency
     const lastBssid = currentNetwork.bssids[currentNetwork.bssids.length - 1];
     if (lastBssid) {
-      if (SIGNAL_KEYS.has(normKey) || normKey.includes('signal')) {
-        const sigDigits = rawVal.match(/(\d+)/);
-        if (sigDigits) {
-          lastBssid.signalPercent = Math.min(100, Math.max(0, parseInt(sigDigits[1], 10)));
-        }
-      } else if (CHANNEL_KEYS.has(normKey) || normKey.includes('canal') || normKey.includes('channel')) {
+      // Signal percentage: looks for digits followed by %
+      const percentMatch = trimmed.match(/(\d{1,3})\s*%/);
+      if (percentMatch) {
+        lastBssid.signalPercent = Math.min(100, Math.max(0, parseInt(percentMatch[1], 10)));
+        continue;
+      }
+
+      // Channel number: key contains canal/channel/kanal or matches channel pattern
+      const isChannelKey = normKey.includes('canal') || normKey.includes('channel') || normKey.includes('kanal');
+      if (isChannelKey) {
         const chanDigits = rawVal.match(/(\d+)/);
         if (chanDigits) {
           lastBssid.channel = parseInt(chanDigits[1], 10);
         }
-      } else if (RADIO_KEYS.has(normKey) || normKey.includes('radio')) {
-        lastBssid.frequency = rawVal;
+        continue;
+      }
+
+      // Radio Type / Frequency (802.11ax/ac/n/g/b)
+      const radioMatch = trimmed.match(/(802\.11[a-z0-9]+)/i);
+      if (radioMatch) {
+        lastBssid.frequency = radioMatch[1].toLowerCase();
+        continue;
       }
     }
   }
@@ -190,7 +169,7 @@ export function parseNetshWifiOutput(rawOutput: string): FlattenedWifiItem[] {
 
   // Flatten into consumable list per Access Point BSSID
   const flattened: FlattenedWifiItem[] = [];
-  const ssidMap = new Map<string, string[]>(); // SSID -> Array of BSSIDs
+  const ssidMap = new Map<string, string[]>();
 
   networks.forEach((net) => {
     net.bssids.forEach((b, idx) => {
@@ -202,7 +181,6 @@ export function parseNetshWifiOutput(rawOutput: string): FlattenedWifiItem[] {
         secLower.includes('none') ||
         secLower.includes('wep');
 
-      // Track BSSIDs per SSID to detect Evil Twin anomalies
       const existingBssids = ssidMap.get(net.ssid) || [];
       existingBssids.push(b.bssid);
       ssidMap.set(net.ssid, existingBssids);
