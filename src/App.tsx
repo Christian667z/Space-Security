@@ -1140,8 +1140,27 @@ export default function App() {
           .then(data => addLog('OK', data.message || 'Mode WinRE programmé avec succès.', 'WINRE'))
           .catch(e => addLog('WARN', `Erreur WinRE: ${e.message}`, 'WINRE'));
         break;
-        addLog('WARN', `Commande "${trimmed}" non reconnue. Tapez "help" pour voir la liste.`);
+
+      default: {
+        // Delegate to backend console engine for persistent SQLite logging and multi-operator sync
+        apiFetch('/api/console/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: trimmed }),
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && Array.isArray(data.results)) {
+              data.results.forEach((r: any) => addLog(r.level || 'INFO', r.text, r.tag || 'CONSOLE'));
+            } else {
+              addLog('WARN', `Commande "${trimmed}" non reconnue. Tapez "help" pour voir la liste.`);
+            }
+          })
+          .catch(() => {
+            addLog('WARN', `Commande "${trimmed}" non reconnue. Tapez "help" pour voir la liste.`);
+          });
         break;
+      }
     }
   };
 

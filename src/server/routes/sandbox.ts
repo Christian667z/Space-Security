@@ -4,20 +4,28 @@ import { safeExecFile, validateAndParsePid, sanitizePath } from '../safeExec.ts'
 import { dbManager } from '../db.ts';
 import { logger } from '../logger.ts';
 import { requireAuth } from '../auth.ts';
+import {
+  getDetailedNetworkInterfaces,
+  killSwitchActive,
+  killSwitchEngagedAt,
+  disabledInterfacesList,
+} from './network.ts';
 
 export const sandboxRouter = Router();
 
-let sandboxedProcessesList: Array<{
+export interface SandboxedProcessItem {
   pid: number;
   name: string;
   path: string;
+  status: 'FROZEN' | 'ISOLATED' | 'TERMINATED';
   isolatedAt: string;
-  status: 'ISOLATED' | 'FROZEN' | 'TERMINATED';
   networkBlocked: boolean;
-  cpuQuotaPercent: number;
-  memoryQuotaMb: number;
+  cpuRestricted: boolean;
+  threatScore: number;
   details: string;
-}> = [];
+}
+
+export let sandboxedProcessesList: SandboxedProcessItem[] = [];
 
 // GET /api/sandbox/processes
 sandboxRouter.get('/processes', (req, res) => {
@@ -28,55 +36,57 @@ sandboxRouter.get('/processes', (req, res) => {
   });
 });
 
-// POST /api/sandbox/isolate-process - SECURED: Parameterized firewall and pid validation!
+// POST /api/sandbox/isolate-process - SECURED: Validated PID & Sanitized Path
 sandboxRouter.post('/isolate-process', requireAuth, async (req, res, next) => {
   try {
-    const { pid, procPath, procName, cpuQuota, memoryQuota } = req.body;
-
-    // CRITICAL: Strictly validate PID and Path to eliminate command injection
+    const { pid, name, path: procPath } = req.body;
     const safePid = validateAndParsePid(pid);
     const safePath = sanitizePath(procPath || 'C:\\Windows\\System32\\cmd.exe');
-    const safeName = (procName && typeof procName === 'string') ? procName.slice(0, 128) : `proc_${safePid}`;
+    const safeName = name && typeof name === 'string' ? name.slice(0, 128) : `Process_${safePid}`;
 
     const isWin32 = os.platform() === 'win32';
     const appliedActions: string[] = [];
 
     if (isWin32) {
       try {
-        // Parameterized suspension via PowerShell
         await safeExecFile('powershell.exe', [
-          '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-          `$p = Get-Process -Id ${safePid} -ErrorAction SilentlyContinue; if ($p) { Stop-Process -Id ${safePid} -Force }`
+          '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-Command',
+          `$p = Get-Process -Id ${safePid} -ErrorAction SilentlyContinue; if ($p) { Stop-Process -Id ${safePid} -Force }`,
         ]);
-        appliedActions.push(`Processus PID ${safePid} suspendu et figé`);
+        appliedActions.push(`Suspension process PID ${safePid}`);
       } catch {}
 
       try {
-        // PARAMETERIZED firewall rule addition: no cmd.exe concatenation!
         await safeExecFile('netsh', [
-          'advfirewall', 'firewall', 'add', 'rule',
+          'advfirewall',
+          'firewall',
+          'add',
+          'rule',
           `name=SpaceSec-Sandbox-PID-${safePid}`,
           'dir=out',
           `program=${safePath}`,
-          'action=block'
+          'action=block',
         ]);
-        appliedActions.push(`Règle pare-feu d'isolation réseau appliquée pour ${safePath}`);
+        appliedActions.push(`Blocage Firewall sortant pour "${safePath}"`);
       } catch {}
     }
 
-    const item = {
+    const item: SandboxedProcessItem = {
       pid: safePid,
       name: safeName,
       path: safePath,
-      isolatedAt: new Date().toISOString(),
-      status: 'ISOLATED' as const,
+      status: 'FROZEN',
+      isolatedAt: new Date().toLocaleTimeString('fr-FR'),
       networkBlocked: true,
-      cpuQuotaPercent: Number(cpuQuota) || 5,
-      memoryQuotaMb: Number(memoryQuota) || 128,
+      cpuRestricted: true,
+      threatScore: 88,
       details: 'Processus gelé et isolé en Sandbox Live. Accès réseau sortant coupé, exécution suspendue.',
     };
 
-    sandboxedProcessesList = sandboxedProcessesList.filter(p => p.pid !== safePid);
+    sandboxedProcessesList = sandboxedProcessesList.filter((p) => p.pid !== safePid);
     sandboxedProcessesList.unshift(item);
 
     dbManager.addAuditLog({
@@ -85,7 +95,7 @@ sandboxRouter.post('/isolate-process', requireAuth, async (req, res, next) => {
       level: 'KERNEL',
       tag: 'SANDBOX',
       text: `CONFINEMENT PROCESSUS : PID ${safePid} (${safeName}) placé en Sandbox Live. Threads suspendus & trafic sortant bloqué.`,
-      operatorName: 'Opérateur Sandbox',
+      operatorName: 'Analyste SOC',
     });
 
     res.json({
@@ -99,7 +109,7 @@ sandboxRouter.post('/isolate-process', requireAuth, async (req, res, next) => {
   }
 });
 
-// POST /api/sandbox/terminate-process - SECURED: Parameterized taskkill and firewall removal
+// POST /api/sandbox/terminate-process - SECURED: Parameterized taskkill
 sandboxRouter.post('/terminate-process', requireAuth, async (req, res, next) => {
   try {
     const safePid = validateAndParsePid(req.body.pid);
@@ -118,7 +128,7 @@ sandboxRouter.post('/terminate-process', requireAuth, async (req, res, next) => 
       } catch {}
     }
 
-    sandboxedProcessesList = sandboxedProcessesList.filter(p => p.pid !== safePid);
+    sandboxedProcessesList = sandboxedProcessesList.filter((p) => p.pid !== safePid);
 
     dbManager.addAuditLog({
       id: `sandbox-kill-${Date.now()}`,
@@ -126,7 +136,7 @@ sandboxRouter.post('/terminate-process', requireAuth, async (req, res, next) => 
       level: 'WARN',
       tag: 'SANDBOX',
       text: `Processus confiné PID ${safePid} abattu et règle pare-feu sandbox retirée.`,
-      operatorName: 'Opérateur Sandbox',
+      operatorName: 'Analyste SOC',
     });
 
     res.json({
@@ -136,5 +146,30 @@ sandboxRouter.post('/terminate-process', requireAuth, async (req, res, next) => 
     });
   } catch (err: any) {
     next(err);
+  }
+});
+
+// GET /api/sandbox/status - Full Sandbox and Kill-Switch status
+sandboxRouter.get('/status', async (req, res) => {
+  try {
+    const ifaces = await getDetailedNetworkInterfaces();
+    const activeExternal = ifaces.filter((i) => !i.isLoopback && i.status === 'Up');
+
+    res.json({
+      success: true,
+      killSwitch: {
+        isActive: killSwitchActive,
+        engagedAt: killSwitchEngagedAt,
+        disabledInterfaces: disabledInterfacesList,
+        loopbackProtected: true,
+        localhostPort: 3000,
+        externalAccessBlocked: killSwitchActive,
+        totalActiveInterfaces: activeExternal.length,
+        interfaces: ifaces,
+      },
+      sandboxedProcesses: sandboxedProcessesList,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });

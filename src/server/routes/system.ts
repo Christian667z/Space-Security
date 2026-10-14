@@ -5,6 +5,7 @@ import { dbManager } from '../db.ts';
 import { logger } from '../logger.ts';
 import { requireAuth } from '../auth.ts';
 import { killProcessSchema, validateBody } from '../validators.ts';
+import { nativeEngine } from '../native/nativeEngine.ts';
 
 export const systemRouter = Router();
 
@@ -276,6 +277,25 @@ systemRouter.post('/kill', requireAuth, validateBody(killProcessSchema), async (
 
     res.json({ success: true, message: `Processus ${safePid} terminé avec succès.` });
   } catch (err: any) {
+    next(err);
+  }
+});
+
+// GET /api/system/memory/vad (or /api/memory/vad)
+systemRouter.get('/memory/vad', async (req, res, next) => {
+  try {
+    const memAudit = await nativeEngine.auditInjectedMemory();
+    const regions = memAudit.inspectedRegionsSample || [];
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      regions,
+      totalRegionsCount: memAudit.scannedRegionsCount || regions.length,
+      unbackedModules: memAudit.unbackedModules || [],
+      rwxPagesFound: memAudit.rwxPagesFound || 0,
+      scannedProcessesCount: memAudit.scannedProcessesCount || 0,
+    });
+  } catch (err) {
     next(err);
   }
 });
