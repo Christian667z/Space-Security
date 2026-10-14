@@ -1520,6 +1520,21 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         });
       }
 
+      // Multi-layer memory, DKOM cross-view and kernel driver telemetry via Native Engine
+      const [crossView, memAudit, kernelDriver] = await Promise.all([
+        nativeEngine.auditCrossViewProcesses(),
+        nativeEngine.auditInjectedMemory(),
+        nativeEngine.getKernelDriverStatus(),
+      ]);
+
+      if (!crossView.clean) {
+        healthScore -= crossView.anomalies.length * 20;
+      }
+      const highSevInjections = (memAudit.unbackedModules || []).filter((m: any) => m.severity === 'HIGH' || m.severity === 'CRITICAL');
+      if (highSevInjections.length > 0) {
+        healthScore -= highSevInjections.length * 15;
+      }
+
       healthScore = Math.max(20, Math.min(100, healthScore));
 
       res.json({
@@ -1533,16 +1548,9 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
             threats: masqueradingFound,
             clean: masqueradingFound.length === 0,
           },
-          hiddenProcesses: {
-            scannedPidRange: '4..65535',
-            anomalies: hiddenPids,
-            clean: hiddenPids.length === 0,
-          },
-          injectedMemory: {
-            rwxPagesFound: 0,
-            unbackedModules: memoryInjections,
-            clean: memoryInjections.length === 0,
-          },
+          hiddenProcesses: crossView,
+          injectedMemory: memAudit,
+          kernelDriver,
           persistence: {
             checkedVectors: isWin32 ? ['Run', 'RunOnce', 'Winlogon', 'IFEO', 'LSA', 'BootExecute', 'WMI'] : ['/etc/crontab', '/etc/cron.*', 'systemd.service'],
             entries: persistenceItems,
@@ -1559,6 +1567,63 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       res.status(500).json({ success: false, error: err.message });
     }
   });
+
+  // Dedicated Forensics Memory VAD & RWX Scanner Endpoint
+  app.get('/api/forensics/memory', async (req, res) => {
+    try {
+      const [memAudit, kernelDriver, processes] = await Promise.all([
+        nativeEngine.auditInjectedMemory(),
+        nativeEngine.getKernelDriverStatus(),
+        nativeEngine.getProcesses(),
+      ]);
+
+      res.json({
+        success: true,
+        timestamp: new Date().toISOString(),
+        memAudit,
+        kernelDriver,
+        processesCount: processes.length,
+        processes: processes.slice(0, 40),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Process Virtual Address Descriptors (VAD) Inspector
+  app.get('/api/forensics/process-memory/:pid', async (req, res) => {
+    try {
+      const pid = parseInt(req.params.pid, 10);
+      if (isNaN(pid) || pid <= 0) {
+        return res.status(400).json({ success: false, error: 'Invalid PID parameter' });
+      }
+      const memoryMap = await nativeEngine.getProcessMemoryMap(pid);
+      res.json({ success: true, memoryMap });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Ring-0 Kernel Minifilter Driver Status, C Code & Architecture Inspection Endpoint
+  app.get('/api/kernel/driver', async (req, res) => {
+    try {
+      const kernelDriver = await nativeEngine.getKernelDriverStatus();
+      const cSourcePath = path.join(appDir, 'src/server/native/spacesec_minifilter.c');
+      const infPath = path.join(appDir, 'src/server/native/spacesec_minifilter.inf');
+      const cSource = fs.existsSync(cSourcePath) ? fs.readFileSync(cSourcePath, 'utf8') : '';
+      const infSource = fs.existsSync(infPath) ? fs.readFileSync(infPath, 'utf8') : '';
+
+      res.json({
+        success: true,
+        kernelDriver,
+        cSource,
+        infSource,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
 
   // Menu 11: Quarantine Storage & Manifests (Starts empty; filled only when real threats are quarantined)
   // Menu 11: Quarantine Storage & Manifests (Persistent SQLite backed)
