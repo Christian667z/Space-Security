@@ -22,9 +22,11 @@ import {
 } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { NetworkConnectionItem } from '../types/cyberdefense';
-import { PortScanner } from './PortScanner';
-import { WiFiScanner } from './WiFiScanner';
 import { apiFetch } from '../utils/api';
+import { ErrorBoundary } from './ErrorBoundary';
+
+const PortScanner = React.lazy(() => import('./PortScanner').then(m => ({ default: m.PortScanner })));
+const WiFiScanner = React.lazy(() => import('./WiFiScanner').then(m => ({ default: m.WiFiScanner })));
 
 interface HostGeoInfo {
   ip: string;
@@ -835,10 +837,18 @@ export const NetworkC2Panel: React.FC<NetworkC2PanelProps> = ({ onRunInConsole, 
       </div>
 
       {/* PortScanner Module: Local Open Ports & Listening Malicious Services */}
-      <PortScanner onRunInConsole={onRunInConsole} />
+      <ErrorBoundary moduleName="Scanner de Ports d'Écoute Locaux">
+        <React.Suspense fallback={<div className="h-48 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement du Scanner de Ports...</div>}>
+          <PortScanner onRunInConsole={onRunInConsole} />
+        </React.Suspense>
+      </ErrorBoundary>
 
       {/* WiFi Scanner Module: Surrounding Wireless Networks, Unsecured APs & Evil Twin Detection */}
-      <WiFiScanner onRunInConsole={onRunInConsole} />
+      <ErrorBoundary moduleName="Scanner Wi-Fi & Analyse BSSID 802.11">
+        <React.Suspense fallback={<div className="h-48 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement du Scanner Wi-Fi...</div>}>
+          <WiFiScanner onRunInConsole={onRunInConsole} />
+        </React.Suspense>
+      </ErrorBoundary>
 
       {/* Lower Row: Named Pipes & HOSTS / Proxy Audit */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

@@ -1,8 +1,10 @@
 import React from 'react';
 import { Lock, ShieldCheck, ShieldAlert, RefreshCw, AlertTriangle, Key, Terminal, Database } from 'lucide-react';
 import { HardeningMetric, ThreatItem } from '../types/cyberdefense';
-import { VulnerabilityScanner } from './VulnerabilityScanner';
-import { DefenderSync } from './DefenderSync';
+import { ErrorBoundary } from './ErrorBoundary';
+
+const VulnerabilityScanner = React.lazy(() => import('./VulnerabilityScanner').then(m => ({ default: m.VulnerabilityScanner })));
+const DefenderSync = React.lazy(() => import('./DefenderSync').then(m => ({ default: m.DefenderSync })));
 
 interface HardeningPanelProps {
   onRunInConsole: (command: string) => void;
@@ -130,10 +132,18 @@ export const HardeningPanel: React.FC<HardeningPanelProps> = ({ onRunInConsole, 
       </div>
 
       {/* DefenderSync Module: Audit and Clean Malware Exclusions in Microsoft Defender */}
-      <DefenderSync onRunInConsole={onRunInConsole} onMutateThreatStatus={onMutateThreatStatus} />
+      <ErrorBoundary moduleName="Audit des Exclusions Windows Defender (MpPreference)">
+        <React.Suspense fallback={<div className="h-40 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement de DefenderSync...</div>}>
+          <DefenderSync onRunInConsole={onRunInConsole} onMutateThreatStatus={onMutateThreatStatus} />
+        </React.Suspense>
+      </ErrorBoundary>
 
       {/* VulnerabilityScanner Module: Obsolete Windows Services & Missing Hotfixes (Get-HotFix / Get-Service) */}
-      <VulnerabilityScanner onRunInConsole={onRunInConsole} />
+      <ErrorBoundary moduleName="Scanner de Vulnérabilités & Correctifs Windows">
+        <React.Suspense fallback={<div className="h-40 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement du Scanner de Vulnérabilités...</div>}>
+          <VulnerabilityScanner onRunInConsole={onRunInConsole} />
+        </React.Suspense>
+      </ErrorBoundary>
 
       {/* Emergency SafeMode Card */}
       <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-4">

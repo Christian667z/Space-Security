@@ -35,14 +35,16 @@ import {
   Undo2,
 } from 'lucide-react';
 import { TabId, ThreatItem } from '../types/cyberdefense';
-import { ThreatHeatmap } from './ThreatHeatmap';
-import { ThreatIntensityMap } from './ThreatIntensityMap';
-import { ThreatCategoryDonutChart } from './ThreatCategoryDonutChart';
-import { VulnerabilityRadarChart } from './VulnerabilityRadarChart';
-import { HealthScoreEvolutionChart } from './HealthScoreEvolutionChart';
-import { SharedCommandModal } from './SharedCommandModal';
 import { calculateSecurityScore } from '../utils/pdfReportGenerator';
 import { ErrorBoundary } from './ErrorBoundary';
+
+// Code-Splitting: Lazy load heavy D3 TopoJSON and Recharts visualizers
+const ThreatHeatmap = React.lazy(() => import('./ThreatHeatmap').then(m => ({ default: m.ThreatHeatmap })));
+const ThreatIntensityMap = React.lazy(() => import('./ThreatIntensityMap').then(m => ({ default: m.ThreatIntensityMap })));
+const ThreatCategoryDonutChart = React.lazy(() => import('./ThreatCategoryDonutChart').then(m => ({ default: m.ThreatCategoryDonutChart })));
+const VulnerabilityRadarChart = React.lazy(() => import('./VulnerabilityRadarChart').then(m => ({ default: m.VulnerabilityRadarChart })));
+const HealthScoreEvolutionChart = React.lazy(() => import('./HealthScoreEvolutionChart').then(m => ({ default: m.HealthScoreEvolutionChart })));
+const SharedCommandModal = React.lazy(() => import('./SharedCommandModal').then(m => ({ default: m.SharedCommandModal })));
 
 interface OverviewDashboardProps {
   onNavigateTab: (tab: TabId) => void;
@@ -488,39 +490,49 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
 
       {/* Security HealthScore 30-Day Evolution Chart (Recharts) */}
       <ErrorBoundary moduleName="Évolution du Score de Santé (Recharts)">
-        <HealthScoreEvolutionChart
-          threats={threats}
-          onRunInConsole={onRunInConsole}
-          onNavigateTab={onNavigateTab}
-        />
+        <React.Suspense fallback={<div className="h-64 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement de l'Évolution du Score...</div>}>
+          <HealthScoreEvolutionChart
+            threats={threats}
+            onRunInConsole={onRunInConsole}
+            onNavigateTab={onNavigateTab}
+          />
+        </React.Suspense>
       </ErrorBoundary>
 
       {/* Machine Vulnerability Radar Chart (Recharts: Services, Patchs, Ports Audits) */}
       <ErrorBoundary moduleName="Radar des Vulnérabilités (Recharts)">
-        <VulnerabilityRadarChart
-          threats={threats}
-          onNavigateTab={onNavigateTab}
-          onRunInConsole={onRunInConsole}
-        />
+        <React.Suspense fallback={<div className="h-64 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement du Radar des Vulnérabilités...</div>}>
+          <VulnerabilityRadarChart
+            threats={threats}
+            onNavigateTab={onNavigateTab}
+            onRunInConsole={onRunInConsole}
+          />
+        </React.Suspense>
       </ErrorBoundary>
 
       {/* Threat Distribution Donut Chart (Recharts) */}
       <ErrorBoundary moduleName="Distribution des Menaces (Donut Recharts)">
-        <ThreatCategoryDonutChart
-          threats={threats}
-          selectedCategory={categoryFilter}
-          onSelectCategory={setCategoryFilter}
-        />
+        <React.Suspense fallback={<div className="h-64 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement de la Distribution des Menaces...</div>}>
+          <ThreatCategoryDonutChart
+            threats={threats}
+            selectedCategory={categoryFilter}
+            onSelectCategory={setCategoryFilter}
+          />
+        </React.Suspense>
       </ErrorBoundary>
 
       {/* Threat Heatmap: System Areas Visualizer (Kernel, Registry, Startup, Filesystem) */}
       <ErrorBoundary moduleName="Heatmap des Zones Système">
-        <ThreatHeatmap onRunInConsole={onRunInConsole} />
+        <React.Suspense fallback={<div className="h-64 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement de la Heatmap Système...</div>}>
+          <ThreatHeatmap onRunInConsole={onRunInConsole} />
+        </React.Suspense>
       </ErrorBoundary>
 
       {/* Threat Intensity Map: D3-based Heatmap Visualizing Geographical Origin of Malicious C2 Connections */}
       <ErrorBoundary moduleName="Cartographie Forensique C2 (D3 / TopoJSON)">
-        <ThreatIntensityMap onRunInConsole={onRunInConsole} onNavigateTab={onNavigateTab} />
+        <React.Suspense fallback={<div className="h-96 flex items-center justify-center bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-500 font-mono animate-pulse">Chargement de la Cartographie Mondiale D3...</div>}>
+          <ThreatIntensityMap onRunInConsole={onRunInConsole} onNavigateTab={onNavigateTab} />
+        </React.Suspense>
       </ErrorBoundary>
 
       {/* Visual Threat Timeline Mini Preview & Gateway */}
@@ -1334,12 +1346,18 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
       </div>
 
       {/* Shared Command Runner Modal */}
-      <SharedCommandModal
-        isOpen={isSharedCommandModalOpen}
-        onClose={() => setIsSharedCommandModalOpen(false)}
-        selectedThreats={selectedThreatsList}
-        onExecuteSharedCommand={handleExecuteSharedCommand}
-      />
+      {isSharedCommandModalOpen && (
+        <ErrorBoundary moduleName="Modal des Commandes Partagées">
+          <React.Suspense fallback={null}>
+            <SharedCommandModal
+              isOpen={isSharedCommandModalOpen}
+              onClose={() => setIsSharedCommandModalOpen(false)}
+              selectedThreats={selectedThreatsList}
+              onExecuteSharedCommand={handleExecuteSharedCommand}
+            />
+          </React.Suspense>
+        </ErrorBoundary>
+      )}
     </div>
   );
 };

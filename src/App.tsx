@@ -16,9 +16,9 @@ import { generateAndDownloadZip } from './utils/zipGenerator';
 import { generateAndDownloadPdfReport } from './utils/pdfReportGenerator';
 import { apiFetch } from './utils/api';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 
-// Code-Splitting: Lazy load all 18 tab panels & modals to drastically reduce startup bundle size
+// Code-Splitting: Lazy load all 19 tab panels, modals & components to drastically reduce startup bundle size
+const KeyboardShortcutsModal = React.lazy(() => import('./components/KeyboardShortcutsModal').then(m => ({ default: m.KeyboardShortcutsModal })));
 const OverviewDashboard = React.lazy(() => import('./components/OverviewDashboard').then(m => ({ default: m.OverviewDashboard })));
 const ThreatTimeline = React.lazy(() => import('./components/ThreatTimeline').then(m => ({ default: m.ThreatTimeline })));
 const TaskManagerLive = React.lazy(() => import('./components/TaskManagerLive').then(m => ({ default: m.TaskManagerLive })));
@@ -1275,14 +1275,16 @@ export default function App() {
             )}
 
             {activeTab === 'heuristic' && (
-              <HeuristicEngine
-                onRunInConsole={handleExecuteCommand}
-                onNavigateTab={setActiveTab}
-                threats={threats}
-                onBulkMutateThreatStatus={mutateBulkThreatStatus}
-                onMassDismissThreats={massDismissThreats}
-                onRestoreThreats={restoreThreats}
-              />
+              <ErrorBoundary moduleName="Moteur Heuristique & Analyse Entropique">
+                <HeuristicEngine
+                  onRunInConsole={handleExecuteCommand}
+                  onNavigateTab={setActiveTab}
+                  threats={threats}
+                  onBulkMutateThreatStatus={mutateBulkThreatStatus}
+                  onMassDismissThreats={massDismissThreats}
+                  onRestoreThreats={restoreThreats}
+                />
+              </ErrorBoundary>
             )}
 
             {activeTab === 'console' && (
@@ -1297,15 +1299,19 @@ export default function App() {
                     </p>
                   </div>
                 </div>
-                <ConsoleTerminal
-                  logs={logs}
-                  onExecuteCommand={handleExecuteCommand}
-                  onClearLogs={clearSharedLogs}
-                  onExportReport={handleDownloadReport}
-                />
+                <ErrorBoundary moduleName="Console Terminal">
+                  <ConsoleTerminal
+                    logs={logs}
+                    onExecuteCommand={handleExecuteCommand}
+                    onClearLogs={clearSharedLogs}
+                    onExportReport={handleDownloadReport}
+                  />
+                </ErrorBoundary>
 
                 {/* Automated Windows EventLog Threat Parser */}
-                <LogAnalyzer onRunInConsole={handleExecuteCommand} />
+                <ErrorBoundary moduleName="Analyseur d'Événements Windows">
+                  <LogAnalyzer onRunInConsole={handleExecuteCommand} />
+                </ErrorBoundary>
               </div>
             )}
 
@@ -1459,14 +1465,20 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Global Keyboard Shortcut Manager Modal */}
-      <KeyboardShortcutsModal
-        isOpen={isShortcutsModalOpen}
-        onClose={() => setIsShortcutsModalOpen(false)}
-        shortcuts={shortcuts}
-        onTriggerShortcut={triggerShortcutById}
-        lastExecutedShortcut={lastExecutedShortcut}
-      />
+      {/* Global Keyboard Shortcut Manager Modal (Code-Split) */}
+      {isShortcutsModalOpen && (
+        <ErrorBoundary moduleName="Gestionnaire de Raccourcis Clavier">
+          <React.Suspense fallback={null}>
+            <KeyboardShortcutsModal
+              isOpen={isShortcutsModalOpen}
+              onClose={() => setIsShortcutsModalOpen(false)}
+              shortcuts={shortcuts}
+              onTriggerShortcut={triggerShortcutById}
+              lastExecutedShortcut={lastExecutedShortcut}
+            />
+          </React.Suspense>
+        </ErrorBoundary>
+      )}
 
       {/* Multi-User Collaboration & Real-Time Sync Modal (Code-Split) */}
       {isCollabModalOpen && (
