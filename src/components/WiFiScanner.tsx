@@ -127,7 +127,7 @@ export const WiFiScanner: React.FC<WiFiScannerProps> = ({ onRunInConsole }) => {
   const stats = useMemo(() => {
     const evilTwinCount = networks.filter(n => n.isEvilTwin).length;
     const unsecuredCount = networks.filter(n => n.isUnsecured).length;
-    const totalDeauth = networks.reduce((acc, n) => acc + n.deauthFramesDetected, 0);
+    const totalDeauth = networks.reduce((acc, n) => acc + (n.deauthFramesDetected || 0), 0);
 
     return {
       totalNetworks: networks.length,
@@ -543,7 +543,7 @@ export const WiFiScanner: React.FC<WiFiScannerProps> = ({ onRunInConsole }) => {
                       </div>
                     </div>
                     <div className="text-[11px] text-slate-300 pt-1">
-                      Inondation Deauth : <strong className="text-rose-400">{selectedNetwork.deauthFramesDetected} trames</strong>
+                      Inondation Deauth : <strong className="text-rose-400">{selectedNetwork.deauthFramesDetected != null ? `${selectedNetwork.deauthFramesDetected} trames` : 'N/A (Mode moniteur requis)'}</strong>
                     </div>
                   </div>
                 )}

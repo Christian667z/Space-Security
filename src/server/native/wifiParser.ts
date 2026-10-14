@@ -7,6 +7,8 @@
  * numeric signal/channel extraction, and security keyword categorization.
  */
 
+import { getVendorFromMac } from './oui.ts';
+
 export interface ParsedBssid {
   bssid: string;
   signalPercent: number;
@@ -33,7 +35,7 @@ export interface FlattenedWifiItem {
   vendor: string;
   isEvilTwin: boolean;
   isUnsecured: boolean;
-  deauthFramesDetected: number;
+  deauthFramesDetected: number | null;
   status: 'LEGITIMATE' | 'UNSECURED_WARNING' | 'SUSPICIOUS_EVIL_TWIN';
   firstSeen: string;
   recommendedAction: string;
@@ -197,10 +199,10 @@ export function parseNetshWifiOutput(rawOutput: string): FlattenedWifiItem[] {
         signalPercent: b.signalPercent || 65,
         signalDbm,
         security: net.security,
-        vendor: 'Borne Wi-Fi Détectée',
+        vendor: getVendorFromMac(b.bssid),
         isEvilTwin: false,
         isUnsecured,
-        deauthFramesDetected: 0,
+        deauthFramesDetected: null,
         status: isUnsecured ? 'UNSECURED_WARNING' : 'LEGITIMATE',
         firstSeen: new Date().toLocaleTimeString('fr-FR'),
         recommendedAction: isUnsecured
@@ -210,17 +212,17 @@ export function parseNetshWifiOutput(rawOutput: string): FlattenedWifiItem[] {
     });
   });
 
-  // Second pass: Mark suspicious duplicates sharing the same SSID with conflicting encryption as Evil Twin
+  // Second pass: Real local calculation for Evil Twin.
+  // Flag if same SSID appears with a different BSSID and conflicting security/encryption in the same scan.
   flattened.forEach((item) => {
-    const peerBssids = ssidMap.get(item.ssid);
-    if (peerBssids && peerBssids.length > 1) {
-      const matches = flattened.filter((f) => f.ssid === item.ssid);
-      const hasSecurityMismatch = matches.some((m) => m.security !== item.security);
+    const peers = flattened.filter((f) => f.ssid === item.ssid && f.bssid !== item.bssid);
+    if (peers.length > 0) {
+      const hasSecurityMismatch = peers.some((m) => m.security !== item.security);
       if (hasSecurityMismatch) {
         item.isEvilTwin = true;
         item.status = 'SUSPICIOUS_EVIL_TWIN';
-        item.deauthFramesDetected = 14;
-        item.recommendedAction = 'ALERTE EVIL TWIN : Deux bornes diffusent le même SSID avec des niveaux de chiffrement différents ! Déconnexion immédiate conseillée.';
+        item.deauthFramesDetected = null;
+        item.recommendedAction = 'ALERTE EVIL TWIN : Plusieurs bornes diffusent le même SSID avec des sécurités divergentes dans le même scan ! Déconnexion immédiate conseillée.';
       }
     }
   });

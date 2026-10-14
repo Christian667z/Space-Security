@@ -273,139 +273,27 @@ export function applyStateMutation(action: string, payload: any, operator: any, 
 }
 
 export function initSharedState(): void {
+  // Authoritative real scanner persistence: start empty, populated exclusively by real scans
   let initialThreats = dbManager.getThreats();
-  const defaultSeedThreats = [
-    {
-      id: 'threat-themes-explorer_exe',
-      name: 'Malware Dossier Thèmes : explorer.exe (Faux Explorateur)',
-      category: 'Trojan',
-      severity: 'CRITICAL' as const,
-      targetPath: 'C:\\Windows\\Resources\\Themes\\explorer.exe',
-      mitreTechnique: 'T1036.005 - Masquerading: Match Legitimate Name or Location',
-      lockedBySystem: true,
-      trustedInstallerLocked: true,
-      description: 'Faux binaire explorer.exe (32-bit) masqué dans C:\\Windows\\Resources\\Themes avec verrouillage TrustedInstaller et watchdog actif.',
-      status: 'ACTIVE' as const,
-      detectedAt: new Date().toISOString(),
-    },
-    {
-      id: 'threat-socket-c2-4444',
-      name: 'Balise C2 Sortante Active : Port 4444',
-      category: 'C2',
-      severity: 'CRITICAL' as const,
-      targetPath: 'TCP 127.0.0.1:49822 -> 194.26.29.112:4444 (PID 7412)',
-      mitreTechnique: 'T1071.001 - Application Layer Protocol: Web Protocols',
-      lockedBySystem: false,
-      trustedInstallerLocked: false,
-      description: "Connexion active et balisage régulier vers l'adresse C2 194.26.29.112 sur le port non-standard 4444.",
-      status: 'ACTIVE' as const,
-      detectedAt: new Date().toISOString(),
-    },
-    {
-      id: 'threat-kernel-minifilter',
-      name: 'Pilote Kernel Suspect : rootkit_hook.sys (Hook IRP Ring0)',
-      category: 'Kernel',
-      severity: 'CRITICAL' as const,
-      targetPath: 'C:\\Windows\\System32\\drivers\\rootkit_hook.sys',
-      mitreTechnique: 'T1014 - Rootkit: Kernel Minifilter Hook',
-      lockedBySystem: true,
-      trustedInstallerLocked: true,
-      description: 'Driver de filtre système non signé WHQL interceptant les requêtes IRP_MJ_CREATE pour masquer les fichiers malveillants.',
-      status: 'ACTIVE' as const,
-      detectedAt: new Date().toISOString(),
-    },
-    {
-      id: 'seed-threat-bits-1',
-      name: "Tâche BITS d'Exfiltration Détectée",
-      category: 'Persistence',
-      severity: 'HIGH' as const,
-      targetPath: 'bitsadmin /job WindowsHealthUpdate (194.26.29.112)',
-      mitreTechnique: 'T1197 - BITS Jobs',
-      lockedBySystem: true,
-      trustedInstallerLocked: false,
-      description: 'Tâche persistante BITS configurée pour transférer des données vers un C2 externe hostile.',
-      status: 'ACTIVE' as const,
-      detectedAt: new Date().toISOString(),
-    },
-    {
-      id: 'seed-threat-vad-2',
-      name: 'Injection Mémoire Suspecte (Reflective DLL)',
-      category: 'Memory',
-      severity: 'CRITICAL' as const,
-      targetPath: 'lsass.exe PID: 684 (Zone VAD EXECUTE_READWRITE)',
-      mitreTechnique: 'T1055.001 - Dynamic-link Library Injection',
-      lockedBySystem: true,
-      trustedInstallerLocked: true,
-      description: "Descripteur de mémoire virtuelle avec permissions d'exécution suspectes injecté dans lsass.exe.",
-      status: 'ACTIVE' as const,
-      detectedAt: new Date().toISOString(),
-    },
-    {
-      id: 'seed-threat-def-3',
-      name: 'Exclusion Windows Defender Illégitime',
-      category: 'Defender',
-      severity: 'MEDIUM' as const,
-      targetPath: 'C:\\Users\\Public\\ (MpPreference -ExclusionPath)',
-      mitreTechnique: 'T1562.001 - Disable or Modify Tools',
-      lockedBySystem: false,
-      trustedInstallerLocked: false,
-      description: 'Dossier public whitelisté frauduleusement dans les exclusions de protection antivirus.',
-      status: 'ACTIVE' as const,
-      detectedAt: new Date().toISOString(),
-    },
-    {
-      id: 'threat-vuln-kb5034441',
-      name: 'Vulnérabilité WinRE Non Corrigée (KB5034441)',
-      category: 'Privilege',
-      severity: 'HIGH' as const,
-      targetPath: 'KB5034441 (WinRE CVE-2024-20666)',
-      mitreTechnique: 'CVE-2024-20666 - BitLocker Security Feature Bypass',
-      lockedBySystem: false,
-      trustedInstallerLocked: false,
-      description: 'Correctif critique Windows WinRE non installé permettant le contournement du chiffrement BitLocker.',
-      status: 'ACTIVE' as const,
-      detectedAt: new Date().toISOString(),
-    },
-    {
-      id: 'threat-service-remoteregistry',
-      name: 'Service Vulnérable Actif : RemoteRegistry',
-      category: 'Trojan',
-      severity: 'HIGH' as const,
-      targetPath: 'RemoteRegistry (Service Windows)',
-      mitreTechnique: 'T1112 - Modify Registry',
-      lockedBySystem: false,
-      trustedInstallerLocked: false,
-      description: 'Registre à distance actif exposant les ruches système à des modifications RPC distantes.',
-      status: 'ACTIVE' as const,
-      detectedAt: new Date().toISOString(),
-    },
-    {
-      id: 'threat-hosts-alteration',
-      name: 'Altération Hostile du Fichier HOSTS',
-      category: 'Network',
-      severity: 'HIGH' as const,
-      targetPath: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
-      mitreTechnique: 'T1565.001 - Internal Defacement / DNS Poisoning',
-      lockedBySystem: false,
-      trustedInstallerLocked: false,
-      description: 'Redirections forcées vers 127.0.0.1 pour les domaines de télémétrie et de mise à jour antivirus Microsoft.',
-      status: 'ACTIVE' as const,
-      detectedAt: new Date().toISOString(),
-    },
-  ];
 
-  const existingCategories = new Set(initialThreats.map((t) => t.category));
-  const hasMissingPillars = ['Trojan', 'C2', 'Kernel', 'Persistence', 'Memory', 'Defender', 'Privilege', 'Network'].some(
-    (c) => !existingCategories.has(c)
-  );
-
-  if (initialThreats.length === 0 || hasMissingPillars) {
-    for (const t of defaultSeedThreats) {
-      if (!initialThreats.some((existing) => existing.id === t.id)) {
-        dbManager.saveThreat(t);
-      }
+  // If not in DEMO_MODE, remove any residual seed threats
+  if (process.env.DEMO_MODE !== 'true') {
+    const seedIds = new Set([
+      'threat-themes-explorer_exe',
+      'threat-socket-c2-4444',
+      'threat-kernel-minifilter',
+      'seed-threat-bits-1',
+      'seed-threat-vad-2',
+      'seed-threat-def-3',
+      'threat-vuln-kb5034441',
+      'threat-service-remoteregistry',
+      'threat-hosts-alteration',
+    ]);
+    const cleanThreats = initialThreats.filter((t) => !seedIds.has(t.id));
+    if (cleanThreats.length !== initialThreats.length) {
+      dbManager.dismissThreats(Array.from(seedIds));
+      initialThreats = cleanThreats;
     }
-    initialThreats = dbManager.getThreats();
   }
 
   let initialLogs = dbManager.getAuditLogs(100);

@@ -116,8 +116,8 @@ export function resolveAuthenticatedOperator(req: Request): AuthenticatedOperato
   if (isLoopback) {
     return {
       id: 'OP-LOCAL',
-      name: sanitizedHandle ? `${sanitizedHandle} [Local]` : 'Analyste SOC Local',
-      role: 'Administrateur SOC (Local)',
+      name: sanitizedHandle ? `${sanitizedHandle} (Local)` : 'Analyste SOC Local',
+      role: 'Administrateur SOC (Session Locale)',
       ip: '127.0.0.1',
       verified: true,
     };
@@ -125,10 +125,10 @@ export function resolveAuthenticatedOperator(req: Request): AuthenticatedOperato
 
   return {
     id: `OP-${cleanIp.replace(/\./g, '')}`,
-    name: sanitizedHandle ? `${sanitizedHandle} [${cleanIp}]` : `Analyste Réseau [${cleanIp}]`,
-    role: 'Opérateur SOC Certifié',
+    name: sanitizedHandle ? `${sanitizedHandle} [Client ${cleanIp}]` : `Analyste Réseau [${cleanIp}]`,
+    role: 'Opérateur Réseau (Distant)',
     ip: cleanIp,
-    verified: true,
+    verified: false,
   };
 }
 

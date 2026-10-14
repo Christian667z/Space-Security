@@ -4,7 +4,7 @@ import { logger } from './logger.ts';
 export interface ThreatIntelResult {
   target: string;
   targetType: 'IP' | 'HASH';
-  source: 'VIRUSTOTAL_API' | 'ABUSEIPDB_API' | 'CACHED' | 'HEURISTIC_FORENSIC';
+  source: 'VIRUSTOTAL_API' | 'MALWAREBAZAAR_API' | 'ABUSEIPDB_API' | 'LOCAL_RFC1918' | 'CACHED' | 'UNAVAILABLE';
   reputationScore: number; // 0 to 100 (0 = clean, 100 = critical threat)
   verdict: 'CLEAN' | 'SUSPICIOUS' | 'MALICIOUS' | 'UNKNOWN';
   detectionRatio?: string; // e.g. "45/72"
@@ -14,11 +14,19 @@ export interface ThreatIntelResult {
   categories?: string[];
   externalUrl: string;
   rawDetails?: any;
+  reason?: string;
 }
 
+/**
+ * Real Hash Reputation Lookup:
+ * 1. Local SQLite cache
+ * 2. VirusTotal API v3 (if VIRUSTOTAL_API_KEY configured)
+ * 3. MalwareBazaar API (https://mb-api.abuse.ch/api/v1/ - public free malware database)
+ * 4. Otherwise returns authentic UNAVAILABLE without fabricating detections
+ */
 export async function checkHashReputation(hash: string): Promise<ThreatIntelResult> {
   const cleanHash = hash.trim().toLowerCase();
-  
+
   // 1. Check local SQLite cache first
   const cached = dbManager.getIntelCache(cleanHash);
   if (cached) {
@@ -71,31 +79,77 @@ export async function checkHashReputation(hash: string): Promise<ThreatIntelResu
     }
   }
 
-  // 3. Fallback Heuristic Inspection
-  // Known malware signature hashes from detection engine
-  const isKnownBad = [
-    'c2beac0n', 'mimikatz', 'darkcomet', 'swisyn', 'cobaltstrike'
-  ].some(k => cleanHash.includes(k));
+  // 3. Query MalwareBazaar public API (abuse.ch) - Real-time verified malware database (free, no API key required)
+  try {
+    const mbRes = await fetch('https://mb-api.abuse.ch/api/v1/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ query: 'get_info', hash: cleanHash }).toString(),
+    });
 
-  const score = isKnownBad ? 92 : 10;
-  const verdict = isKnownBad ? 'MALICIOUS' : 'CLEAN';
+    if (mbRes.ok) {
+      const mbData = await mbRes.json();
+      if (mbData.query_status === 'ok' && Array.isArray(mbData.data) && mbData.data.length > 0) {
+        const sample = mbData.data[0];
+        const result: ThreatIntelResult = {
+          target: cleanHash,
+          targetType: 'HASH',
+          source: 'MALWAREBAZAAR_API',
+          reputationScore: 95,
+          verdict: 'MALICIOUS',
+          detectionRatio: `${sample.signature || sample.file_type || 'Malware'}` ,
+          positiveEngines: 1,
+          totalEngines: 1,
+          lastAnalysisDate: sample.first_seen || new Date().toISOString(),
+          categories: sample.tags || ['Malware'],
+          externalUrl: `https://bazaar.abuse.ch/sample/${cleanHash}/`,
+          rawDetails: sample,
+        };
+        dbManager.setIntelCache(cleanHash, 'HASH', 95, 'MALICIOUS', result);
+        return result;
+      } else if (mbData.query_status === 'hash_not_found') {
+        const cleanResult: ThreatIntelResult = {
+          target: cleanHash,
+          targetType: 'HASH',
+          source: 'MALWAREBAZAAR_API',
+          reputationScore: 0,
+          verdict: 'CLEAN',
+          detectionRatio: '0/1',
+          positiveEngines: 0,
+          totalEngines: 1,
+          externalUrl: `https://bazaar.abuse.ch/browse/`,
+          reason: 'Empreinte non répertoriée dans la base de malwares MalwareBazaar.',
+        };
+        dbManager.setIntelCache(cleanHash, 'HASH', 0, 'CLEAN', cleanResult);
+        return cleanResult;
+      }
+    }
+  } catch (err) {
+    logger.debug({ err, hash: cleanHash }, '[ThreatIntel] MalwareBazaar query error');
+  }
 
+  // 4. No verified threat intel source available
   const fallbackResult: ThreatIntelResult = {
     target: cleanHash,
     targetType: 'HASH',
-    source: 'HEURISTIC_FORENSIC',
-    reputationScore: score,
-    verdict,
-    detectionRatio: isKnownBad ? '58/72' : '0/72',
-    positiveEngines: isKnownBad ? 58 : 0,
-    totalEngines: 72,
+    source: 'UNAVAILABLE',
+    reputationScore: 0,
+    verdict: 'UNKNOWN',
     externalUrl: `https://www.virustotal.com/gui/file/${cleanHash}`,
+    reason: 'Aucune donnée de renseignement sur les menaces disponible (clé VirusTotal non configurée et non répertorié sur MalwareBazaar).',
   };
 
-  dbManager.setIntelCache(cleanHash, 'HASH', score, verdict, fallbackResult);
   return fallbackResult;
 }
 
+/**
+ * Real IP Reputation Lookup:
+ * 1. Local SQLite cache
+ * 2. RFC 1918 Private LAN / Loopback detection
+ * 3. AbuseIPDB API v2 (if ABUSEIPDB_API_KEY configured)
+ * 4. VirusTotal IP v3 (if VIRUSTOTAL_API_KEY configured)
+ * 5. Otherwise returns authentic UNAVAILABLE without fabricated score
+ */
 export async function checkIpReputation(ip: string): Promise<ThreatIntelResult> {
   const cleanIp = ip.trim();
 
@@ -105,11 +159,37 @@ export async function checkIpReputation(ip: string): Promise<ThreatIntelResult> 
     return { ...cached, source: 'CACHED' };
   }
 
+  // 2. Private LAN check
+  const isPrivate =
+    cleanIp === '127.0.0.1' ||
+    cleanIp === 'localhost' ||
+    cleanIp === '::1' ||
+    cleanIp.startsWith('192.168.') ||
+    cleanIp.startsWith('10.') ||
+    (cleanIp.startsWith('172.') && parseInt(cleanIp.split('.')[1] || '0', 10) >= 16 && parseInt(cleanIp.split('.')[1] || '0', 10) <= 31);
+
+  if (isPrivate) {
+    const localResult: ThreatIntelResult = {
+      target: cleanIp,
+      targetType: 'IP',
+      source: 'LOCAL_RFC1918',
+      reputationScore: 0,
+      verdict: 'CLEAN',
+      detectionRatio: '0/0',
+      positiveEngines: 0,
+      totalEngines: 0,
+      externalUrl: '',
+      reason: 'Adresse IP privée locale non routable sur Internet (RFC 1918).',
+    };
+    dbManager.setIntelCache(cleanIp, 'IP', 0, 'CLEAN', localResult);
+    return localResult;
+  }
+
   const settings = dbManager.getAllSettings();
   const abuseApiKey = process.env.ABUSEIPDB_API_KEY || settings.abuseIpDbApiKey;
   const vtApiKey = process.env.VIRUSTOTAL_API_KEY || settings.virusTotalApiKey;
 
-  // 2. Query AbuseIPDB v2 if key available
+  // 3. Query AbuseIPDB v2 if key available
   if (abuseApiKey && abuseApiKey.trim().length > 10) {
     try {
       const response = await fetch(`https://api.abuseipdb.com/api/v2/check?ipAddress=${encodeURIComponent(cleanIp)}&maxAgeInDays=90&verbose=true`, {
@@ -156,7 +236,7 @@ export async function checkIpReputation(ip: string): Promise<ThreatIntelResult> 
     }
   }
 
-  // 3. Query VirusTotal IP v3 if key available
+  // 4. Query VirusTotal IP v3 if key available
   if (vtApiKey && vtApiKey.trim().length > 10) {
     try {
       const response = await fetch(`https://www.virustotal.com/api/v3/ip_addresses/${cleanIp}`, {
@@ -194,23 +274,16 @@ export async function checkIpReputation(ip: string): Promise<ThreatIntelResult> 
     }
   }
 
-  // 4. Autonomous Heuristic / BGP / ASN Analysis Fallback
-  const isPrivate = cleanIp === '127.0.0.1' || cleanIp === 'localhost' || cleanIp.startsWith('192.168.') || cleanIp.startsWith('10.');
-  const score = isPrivate ? 0 : 15;
-  const verdict = isPrivate ? 'CLEAN' : 'CLEAN';
-
+  // 5. No key available for IP threat intelligence
   const fallbackResult: ThreatIntelResult = {
     target: cleanIp,
     targetType: 'IP',
-    source: 'HEURISTIC_FORENSIC',
-    reputationScore: score,
-    verdict,
-    detectionRatio: '0/88',
-    positiveEngines: 0,
-    totalEngines: 88,
+    source: 'UNAVAILABLE',
+    reputationScore: 0,
+    verdict: 'UNKNOWN',
     externalUrl: `https://www.virustotal.com/gui/ip-address/${cleanIp}`,
+    reason: 'Clé d\'API AbuseIPDB ou VirusTotal requise pour la réputation IP complète.',
   };
 
-  dbManager.setIntelCache(cleanIp, 'IP', score, verdict, fallbackResult);
   return fallbackResult;
 }

@@ -50,10 +50,127 @@ import { persistentPs } from './src/server/native/persistentPowerShell.ts';
 import { parseNetshWifiOutput } from './src/server/native/wifiParser.ts';
 import { nativeTelemetry } from './src/server/native/systemTelemetry.ts';
 import { nativeEngine } from './src/server/native/nativeEngine.ts';
+import { ok, none } from './src/server/dataSource.ts';
 
 const execAsync = promisify(exec);
 const appDir = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 const ai = new GoogleGenAI();
+
+/**
+ * Universal HTTPS IP Geolocation Provider Chain (Zero unencrypted HTTP)
+ * Priority: 1. ipwho.is (HTTPS) -> 2. api.ipapi.is (HTTPS) -> 3. ipinfo.io (HTTPS)
+ */
+async function resolveGeoIpHttps(targetIp: string): Promise<any | null> {
+  const isLocal = !targetIp || targetIp === '127.0.0.1' || targetIp === '::1' || targetIp.startsWith('10.') || targetIp.startsWith('192.168.') || targetIp.startsWith('172.');
+  const query = isLocal ? '' : targetIp.trim();
+
+  // 1. ipwho.is (HTTPS, comprehensive BGP, ASN, ISP, Security)
+  try {
+    const res = await fetch(`https://ipwho.is/${query}`, { signal: AbortSignal.timeout(4000) });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success !== false && data.ip) {
+        return {
+          provider: 'ipwho.is (HTTPS)',
+          ip: data.ip,
+          city: data.city || '',
+          country: data.country || '',
+          countryCode: data.country_code || '',
+          continent: data.continent || '',
+          latitude: typeof data.latitude === 'number' ? data.latitude : 0,
+          longitude: typeof data.longitude === 'number' ? data.longitude : 0,
+          isp: data.connection?.isp || data.isp || '',
+          org: data.connection?.org || data.connection?.isp || '',
+          asn: data.connection?.asn ? `AS${data.connection.asn}` : '',
+          asname: data.connection?.org || '',
+          timezone: data.timezone?.id || 'UTC',
+          regionName: data.region || '',
+          district: '',
+          zip: data.postal || '',
+          proxy: Boolean(data.security?.proxy),
+          hosting: Boolean(data.security?.hosting),
+          reverse: data.connection?.domain || '',
+        };
+      }
+    }
+  } catch {}
+
+  // 2. api.ipapi.is (HTTPS)
+  try {
+    const res = await fetch(`https://api.ipapi.is?q=${query}`, { signal: AbortSignal.timeout(4000) });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.ip) {
+        return {
+          provider: 'ipapi.is (HTTPS)',
+          ip: data.ip,
+          city: data.location?.city || '',
+          country: data.location?.country || '',
+          countryCode: data.location?.country_code || '',
+          continent: data.location?.continent || '',
+          latitude: typeof data.location?.latitude === 'number' ? data.location.latitude : 0,
+          longitude: typeof data.location?.longitude === 'number' ? data.location.longitude : 0,
+          isp: data.company?.name || data.asn?.org || '',
+          org: data.asn?.org || data.company?.name || '',
+          asn: data.asn?.asn ? `AS${data.asn.asn}` : '',
+          asname: data.asn?.org || '',
+          timezone: data.location?.timezone || 'UTC',
+          regionName: data.location?.state || '',
+          district: '',
+          zip: data.location?.zip || '',
+          proxy: Boolean(data.is_proxy),
+          hosting: Boolean(data.is_datacenter),
+          reverse: data.company?.domain || '',
+        };
+      }
+    }
+  } catch {}
+
+  // 3. ipinfo.io (HTTPS)
+  try {
+    const res = await fetch(`https://ipinfo.io/${query}/json`, { signal: AbortSignal.timeout(4000) });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.ip) {
+        const [latStr, lonStr] = (data.loc || '').split(',');
+        return {
+          provider: 'ipinfo.io (HTTPS)',
+          ip: data.ip,
+          city: data.city || '',
+          country: data.country || '',
+          countryCode: data.country || '',
+          continent: '',
+          latitude: parseFloat(latStr) || 0,
+          longitude: parseFloat(lonStr) || 0,
+          isp: data.org || '',
+          org: data.org || '',
+          asn: data.org || '',
+          asname: data.org || '',
+          timezone: data.timezone || 'UTC',
+          regionName: data.region || '',
+          district: '',
+          zip: data.postal || '',
+          proxy: false,
+          hosting: false,
+          reverse: data.hostname || '',
+        };
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+let serverPublicOriginCache: { lat: number; lon: number; ip: string } | null = null;
+async function getServerPublicOrigin(): Promise<{ lat: number; lon: number; ip: string } | null> {
+  if (serverPublicOriginCache) return serverPublicOriginCache;
+  const geo = await resolveGeoIpHttps('');
+  if (geo && (geo.latitude !== 0 || geo.longitude !== 0)) {
+    serverPublicOriginCache = { lat: geo.latitude, lon: geo.longitude, ip: geo.ip };
+    return serverPublicOriginCache;
+  }
+  return null;
+}
 
 // Helper for CPU calculation across ticks
 let prevCpuTimes = os.cpus().map(c => c.times);
@@ -458,10 +575,10 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
       const cpuUsage = getCpuUsage();
       const hwSpecs = await getWindowsHardwareSpecs(req.query);
 
-      const totalMem = hwSpecs.totalRamBytes;
+      const totalMem = os.totalmem();
       const freeMem = os.freemem();
-      const usedMem = Math.max(0, totalMem - freeMem);
-      const memUsagePercent = Math.max(10, Math.min(95, Math.round((usedMem / totalMem) * 100)));
+      const usedMem = totalMem - freeMem;
+      const memUsagePercent = totalMem > 0 ? Math.round((usedMem / totalMem) * 100) : 0;
 
       const uptimeSec = os.uptime();
       const loadAvg = os.loadavg();
@@ -488,7 +605,7 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
           usagePercent: cpuUsage,
           model: hwSpecs.cpuModel,
           cores: hwSpecs.cores,
-          speedMhz: cpus[0]?.speed || 3400,
+          speedMhz: cpus[0]?.speed || 0,
           loadAvg,
         },
         memory: {
@@ -604,7 +721,7 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
     }
   });
 
-  // API 3: IP Geolocation (Résolution dynamique de l'hôte local)
+  // API 3: IP Geolocation (Résolution dynamique HTTPS de l'hôte - Aucun repli statique)
   app.get('/api/system/geo', async (req, res) => {
     try {
       const forwarded = req.headers['x-forwarded-for'];
@@ -615,46 +732,27 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
       const isLocal = !rawIp || rawIp === '127.0.0.1' || rawIp === '::1' || rawIp.startsWith('10.') || rawIp.startsWith('192.168.') || rawIp.startsWith('172.');
       const queryTarget = isLocal ? '' : rawIp;
 
-      const response = await fetch(`http://ip-api.com/json/${queryTarget}`);
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.status !== 'fail') {
-          return res.json({
-            success: true,
-            ip: data.query || rawIp || '192.168.1.42',
-            city: data.city || 'Paris',
-            country: data.country || 'France',
-            countryCode: data.countryCode || 'FR',
-            latitude: data.lat || 48.8566,
-            longitude: data.lon || 2.3522,
-            isp: data.isp || 'Local Provider',
-            regionName: data.regionName || '',
-            timezone: data.timezone || 'Europe/Paris',
-          });
-        }
+      const data = await resolveGeoIpHttps(queryTarget);
+      if (data && (data.latitude !== 0 || data.longitude !== 0 || data.city)) {
+        return res.json({
+          success: true,
+          ip: data.ip || rawIp,
+          city: data.city,
+          country: data.country,
+          countryCode: data.countryCode,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          isp: data.isp,
+          regionName: data.regionName,
+          timezone: data.timezone,
+          source: 'live',
+          provider: data.provider,
+        });
       }
 
-      res.json({
-        success: true,
-        ip: rawIp && !isLocal ? rawIp : '192.168.1.42',
-        city: 'Paris',
-        country: 'France',
-        countryCode: 'FR',
-        latitude: 48.8566,
-        longitude: 2.3522,
-        isp: 'Local Endpoint',
-      });
+      return res.status(502).json(none('géolocalisation indisponible'));
     } catch {
-      res.json({
-        success: true,
-        ip: '192.168.1.42',
-        city: 'Paris',
-        country: 'France',
-        countryCode: 'FR',
-        latitude: 48.8566,
-        longitude: 2.3522,
-        isp: 'Local Endpoint',
-      });
+      return res.status(502).json(none('géolocalisation indisponible'));
     }
   });
 
@@ -1195,24 +1293,6 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
               detectedAt: new Date().toISOString(),
             });
           }
-        }
-      } else {
-        // Preview/demo environment: include Themes rogue explorer case study if not cleaned
-        const isCleaned = req.query.cleaned === 'true';
-        if (!isCleaned) {
-          realThreatsFound.push({
-            id: 'threat-themes-explorer_exe',
-            name: 'Malware Dossier Thèmes : explorer.exe',
-            category: 'Trojan',
-            severity: 'CRITICAL',
-            targetPath: 'C:\\Windows\\Resources\\Themes\\explorer.exe',
-            mitreTechnique: 'T1036.005 - Masquerading',
-            lockedBySystem: true,
-            trustedInstallerLocked: true,
-            description: 'Faux binaire explorer.exe (32-bit) masqué dans C:\\Windows\\Resources\\Themes avec verrouillage TrustedInstaller.',
-            status: 'ACTIVE',
-            detectedAt: new Date().toISOString(),
-          });
         }
       }
 

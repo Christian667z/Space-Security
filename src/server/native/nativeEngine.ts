@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { exec } from 'child_process';
 import { persistentPs } from './persistentPowerShell.ts';
 import { parseNetshWifiOutput, type FlattenedWifiItem } from './wifiParser.ts';
+import { getVendorFromMac } from './oui.ts';
 import { safeExecFile } from '../safeExec.ts';
 import { logger } from '../logger.ts';
 
@@ -418,14 +419,15 @@ export class SpaceSecNativeEngine {
     if (cached) return cached;
 
     if (!this.isWin) {
-      const mock = {
+      const unsupported = {
         status: {
-          active: true,
-          realtime: true,
-          signatureAgeDays: 0,
-          serviceEnabled: true,
-          engineVersion: '1.1.24030.4 (Noyau Virtuel)',
-          signaturesVersion: '1.407.12.0',
+          active: false,
+          realtime: false,
+          signatureAgeDays: null as any,
+          serviceEnabled: false,
+          engineVersion: 'Non disponible (hors Windows)',
+          signaturesVersion: 'Non disponible (hors Windows)',
+          reason: 'Windows Defender est absent hors plateforme Windows (unsupported)',
         },
         exclusions: {
           paths: [],
@@ -434,8 +436,8 @@ export class SpaceSecNativeEngine {
           isCompromised: false,
         },
       };
-      this.setCache(cacheKey, mock);
-      return mock;
+      this.setCache(cacheKey, unsupported);
+      return unsupported;
     }
 
     let status: DefenderStatusTelemetry = {
@@ -553,10 +555,54 @@ export class SpaceSecNativeEngine {
       }
     }
 
-    let flatNetworks = parseNetshWifiOutput(rawOutput);
+    let flatNetworks: FlattenedWifiItem[] = [];
+    if (this.isWin) {
+      try {
+        const { stdout } = await safeExecFile('netsh.exe', ['wlan', 'show', 'networks', 'mode=bssid'], { timeout: 4000 });
+        rawOutput = stdout;
+        flatNetworks = parseNetshWifiOutput(rawOutput);
+      } catch (e: any) {
+        logger.debug({ err: e.message }, '[NativeEngine] netsh scan failed');
+      }
+    } else {
+      // Linux nmcli query
+      try {
+        const { stdout } = await safeExecFile('nmcli', ['-t', '-f', 'SSID,BSSID,CHAN,SIGNAL,SECURITY', 'dev', 'wifi', 'list'], { timeout: 4000 });
+        if (stdout && stdout.trim()) {
+          const lines = stdout.split('\n').filter(l => l.trim());
+          flatNetworks = lines.map((line, idx) => {
+            const parts = line.split(':');
+            const ssid = parts[0] || 'Réseau Inconnu';
+            const bssid = parts.slice(1, 7).join(':') || '00:00:00:00:00:00';
+            const channel = parseInt(parts[7] || '1', 10) || 1;
+            const signalPercent = parseInt(parts[8] || '50', 10) || 50;
+            const security = parts[9] || 'Ouvert / Open';
+            const isUnsecured = security.toLowerCase().includes('open') || security.toLowerCase().includes('ouvert') || security === '--';
+            const signalDbm = Math.round(signalPercent / 2 - 100);
+            return {
+              id: `wifi-lin-${idx}`,
+              ssid,
+              bssid: bssid.toUpperCase(),
+              channel,
+              frequency: channel > 14 ? '5 GHz' : '2.4 GHz',
+              signalPercent,
+              signalDbm,
+              security,
+              vendor: getVendorFromMac(bssid),
+              isEvilTwin: false,
+              isUnsecured,
+              deauthFramesDetected: null,
+              status: isUnsecured ? 'UNSECURED_WARNING' as const : 'LEGITIMATE' as const,
+              firstSeen: new Date().toLocaleTimeString('fr-FR'),
+              recommendedAction: isUnsecured ? 'Réseau sans chiffrement détecté.' : 'Point d\'accès nominal.',
+            };
+          });
+        }
+      } catch {}
+    }
 
-    // If running in cloud container / no Wi-Fi interface attached, provide authentic simulated RF telemetry
-    if (flatNetworks.length === 0) {
+    // Only if DEMO_MODE === 'true' can demo test fixtures be injected
+    if (flatNetworks.length === 0 && process.env.DEMO_MODE === 'true') {
       flatNetworks = [
         {
           id: 'wifi-sim-1',
@@ -567,47 +613,13 @@ export class SpaceSecNativeEngine {
           signalPercent: 92,
           signalDbm: -54,
           security: 'WPA3-Personal',
-          vendor: 'Cisco Systems / Meraki',
+          vendor: getVendorFromMac('E4:8D:8C:31:AA:10'),
           isEvilTwin: false,
           isUnsecured: false,
-          deauthFramesDetected: 0,
+          deauthFramesDetected: null,
           status: 'LEGITIMATE',
           firstSeen: new Date().toLocaleTimeString('fr-FR'),
           recommendedAction: 'Point d\'accès chiffré nominal avec protection WPA3.',
-        },
-        {
-          id: 'wifi-sim-2',
-          ssid: 'FreeWifi_Public_Guest',
-          bssid: '24:0A:C4:9B:41:88',
-          channel: 6,
-          frequency: '2.4 GHz (802.11n)',
-          signalPercent: 68,
-          signalDbm: -66,
-          security: 'Ouvert / Open',
-          vendor: 'Espressif / TP-Link',
-          isEvilTwin: false,
-          isUnsecured: true,
-          deauthFramesDetected: 0,
-          status: 'UNSECURED_WARNING',
-          firstSeen: new Date().toLocaleTimeString('fr-FR'),
-          recommendedAction: 'Réseau sans mot de passe. Risque d\'interception : activez impérativement un VPN.',
-        },
-        {
-          id: 'wifi-sim-3',
-          ssid: 'Corporate-Secure-5G',
-          bssid: '00:14:22:98:F1:C3',
-          channel: 1,
-          frequency: '2.4 GHz (802.11g)',
-          signalPercent: 74,
-          signalDbm: -63,
-          security: 'WPA2-Personal',
-          vendor: 'Rogue AP / Alfa Networks',
-          isEvilTwin: true,
-          isUnsecured: false,
-          deauthFramesDetected: 18,
-          status: 'SUSPICIOUS_EVIL_TWIN',
-          firstSeen: new Date().toLocaleTimeString('fr-FR'),
-          recommendedAction: 'ALERTE EVIL TWIN : Deux bornes diffusent le même SSID avec des niveaux de chiffrement différents ! Déconnexion immédiate conseillée.',
         },
       ];
     }
@@ -674,17 +686,54 @@ export class SpaceSecNativeEngine {
 
     const suspiciousProcesses = procs.filter(p => p.isSuspicious);
 
+    let hotfixesCount = 0;
+    let servicesReport: Array<{ name: string; displayName: string; status: string; isVulnerable: boolean }> = [];
+
+    if (this.isWin) {
+      try {
+        const hotfixOut = await persistentPs.execute('(Get-HotFix | Measure-Object).Count');
+        const parsed = parseInt(hotfixOut.trim(), 10);
+        if (!isNaN(parsed)) hotfixesCount = parsed;
+      } catch {}
+
+      try {
+        const servicesJson = await persistentPs.executeJson<any[]>(
+          'Get-Service | Select-Object -Property Name, DisplayName, Status -First 40'
+        );
+        if (Array.isArray(servicesJson)) {
+          servicesReport = servicesJson.map(s => ({
+            name: s.Name,
+            displayName: s.DisplayName || s.Name,
+            status: s.Status === 4 || s.Status === 'Running' ? 'Running' : 'Stopped',
+            isVulnerable: ['RemoteRegistry', 'upnphost', 'SSDPSRV'].includes(s.Name),
+          }));
+        }
+      } catch {}
+    } else {
+      try {
+        const { stdout } = await safeExecFile('systemctl', ['list-units', '--type=service', '--state=running', '--no-pager', '--plain'], { timeout: 2500 });
+        const lines = stdout.split('\n').filter(l => l.includes('.service'));
+        servicesReport = lines.slice(0, 30).map(l => {
+          const parts = l.trim().split(/\s+/);
+          const name = parts[0].replace('.service', '');
+          return {
+            name,
+            displayName: name,
+            status: 'Running',
+            isVulnerable: false,
+          };
+        });
+      } catch {}
+    }
+
     return {
       defenderStatus: defenderTelemetry.status,
       defenderExclusions: defenderTelemetry.exclusions,
       startupPrograms,
       bitsJobs: bitsJobs.map(j => ({ id: j.id, name: j.jobName, state: j.state, remoteUrl: j.remoteUrl, isSuspicious: j.isSuspicious })),
       hostsReport,
-      hotfixesCount: this.isWin ? 8 : 14,
-      servicesReport: [
-        { name: 'Spooler', displayName: 'Spouleur d\'impression', status: 'Running', isVulnerable: false },
-        { name: 'RemoteRegistry', displayName: 'Registre à distance', status: 'Stopped', isVulnerable: false },
-      ],
+      hotfixesCount,
+      servicesReport,
       suspiciousProcesses,
       processesScanned: procs.length,
       deepScanCompleted: deep,

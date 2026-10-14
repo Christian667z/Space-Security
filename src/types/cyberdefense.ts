@@ -78,7 +78,7 @@ export interface WiFiNetworkItem {
   isEvilTwin: boolean;
   evilTwinReason?: string;
   isUnsecured: boolean;
-  deauthFramesDetected: number;
+  deauthFramesDetected?: number | null;
   status: 'LEGITIMATE' | 'SUSPECT_EVIL_TWIN' | 'UNSECURED_WARNING' | 'BLOCKED';
   firstSeen: string;
   recommendedAction: string;
