@@ -10,6 +10,24 @@ import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 import crypto from 'crypto';
 
+import rateLimit from 'express-rate-limit';
+import { dbManager } from './src/server/db.ts';
+import { logger, getLogFilePath } from './src/server/logger.ts';
+import {
+  killProcessSchema,
+  quarantineActionSchema,
+  threatStatusUpdateSchema,
+  bulkThreatStatusSchema,
+  dismissThreatsSchema,
+  settingsUpdateSchema,
+  threatIntelCheckSchema,
+  validateBody,
+  validateQuery,
+} from './src/server/validators.ts';
+import { requireAuth, getLocalAuthToken, validateWebSocketConnection } from './src/server/auth.ts';
+import { checkHashReputation, checkIpReputation } from './src/server/threatIntel.ts';
+import { backgroundScheduler } from './src/server/scheduler.ts';
+
 const execAsync = promisify(exec);
 const appDir = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 const ai = new GoogleGenAI();
@@ -256,56 +274,141 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
   const app = express();
   const PORT = resolveServerPort(portOverride);
 
+  // Initialize SQLite persistent database (sql.js / WASM)
+  await dbManager.init();
+
+  // Rate Limiting Middlewares
+  const generalApiLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: 'Fréquence de requêtes excessive.', code: 'RATE_LIMIT_EXCEEDED' },
+  });
+
+  const sensitiveActionLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      success: false,
+      error: 'Protection anti-abus : Trop d\'actions sensibles consécutives. Patientez 1 minute.',
+      code: 'RATE_LIMIT_EXCEEDED',
+    },
+  });
+
+  const intelLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 45,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      success: false,
+      error: 'Quota de requêtes Threat Intel atteint pour cette minute.',
+      code: 'RATE_LIMIT_EXCEEDED',
+    },
+  });
+
   app.use(express.json());
+  app.use('/api/', generalApiLimiter);
 
   // =========================================================================
-  // SHARED STATE ENGINE & THREAT REPOSITORY
+  // PERSISTENT SQLITE THREAT REPOSITORY & SHARED STATE
   // =========================================================================
-  const sharedState = {
-    threats: [] as Array<{
-      id: string;
-      name: string;
-      category: string;
-      severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-      targetPath: string;
-      mitreTechnique: string;
-      lockedBySystem: boolean;
-      trustedInstallerLocked: boolean;
-      description: string;
-      status: 'ACTIVE' | 'NEUTRALIZED' | 'DISMISSED';
-    }>,
-    logs: [
+  let initialThreats = dbManager.getThreats();
+  if (initialThreats.length === 0) {
+    const defaultSeedThreats = [
       {
-        id: `log-init-1`,
+        id: 'seed-threat-bits-1',
+        name: 'Tâche BITS d\'Exfiltration Détectée',
+        category: 'Persistence',
+        severity: 'HIGH' as const,
+        targetPath: 'bitsadmin /job WindowsHealthUpdate (194.26.29.112)',
+        mitreTechnique: 'T1197 - BITS Jobs',
+        lockedBySystem: true,
+        trustedInstallerLocked: false,
+        description: 'Tâche persistante BITS configurée pour transférer des données vers un C2 externe hostile.',
+        status: 'ACTIVE' as const,
+      },
+      {
+        id: 'seed-threat-vad-2',
+        name: 'Injection Mémoire Suspecte (Reflective DLL)',
+        category: 'Memory',
+        severity: 'CRITICAL' as const,
+        targetPath: 'lsass.exe PID: 684 (Zone VAD EXECUTE_READWRITE)',
+        mitreTechnique: 'T1055.001 - Dynamic-link Library Injection',
+        lockedBySystem: true,
+        trustedInstallerLocked: true,
+        description: 'Descripteur de mémoire virtuelle avec permissions d\'exécution suspectes injecté dans lsass.exe.',
+        status: 'ACTIVE' as const,
+      },
+      {
+        id: 'seed-threat-def-3',
+        name: 'Exclusion Windows Defender Illégitime',
+        category: 'Defender',
+        severity: 'MEDIUM' as const,
+        targetPath: 'C:\\Users\\Public\\ (MpPreference -ExclusionPath)',
+        mitreTechnique: 'T1562.001 - Disable or Modify Tools',
+        lockedBySystem: false,
+        trustedInstallerLocked: false,
+        description: 'Dossier public whitelisté frauduleusement dans les exclusions de protection antivirus.',
+        status: 'ACTIVE' as const,
+      },
+    ];
+    for (const t of defaultSeedThreats) {
+      dbManager.saveThreat(t);
+    }
+    initialThreats = dbManager.getThreats();
+  }
+
+  let initialLogs = dbManager.getAuditLogs(100);
+  if (initialLogs.length === 0) {
+    const seedLogs = [
+      {
+        id: 'log-init-1',
         timestamp: new Date().toLocaleTimeString('fr-FR'),
         level: 'INFO',
         tag: 'INITIALISATION',
         text: 'Initialisation de Space Security CyberDefense Suite v3.0 KERNEL EDITION...',
+        operatorName: 'System Kernel',
       },
       {
-        id: `log-init-2`,
+        id: 'log-init-2',
         timestamp: new Date().toLocaleTimeString('fr-FR'),
         level: 'OK',
         tag: 'ELEVATION',
         text: 'Vérification du bouclier UAC : Privilèges Administrateur confirmés (SID S-1-5-32-544).',
+        operatorName: 'System Kernel',
       },
       {
-        id: `log-init-3`,
+        id: 'log-init-3',
         timestamp: new Date().toLocaleTimeString('fr-FR'),
         level: 'KERNEL',
         tag: 'P/INVOKE',
         text: 'Acquisition des privilèges NT : SeDebugPrivilege et SeTakeOwnershipPrivilege activés avec succès.',
+        operatorName: 'System Kernel',
       },
       {
-        id: `log-init-4`,
+        id: 'log-init-4',
         timestamp: new Date().toLocaleTimeString('fr-FR'),
         level: 'OK',
-        tag: 'STATUT',
-        text: 'Analyse initiale de l\'hôte terminée : Audit de l\'environnement actif.',
+        tag: 'PERSISTENCE',
+        text: 'Moteur de persistance SQLite (spacesec.sqlite) activé avec intégrité transactionnelle.',
+        operatorName: 'System Kernel',
       },
-    ],
-    blockedIps: [] as string[],
-    blockedWifiBssids: [] as string[],
+    ];
+    for (const l of seedLogs) {
+      dbManager.addAuditLog(l);
+    }
+    initialLogs = dbManager.getAuditLogs(100);
+  }
+
+  const sharedState = {
+    threats: initialThreats,
+    logs: initialLogs,
+    blockedIps: dbManager.getBlockedList('IP'),
+    blockedWifiBssids: dbManager.getBlockedList('WIFI'),
     activeUsersCount: 1,
     lastModified: new Date().toISOString(),
   };
@@ -515,17 +618,16 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
     }
   });
 
-  // API 2: Kill Process (Fin de tâche)
-  app.post('/api/system/kill', async (req, res) => {
+  // API 2: Kill Process (Fin de tâche - Protégé par rate limit & validation Zod)
+  app.post('/api/system/kill', sensitiveActionLimiter, validateBody(killProcessSchema), async (req, res, next) => {
     const { pid } = req.body;
-    if (!pid) {
-      return res.status(400).json({ success: false, error: 'PID is required' });
-    }
 
     try {
       if (pid === 1 || pid === process.pid) {
         return res.status(403).json({ success: false, error: 'Impossible de terminer un processus système racine.' });
       }
+
+      logger.warn({ pid, ip: req.ip }, '[SystemControl] Ordre de terminaison du processus reçu');
 
       if (os.platform() === 'win32') {
         await execAsync(`taskkill /F /PID ${pid}`);
@@ -533,9 +635,18 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
         process.kill(Number(pid), 'SIGTERM');
       }
 
+      dbManager.addAuditLog({
+        id: `log-kill-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'WARN',
+        tag: 'TASKKILL',
+        text: `Processus hostile ${pid} neutralisé avec succès (taskkill /F /PID ${pid}).`,
+        operatorName: 'Analyste SOC',
+      });
+
       res.json({ success: true, message: `Processus ${pid} terminé avec succès.` });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      next(err);
     }
   });
 
@@ -796,7 +907,7 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
 Indique clairement que la géolocalisation IP est au niveau de la ville/POP et non d'une adresse physique exacte. Rédige en français concis (2 à 3 phrases objectives).`;
 
             const res = await ai.models.generateContent({
-              model: 'gemini-3.8-flash',
+              model: 'gemini-2.5-flash',
               contents: prompt,
             });
             return res.text || '';
@@ -2121,33 +2232,50 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   });
 
   // Menu 11: Quarantine Storage & Manifests (Starts empty; filled only when real threats are quarantined)
-  let activeQuarantineStore: Array<{
-    id: string;
-    fileName: string;
-    originalPath: string;
-    quarantinePath: string;
-    sha256: string;
-    timestamp: string;
-    reason: string;
-    sizeKb: number;
-    isMicrosoftSigned: boolean;
-  }> = [];
-
+  // Menu 11: Quarantine Storage & Manifests (Persistent SQLite backed)
   app.get('/api/remediation/quarantine/list', (req, res) => {
+    const dbItems = dbManager.getQuarantine();
+    const items = dbItems.filter(q => q.status === 'ISOLATED').map(q => ({
+      id: q.id,
+      fileName: q.fileName,
+      originalPath: q.originalPath,
+      quarantinePath: q.quarantinePath,
+      sha256: q.fileHash,
+      timestamp: q.quarantinedAt,
+      reason: q.reason,
+      sizeKb: Math.round(q.sizeBytes / 1024),
+      isMicrosoftSigned: false,
+    }));
+
     res.json({
       success: true,
       quarantinePath: os.platform() === 'win32' ? 'C:\\SpaceSec_Quarantine' : '/tmp/spacesec_quarantine',
-      items: activeQuarantineStore,
+      items,
+      totalCount: items.length,
+      persistence: 'SQLite (spacesec.sqlite)',
     });
   });
 
-  app.post('/api/remediation/quarantine/restore', (req, res) => {
+  app.post('/api/remediation/quarantine/restore', sensitiveActionLimiter, (req, res) => {
     const { id } = req.body;
-    const item = activeQuarantineStore.find(q => q.id === id);
+    const dbItems = dbManager.getQuarantine();
+    const item = dbItems.find(q => q.id === id);
     if (!item) {
       return res.status(404).json({ success: false, error: 'Élément introuvable en quarantaine.' });
     }
-    activeQuarantineStore = activeQuarantineStore.filter(q => q.id !== id);
+
+    dbManager.updateQuarantineStatus(id, 'RESTORED');
+    logger.info({ item: item.fileName, originalPath: item.originalPath }, '[Quarantine] Fichier restauré');
+
+    dbManager.addAuditLog({
+      id: `log-quarantine-restore-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString('fr-FR'),
+      level: 'INFO',
+      tag: 'QUARANTINE',
+      text: `Fichier ${item.fileName} sorti de quarantaine et restauré vers ${item.originalPath}.`,
+      operatorName: 'Analyste Incident',
+    });
+
     res.json({
       success: true,
       message: `Fichier ${item.fileName} restauré avec succès vers ${item.originalPath}. Permissions ACL rétablies.`,
@@ -2400,7 +2528,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     // Read real threats from sharedState
     const activeThreats = (sharedState.threats || []).filter(t => t.status === 'ACTIVE');
     const neutralizedThreats = (sharedState.threats || []).filter(t => t.status === 'NEUTRALIZED');
-    const quarantineCount = activeQuarantineStore.length;
+    const quarantineCount = dbManager.getQuarantine().filter(q => q.status === 'ISOLATED').length;
 
     // Calculate score based on real threat severity
     let healthScore = 100;
@@ -2752,37 +2880,39 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
+  async function restoreNetworkInterfacesInternal(): Promise<string[]> {
+    const isWin32 = os.platform() === 'win32';
+    const toRestore = [...disabledInterfacesList];
+
+    for (const ifaceName of toRestore) {
+      const netshCmd = `netsh interface set interface "${ifaceName}" admin=enabled`;
+      if (isWin32) {
+        try {
+          await execAsync(netshCmd);
+        } catch {
+          try {
+            await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Enable-NetAdapter -Name '${ifaceName}' -Confirm:$false"`);
+          } catch {}
+        }
+      }
+    }
+
+    if (isWin32) {
+      try {
+        await execAsync('netsh advfirewall firewall delete rule name="SpaceSec-KillSwitch-Block"');
+      } catch {}
+    }
+
+    killSwitchActive = false;
+    killSwitchEngagedAt = null;
+    disabledInterfacesList = [];
+    return toRestore;
+  }
+
   // POST: Restore Network Interfaces
   app.post('/api/network/restore', async (req, res) => {
     try {
-      const isWin32 = os.platform() === 'win32';
-      const toRestore = [...disabledInterfacesList];
-      const executedCommands: string[] = [];
-
-      for (const ifaceName of toRestore) {
-        const netshCmd = `netsh interface set interface "${ifaceName}" admin=enabled`;
-        executedCommands.push(netshCmd);
-        if (isWin32) {
-          try {
-            await execAsync(netshCmd);
-          } catch {
-            try {
-              await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Enable-NetAdapter -Name '${ifaceName}' -Confirm:$false"`);
-            } catch {}
-          }
-        }
-      }
-
-      // Remove temporary firewall rule
-      if (isWin32) {
-        try {
-          await execAsync('netsh advfirewall firewall delete rule name="SpaceSec-KillSwitch-Block"');
-        } catch {}
-      }
-
-      killSwitchActive = false;
-      killSwitchEngagedAt = null;
-      disabledInterfacesList = [];
+      const toRestore = await restoreNetworkInterfacesInternal();
 
       sharedState.logs.unshift({
         id: `restore-${Date.now()}`,
@@ -2797,7 +2927,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         killSwitchActive: false,
         message: 'Interfaces réseau réactivées avec succès. Connectivité normale restaurée.',
         restoredInterfaces: toRestore,
-        executedCommands,
+        executedCommands: toRestore.map(name => `netsh interface set interface "${name}" admin=enabled`),
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -2991,6 +3121,111 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   };
 
+  // Start background watchdog scheduler with WebSocket broadcaster
+  backgroundScheduler.start(broadcastToAll);
+
+  // Centralized State Mutation Handler (Synchronizes Memory, SQLite & WebSockets)
+  function applyStateMutation(action: string, payload: any, operator: any, originWs?: WebSocket) {
+    if (action === 'UPDATE_THREAT_STATUS') {
+      const { threatId, status, targetPath } = payload;
+      sharedState.threats = sharedState.threats.map(t =>
+        t.id === threatId || (targetPath && t.targetPath === targetPath) ? { ...t, status } : t
+      );
+      dbManager.updateThreatStatus(threatId, status, targetPath);
+      logger.info({ action, threatId, status, operator: operator?.name }, '[StateMutation] Menace mise à jour');
+    } else if (action === 'ADD_LOG') {
+      sharedState.logs = [...sharedState.logs.slice(-200), payload];
+      dbManager.addAuditLog(payload);
+    } else if (action === 'BLOCK_IP') {
+      if (!sharedState.blockedIps.includes(payload.ip)) {
+        sharedState.blockedIps.push(payload.ip);
+        dbManager.addBlockedEntity('IP', payload.ip, payload.reason);
+        logger.info({ ip: payload.ip, operator: operator?.name }, '[StateMutation] IP hostile bloquée');
+      }
+    } else if (action === 'UNBLOCK_IP') {
+      sharedState.blockedIps = sharedState.blockedIps.filter(ip => ip !== payload.ip);
+      dbManager.removeBlockedEntity('IP', payload.ip);
+      logger.info({ ip: payload.ip, operator: operator?.name }, '[StateMutation] IP débloquée');
+    } else if (action === 'BLOCK_WIFI_BSSID') {
+      if (!sharedState.blockedWifiBssids.includes(payload.bssid)) {
+        sharedState.blockedWifiBssids.push(payload.bssid);
+        dbManager.addBlockedEntity('WIFI', payload.bssid, payload.reason);
+      }
+    } else if (action === 'BULK_UPDATE_THREAT_STATUS') {
+      const { threatIds, status, command } = payload;
+      const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
+      sharedState.threats = sharedState.threats.map(t =>
+        idSet.has(t.id) ? { ...t, status } : t
+      );
+      dbManager.bulkUpdateThreatStatus(Array.from(idSet), status);
+      if (command) {
+        const logEntry = {
+          id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+          timestamp: new Date().toLocaleTimeString('fr-FR'),
+          level: 'OK',
+          text: `[COMMANDE-PARTAGÉE] Exécution groupée (${idSet.size} cibles) par ${operator?.name || 'Opérateur'} : "${command}" -> Statut: ${status}`,
+          tag: 'BULK-OP',
+          operatorName: operator?.name,
+        };
+        sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+        dbManager.addAuditLog(logEntry);
+      }
+    } else if (action === 'DISMISS_THREATS') {
+      const { threatIds } = payload;
+      const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
+      sharedState.threats = sharedState.threats.map(t =>
+        idSet.has(t.id) ? { ...t, status: 'DISMISSED' } : t
+      );
+      dbManager.dismissThreats(Array.from(idSet));
+      const logEntry = {
+        id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'WARN',
+        text: `[REJET-MASSE] ${idSet.size} menace(s) ignorée(s)/rejetée(s) par ${operator?.name || 'Opérateur'}.`,
+        tag: 'DISMISS',
+        operatorName: operator?.name,
+      };
+      sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+      dbManager.addAuditLog(logEntry);
+    } else if (action === 'RESTORE_THREATS') {
+      const { threatIds } = payload;
+      const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
+      sharedState.threats = sharedState.threats.map(t =>
+        idSet.has(t.id) ? { ...t, status: 'ACTIVE' } : t
+      );
+      dbManager.bulkUpdateThreatStatus(Array.from(idSet), 'ACTIVE');
+      const logEntry = {
+        id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'INFO',
+        text: `[RESTAURATION] ${idSet.size} menace(s) réactivée(s) par ${operator?.name || 'Opérateur'}.`,
+        tag: 'RESTORE',
+        operatorName: operator?.name,
+      };
+      sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+      dbManager.addAuditLog(logEntry);
+    } else if (action === 'RESET_THREATS') {
+      sharedState.threats = sharedState.threats.map(t => ({ ...t, status: 'ACTIVE' }));
+      dbManager.resetThreats();
+    } else if (action === 'CLEAR_LOGS') {
+      sharedState.logs = [];
+      dbManager.clearAuditLogs();
+    }
+
+    sharedState.lastModified = new Date().toISOString();
+    broadcastToAll({
+      type: 'STATE_DELTA',
+      action,
+      payload,
+      senderOperator: operator,
+      state: {
+        ...sharedState,
+        activeUsersCount: Math.max(1, connectedClients.size),
+        activeOperators: getActiveOperators(),
+      },
+    }, originWs);
+  }
+
   // REST API: Get current synchronized state (used on initial load or reconnect)
   app.get('/api/shared/state', (req, res) => {
     res.json({
@@ -3009,91 +3244,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     if (!action) {
       return res.status(400).json({ success: false, error: 'Action required' });
     }
-
-    if (action === 'UPDATE_THREAT_STATUS') {
-      const { threatId, status, targetPath } = payload;
-      sharedState.threats = sharedState.threats.map(t =>
-        t.id === threatId || (targetPath && t.targetPath === targetPath) ? { ...t, status } : t
-      );
-    } else if (action === 'ADD_LOG') {
-      sharedState.logs = [...sharedState.logs.slice(-200), payload];
-    } else if (action === 'BLOCK_IP') {
-      if (!sharedState.blockedIps.includes(payload.ip)) {
-        sharedState.blockedIps.push(payload.ip);
-      }
-    } else if (action === 'UNBLOCK_IP') {
-      sharedState.blockedIps = sharedState.blockedIps.filter(ip => ip !== payload.ip);
-    } else if (action === 'BLOCK_WIFI_BSSID') {
-      if (!sharedState.blockedWifiBssids.includes(payload.bssid)) {
-        sharedState.blockedWifiBssids.push(payload.bssid);
-      }
-    } else if (action === 'BULK_UPDATE_THREAT_STATUS') {
-      const { threatIds, status, command } = payload;
-      const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
-      sharedState.threats = sharedState.threats.map(t =>
-        idSet.has(t.id) ? { ...t, status } : t
-      );
-      if (command) {
-        sharedState.logs = [
-          ...sharedState.logs.slice(-200),
-          {
-            id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-            timestamp: new Date().toLocaleTimeString('fr-FR'),
-            level: 'OK',
-            text: `[COMMANDE-PARTAGÉE] Exécution groupée (${idSet.size} cibles) : "${command}" -> Statut: ${status}`,
-            tag: 'BULK-OP',
-          },
-        ];
-      }
-    } else if (action === 'DISMISS_THREATS') {
-      const { threatIds } = payload;
-      const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
-      sharedState.threats = sharedState.threats.map(t =>
-        idSet.has(t.id) ? { ...t, status: 'DISMISSED' } : t
-      );
-      sharedState.logs = [
-        ...sharedState.logs.slice(-200),
-        {
-          id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-          timestamp: new Date().toLocaleTimeString('fr-FR'),
-          level: 'WARN',
-          text: `[REJET-MASSE] ${idSet.size} menace(s) ignorée(s)/rejetée(s) par l'opérateur.`,
-          tag: 'DISMISS',
-        },
-      ];
-    } else if (action === 'RESTORE_THREATS') {
-      const { threatIds } = payload;
-      const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
-      sharedState.threats = sharedState.threats.map(t =>
-        idSet.has(t.id) ? { ...t, status: 'ACTIVE' } : t
-      );
-      sharedState.logs = [
-        ...sharedState.logs.slice(-200),
-        {
-          id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-          timestamp: new Date().toLocaleTimeString('fr-FR'),
-          level: 'INFO',
-          text: `[RESTAURATION] ${idSet.size} menace(s) réactivée(s) dans la liste d'observation.`,
-          tag: 'RESTORE',
-        },
-      ];
-    } else if (action === 'RESET_THREATS') {
-      sharedState.threats = sharedState.threats.map(t => ({ ...t, status: 'ACTIVE' }));
-    }
-
-    sharedState.lastModified = new Date().toISOString();
-    broadcastToAll({
-      type: 'STATE_DELTA',
-      action,
-      payload,
-      senderOperator: operator,
-      state: {
-        ...sharedState,
-        activeUsersCount: Math.max(1, connectedClients.size),
-        activeOperators: getActiveOperators(),
-      },
-    });
-
+    applyStateMutation(action, payload, operator);
     res.json({ success: true, state: sharedState });
   });
 
@@ -3462,6 +3613,156 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
+  // =========================================================================
+  // INFRASTRUCTURE BRICKS: HEALTH, AUTH, SETTINGS, THREAT INTEL & UPDATES
+  // =========================================================================
+
+  // 1. Health check endpoint (System, SQLite, WS, Scheduler, Memory)
+  app.get('/api/health', (req, res) => {
+    res.json({
+      status: 'UP',
+      service: 'Space Security CyberDefense Engine',
+      version: '1.0.0',
+      timestamp: new Date().toISOString(),
+      uptimeSec: Math.round(process.uptime()),
+      database: {
+        engine: 'SQLite (sql.js / WebAssembly)',
+        file: 'spacesec.sqlite',
+        status: 'CONNECTED',
+        ...dbManager.getStats(),
+      },
+      websocket: {
+        status: 'ACTIVE',
+        connectedClients: connectedClients.size,
+        activeOperators: getActiveOperators().length,
+      },
+      scheduler: backgroundScheduler.getStatus(),
+      network: {
+        killSwitchActive,
+        disabledInterfaces: disabledInterfacesList,
+      },
+      process: {
+        pid: process.pid,
+        platform: os.platform(),
+        arch: os.arch(),
+        nodeVersion: process.version,
+        memoryUsage: process.memoryUsage(),
+      },
+    });
+  });
+
+  // 2. Local Authentication Token Handshake (Renderer / Web Client)
+  app.get('/api/auth/token', (req, res) => {
+    res.json({
+      success: true,
+      token: getLocalAuthToken(),
+      mode: process.env.IS_ELECTRON === 'true' ? 'ELECTRON_LOCAL_IPC' : 'WEB_DEVELOPMENT',
+    });
+  });
+
+  // 3. User Preferences (Settings) Persistence via SQLite
+  app.get('/api/settings', (req, res) => {
+    res.json({
+      success: true,
+      settings: dbManager.getAllSettings(),
+    });
+  });
+
+  app.post('/api/settings', validateBody(settingsUpdateSchema), (req, res) => {
+    const updated = dbManager.updateSettings(req.body);
+    if (req.body.autoScanInterval) {
+      backgroundScheduler.configureInterval(req.body.autoScanInterval);
+    }
+    logger.info({ settings: req.body }, '[Settings] Préférences utilisateur enregistrées dans SQLite');
+    res.json({
+      success: true,
+      message: 'Préférences utilisateur enregistrées avec succès.',
+      settings: updated,
+    });
+  });
+
+  // 4. Real Threat Intelligence Integration (VirusTotal v3 & AbuseIPDB v2)
+  app.post('/api/intel/check-ip', intelLimiter, validateBody(threatIntelCheckSchema), async (req, res, next) => {
+    try {
+      const result = await checkIpReputation(req.body.target);
+      res.json({ success: true, intel: result });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/intel/check-hash', intelLimiter, validateBody(threatIntelCheckSchema), async (req, res, next) => {
+    try {
+      const result = await checkHashReputation(req.body.target);
+      res.json({ success: true, intel: result });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // 5. Auto-Updater Architecture (GitHub Releases / Electron updater API)
+  app.get('/api/updates/check', async (req, res) => {
+    const currentVersion = '1.0.0';
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      const response = await fetch('https://api.github.com/repos/Christian667z/Space-Security/releases/latest', {
+        headers: { 'User-Agent': 'SpaceSecurity-CyberDefense' },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (response.ok) {
+        const data = await response.json();
+        const latestTag = (data.tag_name || '').replace(/^v/, '');
+        const updateAvailable = Boolean(latestTag && latestTag !== currentVersion);
+        return res.json({
+          success: true,
+          currentVersion,
+          latestVersion: latestTag || currentVersion,
+          updateAvailable,
+          releaseNotes: data.body || 'Mise à jour disponible sur le dépôt officiel.',
+          downloadUrl: data.html_url || 'https://github.com/Christian667z/Space-Security/releases',
+          publishedAt: data.published_at,
+        });
+      }
+    } catch {}
+
+    res.json({
+      success: true,
+      currentVersion,
+      latestVersion: currentVersion,
+      updateAvailable: false,
+      releaseNotes: 'Version actuelle à jour. Aucune mise à jour critique en attente.',
+      downloadUrl: 'https://github.com/Christian667z/Space-Security/releases',
+    });
+  });
+
+  // 6. Structured Forensic Log File Export
+  app.get('/api/logs/download', (req, res) => {
+    const logFile = getLogFilePath();
+    if (fs.existsSync(logFile)) {
+      res.download(logFile, 'spacesec-forensic-audit.log');
+    } else {
+      res.status(404).json({ success: false, error: 'Fichier journal introuvable.' });
+    }
+  });
+
+  // Centralized Error Handling Middleware (Catches unhandled errors & logs with Pino)
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    logger.error(
+      { err: err?.message || err, stack: err?.stack, path: req.path, method: req.method },
+      '[Express Error Handler] Erreur interceptée'
+    );
+    if (res.headersSent) {
+      return next(err);
+    }
+    res.status(err.status || 500).json({
+      success: false,
+      error: err.message || 'Une erreur interne inattendue est survenue.',
+      code: err.code || 'INTERNAL_ERROR',
+    });
+  });
+
   // Mount Vite middleware in development (non-bundled)
   if (process.env.NODE_ENV !== 'production' && !process.env.IS_ELECTRON) {
     const { createServer: createViteServer } = await import('vite');
@@ -3484,11 +3785,18 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   }
 
-  // Create HTTP Server & Mount WebSocket Server on same port 3000
+  // Create HTTP Server & Mount WebSocket Server on same port
   const httpServer = http.createServer(app);
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
   wss.on('connection', (ws, req) => {
+    // Validate WebSocket Authentication Token
+    if (!validateWebSocketConnection(req.url)) {
+      logger.warn({ ip: req.socket.remoteAddress, url: req.url }, '[WebSocket] Connexion non autorisée rejetée');
+      ws.close(4401, 'Unauthorized');
+      return;
+    }
+
     connectedClients.add(ws);
     const activeCount = connectedClients.size;
     sharedState.activeUsersCount = activeCount;
@@ -3534,100 +3842,21 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         const msg = JSON.parse(data.toString());
         if (msg.type === 'MUTATE') {
           const { action, payload } = msg;
-
-          if (action === 'UPDATE_THREAT_STATUS') {
-            sharedState.threats = sharedState.threats.map(t =>
-              t.id === payload.threatId || (payload.targetPath && t.targetPath === payload.targetPath)
-                ? { ...t, status: payload.status }
-                : t
-            );
-          } else if (action === 'ADD_LOG') {
-            sharedState.logs = [...sharedState.logs.slice(-200), payload];
-          } else if (action === 'BLOCK_IP') {
-            if (!sharedState.blockedIps.includes(payload.ip)) {
-              sharedState.blockedIps.push(payload.ip);
-            }
-          } else if (action === 'UNBLOCK_IP') {
-            sharedState.blockedIps = sharedState.blockedIps.filter(ip => ip !== payload.ip);
-          } else if (action === 'BLOCK_WIFI_BSSID') {
-            if (!sharedState.blockedWifiBssids.includes(payload.bssid)) {
-              sharedState.blockedWifiBssids.push(payload.bssid);
-            }
-          } else if (action === 'BULK_UPDATE_THREAT_STATUS') {
-            const { threatIds, status, command } = payload;
-            const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
-            sharedState.threats = sharedState.threats.map(t =>
-              idSet.has(t.id) ? { ...t, status } : t
-            );
-            if (command) {
-              sharedState.logs = [
-                ...sharedState.logs.slice(-200),
-                {
-                  id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-                  timestamp: new Date().toLocaleTimeString('fr-FR'),
-                  level: 'OK',
-                  text: `[COMMANDE-PARTAGÉE] Exécution groupée (${idSet.size} cibles) par ${opSession.name} : "${command}" -> Statut: ${status}`,
-                  tag: 'BULK-OP',
-                },
-              ];
-            }
-          } else if (action === 'DISMISS_THREATS') {
-            const { threatIds } = payload;
-            const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
-            sharedState.threats = sharedState.threats.map(t =>
-              idSet.has(t.id) ? { ...t, status: 'DISMISSED' } : t
-            );
-            sharedState.logs = [
-              ...sharedState.logs.slice(-200),
-              {
-                id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-                timestamp: new Date().toLocaleTimeString('fr-FR'),
-                level: 'WARN',
-                text: `[REJET-MASSE] ${idSet.size} menace(s) ignorée(s)/rejetée(s) par ${opSession.name}.`,
-                tag: 'DISMISS',
-              },
-            ];
-          } else if (action === 'RESTORE_THREATS') {
-            const { threatIds } = payload;
-            const idSet = new Set(Array.isArray(threatIds) ? threatIds : []);
-            sharedState.threats = sharedState.threats.map(t =>
-              idSet.has(t.id) ? { ...t, status: 'ACTIVE' } : t
-            );
-            sharedState.logs = [
-              ...sharedState.logs.slice(-200),
-              {
-                id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-                timestamp: new Date().toLocaleTimeString('fr-FR'),
-                level: 'INFO',
-                text: `[RESTAURATION] ${idSet.size} menace(s) réactivée(s) par ${opSession.name}.`,
-                tag: 'RESTORE',
-              },
-            ];
-          } else if (action === 'CLEAR_LOGS') {
-            sharedState.logs = [];
-          } else if (action === 'RESET_THREATS') {
-            sharedState.threats = sharedState.threats.map(t => ({ ...t, status: 'ACTIVE' }));
+          const allowed = [
+            'UPDATE_THREAT_STATUS', 'ADD_LOG', 'BLOCK_IP', 'UNBLOCK_IP',
+            'BLOCK_WIFI_BSSID', 'BULK_UPDATE_THREAT_STATUS', 'DISMISS_THREATS',
+            'RESTORE_THREATS', 'CLEAR_LOGS', 'RESET_THREATS',
+          ];
+          if (!allowed.includes(action)) {
+            logger.warn({ action }, '[WebSocket] Action MUTATE non autorisée ignorée');
+            return;
           }
-
-          sharedState.lastModified = new Date().toISOString();
-
-          // Broadcast change to ALL other users in real time
-          broadcastToAll({
-            type: 'STATE_DELTA',
-            action,
-            payload,
-            senderOperator: opSession,
-            state: {
-              ...sharedState,
-              activeUsersCount: connectedClients.size,
-              activeOperators: getActiveOperators(),
-            },
-          }, ws);
+          applyStateMutation(action, payload, opSession, ws);
         } else if (msg.type === 'PING') {
           ws.send(JSON.stringify({ type: 'PONG', timestamp: Date.now() }));
         }
       } catch (err) {
-        console.error('[WebSocket] Parse error:', err);
+        logger.error({ err }, '[WebSocket] Erreur d\'analyse du message');
       }
     });
 
@@ -3655,9 +3884,53 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
+  // Graceful Shutdown Handler (Restores network, stops scheduler, closes SQLite and HTTP cleanly)
+  let isShuttingDown = false;
+  const gracefulShutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    logger.info({ signal }, '[SpaceSec] Signal d\'arrêt reçu. Fermeture ordonnée...');
+
+    try {
+      if (killSwitchActive) {
+        logger.info('[SpaceSec] Rétablissement automatique des interfaces réseau...');
+        await restoreNetworkInterfacesInternal();
+      }
+
+      backgroundScheduler.stop();
+
+      for (const client of connectedClients) {
+        try {
+          client.close(1001, 'Serveur en cours d\'extinction propre');
+        } catch {}
+      }
+      connectedClients.clear();
+
+      dbManager.close();
+
+      httpServer.close(() => {
+        logger.info('[SpaceSec] Serveur HTTP arrêté proprement. Processus terminé.');
+        process.exit(0);
+      });
+
+      setTimeout(() => process.exit(0), 4000).unref();
+    } catch (shutdownErr) {
+      logger.error({ shutdownErr }, '[SpaceSec] Erreur pendant l\'arrêt propre');
+      process.exit(1);
+    }
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+  const bindHost = process.env.IS_ELECTRON === 'true' ? '127.0.0.1' : '0.0.0.0';
+
   return new Promise((resolve) => {
-    httpServer.listen(PORT, '0.0.0.0', () => {
-      console.log(`[Space Security Live Server & WebSocket Multi-User Engine] Running on http://0.0.0.0:${PORT}`);
+    httpServer.listen(PORT, bindHost, () => {
+      logger.info(
+        { port: PORT, host: bindHost, pid: process.pid, isElectron: process.env.IS_ELECTRON === 'true' },
+        `[Space Security Engine v3.0] Prêt sur http://${bindHost}:${PORT}`
+      );
       resolve(httpServer);
     });
   });
