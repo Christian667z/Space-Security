@@ -1231,7 +1231,7 @@ export default function App() {
   });
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Plus_Jakarta_Sans'] selection:bg-cyan-500/30 selection:text-cyan-200">
+    <div className="min-h-screen w-full max-w-[100vw] bg-[#020617] text-slate-100 flex flex-col font-['Plus_Jakarta_Sans'] overflow-x-hidden selection:bg-cyan-500/30 selection:text-cyan-200">
       {/* Universal 3-Zone Top Bar */}
       <TopNav
         activeTab={activeTab}

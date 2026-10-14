@@ -117,22 +117,22 @@ export const ThreatIntensityMap: React.FC<ThreatIntensityMapProps> = ({
       // Continue to client direct fetch
     }
 
-    // Strategy 2: Client-side direct query to IP geolocation API (resolves user's real browser IP)
+    // Strategy 2: Client-side direct query to secure HTTPS IP geolocation API (https://ipwho.is/)
     if (!resolved) {
       try {
-        const clientRes = await fetch('https://ipapi.co/json/');
+        const clientRes = await fetch('https://ipwho.is/', { mode: 'cors' });
         if (clientRes.ok) {
           const cData = await clientRes.json();
-          if (cData && cData.city && cData.latitude && cData.longitude) {
+          if (cData && cData.success && cData.latitude && cData.longitude) {
             setTargetHost({
-              name: `Station Hôte (${cData.city}, ${cData.country_name || cData.country})`,
-              ip: cData.ip,
-              city: cData.city,
-              country: cData.country_name || cData.country,
+              name: `Station Hôte (${cData.city || 'Paris'}, ${cData.country || 'France'})`,
+              ip: cData.ip || '192.168.1.42',
+              city: cData.city || 'Paris',
+              country: cData.country || 'France',
               countryCode: cData.country_code || 'FR',
               latitude: Number(cData.latitude),
               longitude: Number(cData.longitude),
-              isp: cData.org || cData.asn || 'Connexion Locale',
+              isp: cData.connection?.isp || cData.connection?.org || 'Opérateur Local',
               regionName: cData.region,
               isRealDetected: true,
             });
@@ -140,34 +140,7 @@ export const ThreatIntensityMap: React.FC<ThreatIntensityMapProps> = ({
           }
         }
       } catch {
-        // Fallback strategy 3
-      }
-    }
-
-    // Strategy 3: Alternative IP-API endpoint
-    if (!resolved) {
-      try {
-        const altRes = await fetch('http://ip-api.com/json/');
-        if (altRes.ok) {
-          const aData = await altRes.json();
-          if (aData && aData.status === 'success' && aData.lat && aData.lon) {
-            setTargetHost({
-              name: `Station Hôte (${aData.city}, ${aData.country})`,
-              ip: aData.query,
-              city: aData.city,
-              country: aData.country,
-              countryCode: aData.countryCode || 'FR',
-              latitude: Number(aData.lat),
-              longitude: Number(aData.lon),
-              isp: aData.isp || 'Fournisseur d\'Accès',
-              regionName: aData.regionName,
-              isRealDetected: true,
-            });
-            resolved = true;
-          }
-        }
-      } catch {
-        // Keep fallback
+        // Fallback default host
       }
     }
 

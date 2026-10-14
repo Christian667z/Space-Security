@@ -28,6 +28,7 @@ import {
   ShieldAlert,
   Flame,
   Keyboard,
+  MoreHorizontal,
 } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
@@ -77,11 +78,14 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenShortcutsModal,
 }) => {
   const [isMegaMenuOpen, setIsMegaMenuOpen] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   const megaMenuRef = useRef<HTMLDivElement>(null);
   const triggerButtonRef = useRef<HTMLButtonElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Close Mega Menu on Click Outside or Escape key
+  // Close menus on Click Outside or Escape key
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {
       const target = event.target as Node;
@@ -93,25 +97,32 @@ export const TopNav: React.FC<TopNavProps> = ({
       ) {
         setIsMegaMenuOpen(false);
       }
+      if (
+        moreMenuRef.current &&
+        !moreMenuRef.current.contains(target) &&
+        moreButtonRef.current &&
+        !moreButtonRef.current.contains(target)
+      ) {
+        setIsMoreMenuOpen(false);
+      }
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setIsMegaMenuOpen(false);
+        setIsMoreMenuOpen(false);
       }
     };
 
-    if (isMegaMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      document.addEventListener('touchstart', handleClickOutside);
-      document.addEventListener('keydown', handleKeyDown);
-    }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isMegaMenuOpen]);
+  }, []);
 
   // Two columns navigation structure for the Mega Menu
   const columns: NavColumn[] = [
@@ -305,6 +316,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   const handleSelectTab = (tab: TabId) => {
     onSelectTab(tab);
     setIsMegaMenuOpen(false);
+    setIsMoreMenuOpen(false);
     setSearchFilter('');
   };
 
@@ -322,23 +334,23 @@ export const TopNav: React.FC<TopNavProps> = ({
   ];
 
   return (
-    <header className="sticky top-0 z-50 w-full h-16 max-h-16 bg-[#030712] border-b border-slate-800/90 shadow-md select-none overflow-x-hidden">
-      <div className="w-full max-w-7xl mx-auto h-full px-3 sm:px-6 flex items-center justify-between gap-2 sm:gap-4 overflow-x-hidden">
+    <header className="sticky top-0 z-50 w-full max-w-[100vw] h-16 max-h-16 bg-[#030712] border-b border-slate-800/90 shadow-md select-none overflow-x-hidden flex items-center">
+      <div className="w-full max-w-7xl mx-auto h-full px-2 sm:px-4 lg:px-6 flex items-center justify-between gap-2 flex-nowrap overflow-x-hidden">
         
         {/* ========================================================================= */}
-        {/* ZONE 1 (GAUCHE) : Logo + Badge KERNEL V3.0 + Statut PROTECTION ACTIVE */}
+        {/* ZONE 1 (GAUCHE) : Logo + Badge KERNEL V3.0 + Statut PROTECTION ACTIVE     */}
         {/* ========================================================================= */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 flex-nowrap">
           <div
             onClick={() => handleSelectTab('overview')}
-            className="flex items-center gap-2.5 cursor-pointer text-slate-100 group select-none"
+            className="flex items-center gap-2 sm:gap-2.5 cursor-pointer text-slate-100 group select-none"
             title="Retour à la Vue Centrale"
           >
             <div className="w-9 h-9 rounded-lg bg-cyan-950/90 border border-cyan-800/90 flex items-center justify-center text-cyan-400 group-hover:border-cyan-400 group-hover:shadow-xs group-hover:shadow-cyan-500/30 transition-all shrink-0">
               <Shield className="w-4 h-4 text-cyan-400" />
             </div>
             <div className="flex flex-col justify-center">
-              <div className="flex items-center gap-1.5 leading-tight">
+              <div className="flex items-center gap-1.5 leading-tight flex-nowrap">
                 <span className="text-sm sm:text-base font-bold tracking-tight text-white font-['Plus_Jakarta_Sans'] whitespace-nowrap">
                   Space Security
                 </span>
@@ -346,7 +358,7 @@ export const TopNav: React.FC<TopNavProps> = ({
                   KERNEL V3.0
                 </span>
               </div>
-              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 leading-tight mt-0.5">
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 leading-tight mt-0.5 flex-nowrap">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
                 <span className="font-mono text-emerald-400 font-semibold tracking-wide whitespace-nowrap">
                   PROTECTION ACTIVE
@@ -357,12 +369,12 @@ export const TopNav: React.FC<TopNavProps> = ({
         </div>
 
         {/* ========================================================================= */}
-        {/* ZONE 2 (CENTRE) : 4 Onglets Max (Vue Centrale, Gestionnaire, Console, Traceur IP) */}
+        {/* ZONE 2 (CENTRE) : 4 Onglets Max avec min-w-0 et overflow-x: auto caché   */}
         {/* Responsive : Sous 1100px, seules les icônes restent visibles              */}
         {/* ========================================================================= */}
         <nav
           aria-label="Navigation principale"
-          className="flex items-center justify-center gap-1 sm:gap-1.5 shrink-0"
+          className="flex items-center justify-center gap-1 sm:gap-1.5 min-w-0 flex-1 overflow-x-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden flex-nowrap"
         >
           {centerTabs.map((tab) => {
             const Icon = tab.icon;
@@ -373,7 +385,7 @@ export const TopNav: React.FC<TopNavProps> = ({
                 key={tab.id}
                 onClick={() => handleSelectTab(tab.id)}
                 title={tab.title}
-                className={`h-9 px-2.5 min-[1100px]:px-3.5 rounded-lg text-xs font-medium whitespace-nowrap flex items-center justify-center gap-1.5 transition-all border shrink-0 cursor-pointer ${
+                className={`h-9 px-2 sm:px-2.5 min-[1100px]:px-3.5 rounded-lg text-xs font-medium whitespace-nowrap flex items-center justify-center gap-1.5 transition-all border shrink-0 cursor-pointer ${
                   isActive
                     ? 'bg-cyan-950/80 text-cyan-300 border-cyan-600/80 shadow-xs shadow-cyan-950/50 font-semibold'
                     : 'bg-slate-900/60 hover:bg-slate-800 text-slate-300 hover:text-white border-transparent hover:border-slate-700/60'
@@ -389,10 +401,11 @@ export const TopNav: React.FC<TopNavProps> = ({
         </nav>
 
         {/* ========================================================================= */}
-        {/* ZONE 3 (DROITE) : Statut de Synchro & Bouton "Modules & Outils"           */}
+        {/* ZONE 3 (DROITE) : Synchro, Kill-Switch, Archive ZIP & Modules & Outils    */}
+        {/* Sous 1400px : Icônes seules (texte avec "hidden xl:inline")              */}
         {/* ========================================================================= */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Statut de Synchronisation Multi-Opérateur */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
+          {/* Bouton Synchro */}
           <button
             onClick={onOpenCollabModal}
             title="Centre d'Opérations Multi-Opérateurs : Cliquez pour auditer la synchronisation"
@@ -412,7 +425,7 @@ export const TopNav: React.FC<TopNavProps> = ({
                 }`}
               ></span>
             </span>
-            <span className="font-semibold tracking-wide whitespace-nowrap hidden sm:inline">
+            <span className="font-semibold tracking-wide whitespace-nowrap hidden xl:inline">
               {connectionStatus === 'connected'
                 ? activeUsersCount > 1
                   ? `${activeUsersCount} Analystes`
@@ -422,13 +435,104 @@ export const TopNav: React.FC<TopNavProps> = ({
             <Users className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
           </button>
 
+          {/* Bouton Kill-Switch Réseau */}
+          <button
+            onClick={() => onSelectTab('sandbox-isolation')}
+            title="Kill-Switch Réseau d'Urgence : Couper le trafic sortant/entrant tout en maintenant localhost"
+            className="h-9 px-2.5 sm:px-3 rounded-lg text-xs font-mono font-bold transition-all border shadow-xs bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border-rose-800/80 hover:border-rose-500 flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer"
+          >
+            <WifiOff className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span className="hidden xl:inline whitespace-nowrap">Kill-Switch</span>
+          </button>
+
+          {/* Bouton Télécharger Archive ZIP (Direct sous xl / >= 1400px avec texte, icône sous 1400px) */}
+          <button
+            onClick={onDownloadZip}
+            title="Télécharger l'Archive ZIP complète Space Security (scripts, modules, exécutables)"
+            className="h-9 px-2.5 sm:px-3 rounded-lg text-xs font-semibold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-all shadow-xs flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer"
+          >
+            <Archive className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden xl:inline whitespace-nowrap">Archive ZIP</span>
+          </button>
+
+          {/* Menu "..." Actions Rapides (Rapport PDF, Script PS1, Raccourcis) */}
+          <div className="relative">
+            <button
+              ref={moreButtonRef}
+              onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+              aria-expanded={isMoreMenuOpen}
+              aria-haspopup="true"
+              title="Actions rapides & Téléchargements"
+              className={`h-9 w-8 sm:w-9 rounded-lg text-xs font-semibold transition-all border flex items-center justify-center shrink-0 cursor-pointer ${
+                isMoreMenuOpen
+                  ? 'bg-slate-800 text-cyan-300 border-cyan-500 shadow-xs'
+                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700/80'
+              }`}
+            >
+              <MoreHorizontal className="w-4 h-4 shrink-0" />
+            </button>
+
+            {/* Popup Menu "..." */}
+            {isMoreMenuOpen && (
+              <div
+                ref={moreMenuRef}
+                className="absolute right-0 top-full mt-1.5 w-56 bg-[#0c1222] border border-cyan-800/80 rounded-xl shadow-2xl shadow-black z-[100] py-2 animate-in fade-in zoom-in-95 duration-100"
+              >
+                <div className="px-3 py-1.5 border-b border-slate-800 text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold">
+                  Outils & Téléchargements
+                </div>
+                <button
+                  onClick={() => {
+                    onDownloadZip();
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:text-cyan-300 hover:bg-slate-800/80 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Archive className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>Télécharger Archive ZIP</span>
+                </button>
+                <button
+                  onClick={() => {
+                    onOpenPdfReport();
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:text-rose-300 hover:bg-slate-800/80 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <FileText className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <span>Générer Rapport PDF</span>
+                </button>
+                <button
+                  onClick={() => {
+                    onDownloadScript();
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:text-amber-300 hover:bg-slate-800/80 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Script PowerShell (.ps1)</span>
+                </button>
+                <div className="border-t border-slate-800 my-1"></div>
+                <button
+                  onClick={() => {
+                    onOpenShortcutsModal?.();
+                    setIsMoreMenuOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:text-cyan-300 hover:bg-slate-800/80 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Keyboard className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>Raccourcis Clavier (?)</span>
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Bouton Menu Déroulant "Modules & Outils" */}
           <button
             ref={triggerButtonRef}
             onClick={() => setIsMegaMenuOpen(!isMegaMenuOpen)}
             aria-expanded={isMegaMenuOpen}
             aria-haspopup="true"
-            title="Ouvrir le centre de contrôle de tous les modules et outils de cyberdéfense"
+            title="Ouvrir le catalogue complet des 19 modules de cyberdéfense"
             className={`h-9 px-2.5 sm:px-3 rounded-lg text-xs font-semibold transition-all border flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer ${
               isMegaMenuOpen
                 ? 'bg-cyan-950 text-cyan-300 border-cyan-500 shadow-sm shadow-cyan-950/60'
