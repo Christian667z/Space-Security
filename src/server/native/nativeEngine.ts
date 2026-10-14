@@ -1,14 +1,10 @@
 import os from 'os';
 import fs from 'fs';
-import { promisify } from 'util';
-import { exec } from 'child_process';
 import { persistentPs } from './persistentPowerShell.ts';
 import { parseNetshWifiOutput, type FlattenedWifiItem } from './wifiParser.ts';
 import { getVendorFromMac } from './oui.ts';
 import { safeExecFile } from '../safeExec.ts';
 import { logger } from '../logger.ts';
-
-const execAsync = promisify(exec);
 
 export interface ProcessTelemetry {
   pid: number;
@@ -235,8 +231,8 @@ export class SpaceSecNativeEngine {
 
     // Linux or fallback
     try {
-      const { stdout } = await execAsync('ps -eo pid,ppid,%cpu,%mem,comm,args --sort=-%cpu 2>/dev/null | head -n 35');
-      const lines = stdout.trim().split('\n').slice(1);
+      const { stdout } = await safeExecFile('ps', ['-eo', 'pid,ppid,%cpu,%mem,comm,args', '--sort=-%cpu']);
+      const lines = stdout.trim().split('\n').slice(1, 36);
       const totalMem = os.totalmem();
 
       const list: ProcessTelemetry[] = lines.map(line => {
@@ -762,28 +758,28 @@ export class SpaceSecNativeEngine {
     const recentServices: any[] = [];
 
     try {
-      const { stdout } = await execAsync('wevtutil qe Security "/q:*[System[(EventID=4625)]]" /c:15 /rd:true /f:xml');
-      const matches = stdout.match(/<EventID>4625<\/EventID>/g);
+      const { stdout } = await safeExecFile('wevtutil.exe', ['qe', 'Security', '/q:*[System[(EventID=4625)]]', '/c:15', '/rd:true', '/f:xml']);
+      const matches = stdout ? stdout.match(/<EventID>4625<\/EventID>/g) : null;
       failedLoginsCount = matches ? matches.length : 0;
     } catch {}
 
     try {
-      const { stdout: secOut } = await execAsync('wevtutil qe Security "/q:*[System[(EventID=1102)]]" /c:1 /rd:true /f:xml');
-      const { stdout: sysOut } = await execAsync('wevtutil qe System "/q:*[System[(EventID=104)]]" /c:1 /rd:true /f:xml');
-      if (secOut.includes('<EventID>1102') || sysOut.includes('<EventID>104')) {
+      const { stdout: secOut } = await safeExecFile('wevtutil.exe', ['qe', 'Security', '/q:*[System[(EventID=1102)]]', '/c:1', '/rd:true', '/f:xml']);
+      const { stdout: sysOut } = await safeExecFile('wevtutil.exe', ['qe', 'System', '/q:*[System[(EventID=104)]]', '/c:1', '/rd:true', '/f:xml']);
+      if ((secOut && secOut.includes('<EventID>1102')) || (sysOut && sysOut.includes('<EventID>104'))) {
         logsClearedDetected = true;
       }
     } catch {}
 
     try {
-      const { stdout } = await execAsync('wevtutil qe Security "/q:*[System[(EventID=4720)]]" /c:5 /rd:true /f:xml');
-      const matches = stdout.match(/<EventID>4720<\/EventID>/g);
+      const { stdout } = await safeExecFile('wevtutil.exe', ['qe', 'Security', '/q:*[System[(EventID=4720)]]', '/c:5', '/rd:true', '/f:xml']);
+      const matches = stdout ? stdout.match(/<EventID>4720<\/EventID>/g) : null;
       newAdminsCount = matches ? matches.length : 0;
     } catch {}
 
     try {
-      const { stdout } = await execAsync('wevtutil qe System "/q:*[System[(EventID=7045)]]" /c:5 /rd:true /f:xml');
-      const matches = stdout.match(/<EventID>7045<\/EventID>/g);
+      const { stdout } = await safeExecFile('wevtutil.exe', ['qe', 'System', '/q:*[System[(EventID=7045)]]', '/c:5', '/rd:true', '/f:xml']);
+      const matches = stdout ? stdout.match(/<EventID>7045<\/EventID>/g) : null;
       newServicesCount = matches ? matches.length : 0;
     } catch {}
 
@@ -1150,8 +1146,8 @@ export class SpaceSecNativeEngine {
     let fltFiltersList: string[] = [];
     if (this.isWin) {
       try {
-        const { stdout } = await execAsync('fltmc.exe filters');
-        const lines = stdout.split('\n').filter(l => l.trim() && !l.includes('---') && !l.toLowerCase().includes('filter name'));
+        const { stdout } = await safeExecFile('fltmc.exe', ['filters']);
+        const lines = stdout ? stdout.split('\n').filter(l => l.trim() && !l.includes('---') && !l.toLowerCase().includes('filter name')) : [];
         fltFiltersList = lines.map(l => l.trim().split(/\s+/)[0]).filter(Boolean);
       } catch {}
     }

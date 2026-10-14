@@ -2,8 +2,6 @@ import express from 'express';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -62,14 +60,13 @@ import {
 setAuthDbManager(dbManager);
 import { checkHashReputation, checkIpReputation } from './src/server/threatIntel.ts';
 import { backgroundScheduler } from './src/server/scheduler.ts';
-import { safeExecFile, validateAndParsePid, sanitizeInterfaceName, sanitizePath, sanitizeIpAddress } from './src/server/safeExec.ts';
+import { safeExecFile, safeExecPowerShell, psString, validateAndParsePid, sanitizeInterfaceName, sanitizePath, sanitizeIpAddress } from './src/server/safeExec.ts';
 import { persistentPs } from './src/server/native/persistentPowerShell.ts';
 import { parseNetshWifiOutput } from './src/server/native/wifiParser.ts';
 import { nativeTelemetry } from './src/server/native/systemTelemetry.ts';
 import { nativeEngine } from './src/server/native/nativeEngine.ts';
 import { ok, none } from './src/server/dataSource.ts';
 
-const execAsync = promisify(exec);
 const appDir = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 const ai = new GoogleGenAI();
 
@@ -1034,13 +1031,14 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         estLatencyMs = Math.max(2, Math.round(distanceKm * 0.012 + 8));
       }
 
-      // Real ICMP ping probe
+      // Real ICMP ping probe (SECURED: safeExecFile with strict IP sanitization)
       let measuredPingMs: number | null = null;
       try {
-        const pingCmd = os.platform() === 'win32'
-          ? `ping -n 1 -w 1500 ${resolvedIp}`
-          : `ping -c 1 -W 2 ${resolvedIp}`;
-        const { stdout: pingOut } = await execAsync(pingCmd);
+        const safeTargetIp = sanitizeIpAddress(resolvedIp);
+        const pingArgs = os.platform() === 'win32'
+          ? ['-n', '1', '-w', '1500', safeTargetIp]
+          : ['-c', '1', '-W', '2', safeTargetIp];
+        const { stdout: pingOut } = await safeExecFile('ping', pingArgs, { timeout: 3000 });
         const match = pingOut.match(/time[=<]([0-9.]+)\s*ms/i);
         if (match && match[1]) {
           measuredPingMs = parseFloat(match[1]);
@@ -1061,8 +1059,9 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         { hop: 5, ip: resolvedIp, host: geoData.reverse || `${resolvedIp}.in-addr.arpa`, latency: measuredPingMs ? `${measuredPingMs.toFixed(1)} ms (Mesuré ICMP)` : `${estLatencyMs} ms (Estimé RTT)`, location: `${city}, ${country}`, org: org || isp },
       ];
 
-      // Firewall block rule script
-      const firewallRulePs1 = `New-NetFirewallRule -DisplayName "SpaceSec-Block-IP-${resolvedIp.replace(/[^a-zA-Z0-9]/g, '_')}" -Direction Outbound -RemoteAddress "${resolvedIp}" -Action Block -Description "Règle de confinement défensif SpaceSec générée pour l'IP hostile ${resolvedIp} (${country})"`;
+      // Firewall block rule script (strictly sanitized IP, safe from injection)
+      const safeFirewallIp = sanitizeIpAddress(resolvedIp);
+      const firewallRulePs1 = `New-NetFirewallRule -DisplayName "SpaceSec-Block-IP-${safeFirewallIp.replace(/[^a-zA-Z0-9]/g, '_')}" -Direction Outbound -RemoteAddress "${safeFirewallIp}" -Action Block -Description "Règle de confinement défensif SpaceSec générée pour l'IP hostile ${safeFirewallIp} (${country.replace(/"/g, '')})"`;
 
       return res.json({
         success: true,
@@ -1194,7 +1193,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       const validChannels = ['System', 'Application', 'Security', 'Microsoft-Windows-PowerShell/Operational', 'Microsoft-Windows-Windows Defender/Operational'];
       const targetChannel = validChannels.includes(channel) ? channel : 'System';
 
-      const { stdout } = await execAsync(`wevtutil qe "${targetChannel}" /c:25 /rd:true /f:text`);
+      const { stdout } = await safeExecFile('wevtutil.exe', ['qe', targetChannel, '/c:25', '/rd:true', '/f:text']);
       const events: any[] = [];
       const eventBlocks = stdout.split(/Event\[\d+\]/g).filter(b => b.trim());
 
@@ -1692,25 +1691,25 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       };
 
       if (isWin32) {
-        // Probe Taskmgr
+        // Probe Taskmgr (SECURED: safeExecFile directly targeting reg.exe)
         try {
-          const { stdout } = await execAsync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableTaskMgr');
+          const { stdout } = await safeExecFile('reg.exe', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableTaskMgr']);
           if (stdout.includes('0x1')) items.taskmgr.blocked = true;
         } catch {}
         try {
-          const { stdout } = await execAsync('reg query "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableTaskMgr');
+          const { stdout } = await safeExecFile('reg.exe', ['query', 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableTaskMgr']);
           if (stdout.includes('0x1')) items.taskmgr.blocked = true;
         } catch {}
 
         // Probe Regedit
         try {
-          const { stdout } = await execAsync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableRegistryTools');
+          const { stdout } = await safeExecFile('reg.exe', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableRegistryTools']);
           if (stdout.includes('0x1')) items.regedit.blocked = true;
         } catch {}
 
         // Probe CMD
         try {
-          const { stdout } = await execAsync('reg query "HKCU\\Software\\Policies\\Microsoft\\Windows\\System" /v DisableCMD');
+          const { stdout } = await safeExecFile('reg.exe', ['query', 'HKCU\\Software\\Policies\\Microsoft\\Windows\\System', '/v', 'DisableCMD']);
           if (stdout.includes('0x1') || stdout.includes('0x2')) items.cmd.blocked = true;
         } catch {}
 
@@ -1747,43 +1746,43 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       if (isWin32) {
         // Unlock Taskmgr
         try {
-          await execAsync('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableTaskMgr /f');
+          await safeExecFile('reg.exe', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableTaskMgr', '/f']);
           results.push('Taskmgr débloqué (HKCU)');
         } catch {}
         try {
-          await execAsync('reg delete "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableTaskMgr /f');
+          await safeExecFile('reg.exe', ['delete', 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableTaskMgr', '/f']);
           results.push('Taskmgr débloqué (HKLM)');
         } catch {}
 
         // Unlock Regedit
         try {
-          await execAsync('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableRegistryTools /f');
+          await safeExecFile('reg.exe', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableRegistryTools', '/f']);
           results.push('Regedit débloqué (HKCU)');
         } catch {}
         try {
-          await execAsync('reg delete "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableRegistryTools /f');
+          await safeExecFile('reg.exe', ['delete', 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableRegistryTools', '/f']);
           results.push('Regedit débloqué (HKLM)');
         } catch {}
 
         // Unlock CMD
         try {
-          await execAsync('reg delete "HKCU\\Software\\Policies\\Microsoft\\Windows\\System" /v DisableCMD /f');
+          await safeExecFile('reg.exe', ['delete', 'HKCU\\Software\\Policies\\Microsoft\\Windows\\System', '/v', 'DisableCMD', '/f']);
           results.push('CMD & PowerShell débloqués (HKCU)');
         } catch {}
         try {
-          await execAsync('reg delete "HKLM\\Software\\Policies\\Microsoft\\Windows\\System" /v DisableCMD /f');
+          await safeExecFile('reg.exe', ['delete', 'HKLM\\Software\\Policies\\Microsoft\\Windows\\System', '/v', 'DisableCMD', '/f']);
           results.push('CMD & PowerShell débloqués (HKLM)');
         } catch {}
 
         // Unlock NoRun
         try {
-          await execAsync('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer" /v NoRun /f');
+          await safeExecFile('reg.exe', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer', '/v', 'NoRun', '/f']);
           results.push('Boîte Exécuter débloquée (NoRun)');
         } catch {}
 
         // Force Group Policy Refresh
         try {
-          await execAsync('gpupdate /force');
+          await safeExecFile('gpupdate.exe', ['/force']);
           results.push('Stratégies de groupe (GPO) actualisées avec succès (gpupdate /force)');
         } catch {}
       } else {
@@ -1835,7 +1834,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
           backupDone = true;
           fs.writeFileSync(hostsPath, cleanHostsContent, 'utf8');
         } catch (e: any) {
-          await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -Path '${hostsPath}' -Value @'${cleanHostsContent}'@ -Force"`);
+          const psSetContent = `Set-Content -LiteralPath 'C:\\Windows\\System32\\drivers\\etc\\hosts' -Value ${psString(cleanHostsContent)} -Force`;
+          await safeExecPowerShell(psSetContent);
         }
       }
 
@@ -1843,8 +1843,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       let dnsFlushed = false;
       if (isWin32) {
         try {
-          await execAsync('ipconfig /flushdns');
-          await execAsync('netsh winsock reset');
+          await safeExecFile('ipconfig.exe', ['/flushdns']);
+          await safeExecFile('netsh.exe', ['winsock', 'reset']);
           dnsFlushed = true;
         } catch {}
       } else {
@@ -1900,16 +1900,26 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       });
       const sha256 = hash.digest('hex');
 
-      // Check Authenticode Signature via PowerShell if Windows
+      // Check Authenticode Signature via PowerShell if Windows (SECURED: safeExecPowerShell via -EncodedCommand & -LiteralPath)
       let signatureStatus = 'UNKNOWN';
       let signer = 'Non signé';
       if (os.platform() === 'win32') {
         try {
-          const { stdout } = await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-AuthenticodeSignature -FilePath '${targetPath.replace(/'/g, "''")}').Status.ToString()"`);
-          const statusTrim = stdout.trim();
-          if (statusTrim) signatureStatus = statusTrim;
-          const { stdout: signerOut } = await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-AuthenticodeSignature -FilePath '${targetPath.replace(/'/g, "''")}').SignerCertificate.Subject"`);
-          if (signerOut.trim()) signer = signerOut.trim();
+          const cleanPath = sanitizePath(targetPath);
+          const sigScript = `
+$p = ${psString(cleanPath)};
+$sig = Get-AuthenticodeSignature -LiteralPath $p;
+[PSCustomObject]@{
+  Status = $sig.Status.ToString()
+  Signer = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '' }
+} | ConvertTo-Json -Compress
+`;
+          const { stdout } = await safeExecPowerShell(sigScript);
+          if (stdout.trim()) {
+            const parsed = JSON.parse(stdout.trim());
+            if (parsed.Status) signatureStatus = parsed.Status;
+            if (parsed.Signer) signer = parsed.Signer;
+          }
         } catch {}
       }
 
@@ -2025,9 +2035,9 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
           }
         } catch {}
       } else {
-        // Linux / Container host: count real processes
+        // Linux / Container host: count real processes (SECURED: safeExecFile without shell)
         try {
-          const { stdout: psOut } = await execAsync('ps -e -o pid,comm 2>/dev/null');
+          const { stdout: psOut } = await safeExecFile('ps', ['-e', '-o', 'pid,comm']);
           const lines = psOut.trim().split('\n').slice(1);
           totalProcsCount = lines.length;
         } catch {
@@ -2050,10 +2060,10 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
           } catch {}
         }
 
-        // Real Linux kernel modules (lsmod)
+        // Real Linux kernel modules (lsmod via safeExecFile)
         try {
-          const { stdout: lsmodOut } = await execAsync('lsmod 2>/dev/null | head -n 8');
-          const modLines = lsmodOut.trim().split('\n').slice(1);
+          const { stdout: lsmodOut } = await safeExecFile('lsmod', []);
+          const modLines = lsmodOut.trim().split('\n').slice(1, 9);
           modLines.forEach(l => {
             const parts = l.trim().split(/\s+/);
             if (parts.length >= 1) {
@@ -2630,7 +2640,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     // On Windows, enrich with netsh and WMI if available
     if (isWin32) {
       try {
-        const { stdout: netshOut } = await execAsync('netsh interface show interface');
+        const { stdout: netshOut } = await safeExecFile('netsh.exe', ['interface', 'show', 'interface']);
         const lines = netshOut.split('\n');
         for (const line of lines) {
           const match = line.trim().match(/^(Activé|Désactivé|Enabled|Disabled)\s+(Connecté|Déconnecté|Connected|Disconnected)\s+(Dédié|Dedicated)\s+(.+)$/i);
@@ -2725,15 +2735,15 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
       for (const iface of targetInterfaces) {
         newlyDisabled.push(iface.name);
-        const netshCmd = `netsh interface set interface "${iface.name}" admin=disabled`;
-        executedCommands.push(netshCmd);
+        const cleanName = sanitizeInterfaceName(iface.name);
+        executedCommands.push(`netsh interface set interface "${cleanName}" admin=disabled`);
 
         if (isWin32) {
           try {
-            await execAsync(netshCmd);
+            await safeExecFile('netsh.exe', ['interface', 'set', 'interface', cleanName, 'admin=disabled']);
           } catch {
             try {
-              await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Disable-NetAdapter -Name '${iface.name}' -Confirm:$false"`);
+              await safeExecPowerShell(`Disable-NetAdapter -Name ${psString(cleanName)} -Confirm:$false`);
             } catch {}
           }
         }
@@ -2742,9 +2752,14 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       // Add strict firewall outbound block rule for external traffic, strictly preserving 127.0.0.1
       if (isWin32) {
         try {
-          const fwRule = 'netsh advfirewall firewall add rule name="SpaceSec-KillSwitch-Block" dir=out action=block remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255';
-          await execAsync(fwRule);
-          executedCommands.push(fwRule);
+          await safeExecFile('netsh.exe', [
+            'advfirewall', 'firewall', 'add', 'rule',
+            'name=SpaceSec-KillSwitch-Block',
+            'dir=out',
+            'action=block',
+            'remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255'
+          ]);
+          executedCommands.push('netsh advfirewall firewall add rule name="SpaceSec-KillSwitch-Block" dir=out action=block remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255');
         } catch {}
       }
 
@@ -2785,13 +2800,13 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     const toRestore = [...disabledInterfacesList];
 
     for (const ifaceName of toRestore) {
-      const netshCmd = `netsh interface set interface "${ifaceName}" admin=enabled`;
       if (isWin32) {
+        const cleanName = sanitizeInterfaceName(ifaceName);
         try {
-          await execAsync(netshCmd);
+          await safeExecFile('netsh.exe', ['interface', 'set', 'interface', cleanName, 'admin=enabled']);
         } catch {
           try {
-            await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Enable-NetAdapter -Name '${ifaceName}' -Confirm:$false"`);
+            await safeExecPowerShell(`Enable-NetAdapter -Name ${psString(cleanName)} -Confirm:$false`);
           } catch {}
         }
       }
@@ -2799,7 +2814,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
     if (isWin32) {
       try {
-        await execAsync('netsh advfirewall firewall delete rule name="SpaceSec-KillSwitch-Block"');
+        await safeExecFile('netsh.exe', ['advfirewall', 'firewall', 'delete', 'rule', 'name=SpaceSec-KillSwitch-Block']);
       } catch {}
     }
 
@@ -3300,11 +3315,20 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       let cfaEnabled = false;
 
       if (isWin) {
-        // 1. Check suspect files on disk
+        // 1. Check suspect files on disk (SECURED: safeExecPowerShell via -EncodedCommand & -LiteralPath)
         for (const name of suspectNames) {
-          const filePath = `${targetFolder}\\${name}`;
+          const filePath = path.join(targetFolder, name);
           try {
-            const { stdout } = await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path '${filePath}') { $i = Get-Item '${filePath}' -Force; $h = (Get-FileHash '${filePath}' -Algorithm SHA256).Hash; $s = (Get-AuthenticodeSignature '${filePath}').Status; Write-Output \\"$($i.Length)|$h|$s\\" }"`);
+            const psInspect = `
+$p = ${psString(filePath)};
+if (Test-Path -LiteralPath $p) {
+  $i = Get-Item -LiteralPath $p -Force
+  $h = (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash
+  $s = (Get-AuthenticodeSignature -LiteralPath $p).Status
+  "$($i.Length)|$h|$s"
+}
+`;
+            const { stdout } = await safeExecPowerShell(psInspect);
             const trimmed = stdout.trim();
             if (trimmed) {
               const [sizeStr, hash, sig] = trimmed.split('|');
@@ -3324,9 +3348,15 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
           } catch {}
         }
 
-        // 2. Check running processes
+        // 2. Check running processes (SECURED: safeExecPowerShell with psString folder)
         try {
-          const { stdout: procOut } = await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith('${targetFolder}', [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { \\"$($_.ProcessId)|$($_.Name)|$($_.ExecutablePath)\\" }"`);
+          const psProc = `
+$folder = ${psString(targetFolder)};
+Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($folder, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object {
+  "$($_.ProcessId)|$($_.Name)|$($_.ExecutablePath)"
+}
+`;
+          const { stdout: procOut } = await safeExecPowerShell(psProc);
           const lines = procOut.trim().split('\n').filter(Boolean);
           for (const line of lines) {
             const [pidStr, procName, procPath] = line.trim().split('|');
@@ -3344,7 +3374,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
         // 3. Check ControlledFolderAccess status
         try {
-          const { stdout: cfaOut } = await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-MpPreference).EnableControlledFolderAccess"`);
+          const { stdout: cfaOut } = await safeExecPowerShell('(Get-MpPreference).EnableControlledFolderAccess');
           cfaEnabled = cfaOut.trim() === '1';
         } catch {}
       } else {
@@ -3492,7 +3522,13 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
           message: 'Recherche et terminaison de tout processus actif lancé depuis C:\\Windows\\Resources\\Themes...',
         });
         try {
-          const { stdout } = await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith('C:\\Windows\\Resources\\Themes', [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Output \\"Killed $($_.ProcessId)\\" }"`);
+          const killScript = `
+Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith('C:\\Windows\\Resources\\Themes', [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object {
+  Stop-Process -Id $_.ProcessId -Force
+  Write-Output "Killed $($_.ProcessId)"
+}
+`;
+          const { stdout } = await safeExecPowerShell(killScript);
           stepsLog.push({
             step: 1,
             name: 'Arrêt forcé des processus suspects',
@@ -3516,9 +3552,9 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
           message: 'Transfert de propriété depuis TrustedInstaller vers le groupe Administrateurs...',
         });
         for (const file of ['explorer.exe', 'icsys.icn.exe']) {
-          const p = `C:\\Windows\\Resources\\Themes\\${file}`;
+          const p = path.join('C:\\Windows\\Resources\\Themes', file);
           try {
-            await execAsync(`takeown /f "${p}" /a`);
+            await safeExecFile('takeown.exe', ['/f', p, '/a']);
             stepsLog.push({
               step: 2,
               name: `takeown ${file}`,
@@ -3536,9 +3572,9 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
           message: 'Attribution des permissions FullControl (*S-1-5-32-544:F)...',
         });
         for (const file of ['explorer.exe', 'icsys.icn.exe']) {
-          const p = `C:\\Windows\\Resources\\Themes\\${file}`;
+          const p = path.join('C:\\Windows\\Resources\\Themes', file);
           try {
-            await execAsync(`icacls "${p}" /grant "*S-1-5-32-544:F"`);
+            await safeExecFile('icacls.exe', [p, '/grant', '*S-1-5-32-544:F']);
             stepsLog.push({
               step: 3,
               name: `icacls ${file}`,
@@ -3559,11 +3595,11 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
           const deletePsScript = `
             $cfa = (Get-MpPreference -ErrorAction SilentlyContinue).EnableControlledFolderAccess
             if ($cfa -eq 1) { Set-MpPreference -EnableControlledFolderAccess Disabled -ErrorAction SilentlyContinue }
-            Remove-Item "C:\\Windows\\Resources\\Themes\\explorer.exe" -Force -ErrorAction SilentlyContinue
-            Remove-Item "C:\\Windows\\Resources\\Themes\\icsys.icn.exe" -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath 'C:\\Windows\\Resources\\Themes\\explorer.exe' -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath 'C:\\Windows\\Resources\\Themes\\icsys.icn.exe' -Force -ErrorAction SilentlyContinue
             if ($cfa -eq 1) { Set-MpPreference -EnableControlledFolderAccess Enabled -ErrorAction SilentlyContinue }
           `;
-          await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "${deletePsScript.replace(/\n/g, '; ')}"`);
+          await safeExecPowerShell(deletePsScript);
           stepsLog.push({
             step: 4,
             name: 'Suppression des fichiers',
@@ -3703,7 +3739,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
             }
             $results | ConvertTo-Json
           `;
-          const { stdout } = await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "${script.replace(/\n/g, ' ')}"`);
+          const { stdout } = await safeExecPowerShell(script);
           if (stdout.trim()) {
             const parsed = JSON.parse(stdout);
             persistenceItems = Array.isArray(parsed) ? parsed : [parsed];

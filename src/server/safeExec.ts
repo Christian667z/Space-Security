@@ -33,11 +33,44 @@ export async function safeExecFile(
 }
 
 /**
+ * Executes a PowerShell script safely using -EncodedCommand.
+ * Encodes the script into UTF-16LE Base64, completely immune to quote injection,
+ * command chaining, parameter expansion, and shell escapes.
+ */
+export async function safeExecPowerShell(
+  script: string,
+  options: ExecFileOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  const utf16le = Buffer.from(script, 'utf16le').toString('base64');
+  return safeExecFile(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', utf16le],
+    options
+  );
+}
+
+/**
+ * Returns a PowerShell expression that safely reconstructs a literal string value at runtime
+ * from Base64 UTF-8 bytes. Since Base64 contains only [A-Za-z0-9+/=], this is 100% immune
+ * to quote escapes, backtick interpolation, shell breakouts, or parameter injection.
+ */
+export function psString(value: string): string {
+  const b64 = Buffer.from(String(value ?? ''), 'utf8').toString('base64');
+  return `[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))`;
+}
+
+/**
  * Validates that an input is strictly a positive integer PID.
  * Throws an error if invalid.
  */
 export function validateAndParsePid(input: unknown): number {
-  const num = typeof input === 'number' ? input : parseInt(String(input).trim(), 10);
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!/^\d+$/.test(trimmed)) {
+      throw new Error('PID invalide : doit être un entier strictement positif.');
+    }
+  }
+  const num = typeof input === 'number' ? input : Number(String(input).trim());
   if (isNaN(num) || !Number.isInteger(num) || num <= 0 || num > 4194304) {
     throw new Error('PID invalide : doit être un entier strictement positif.');
   }

@@ -1,13 +1,11 @@
 import { Router } from 'express';
 import os from 'os';
 import fs from 'fs';
-import { promisify } from 'util';
-import { exec } from 'child_process';
 import { dbManager } from '../db.ts';
 import { logger } from '../logger.ts';
 import { requireAuth } from '../auth.ts';
+import { safeExecFile, safeExecPowerShell, psString } from '../safeExec.ts';
 
-const execAsync = promisify(exec);
 export const remediationRouter = Router();
 
 // GET /api/remediation/status - Detailed IFEO & policy status
@@ -25,26 +23,26 @@ remediationRouter.get('/status', async (req, res) => {
 
     if (isWin32) {
       try {
-        const { stdout } = await execAsync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableTaskMgr');
-        if (stdout.includes('0x1')) items.taskmgr.blocked = true;
+        const { stdout } = await safeExecFile('reg.exe', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableTaskMgr']);
+        if (stdout && stdout.includes('0x1')) items.taskmgr.blocked = true;
       } catch {}
       try {
-        const { stdout } = await execAsync('reg query "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableTaskMgr');
-        if (stdout.includes('0x1')) items.taskmgr.blocked = true;
-      } catch {}
-
-      try {
-        const { stdout } = await execAsync('reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableRegistryTools');
-        if (stdout.includes('0x1')) items.regedit.blocked = true;
-      } catch {}
-      try {
-        const { stdout } = await execAsync('reg query "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableRegistryTools');
-        if (stdout.includes('0x1')) items.regedit.blocked = true;
+        const { stdout } = await safeExecFile('reg.exe', ['query', 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableTaskMgr']);
+        if (stdout && stdout.includes('0x1')) items.taskmgr.blocked = true;
       } catch {}
 
       try {
-        const { stdout } = await execAsync('reg query "HKCU\\Software\\Policies\\Microsoft\\Windows\\System" /v DisableCMD');
-        if (stdout.includes('0x1') || stdout.includes('0x2')) items.cmd.blocked = true;
+        const { stdout } = await safeExecFile('reg.exe', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableRegistryTools']);
+        if (stdout && stdout.includes('0x1')) items.regedit.blocked = true;
+      } catch {}
+      try {
+        const { stdout } = await safeExecFile('reg.exe', ['query', 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableRegistryTools']);
+        if (stdout && stdout.includes('0x1')) items.regedit.blocked = true;
+      } catch {}
+
+      try {
+        const { stdout } = await safeExecFile('reg.exe', ['query', 'HKCU\\Software\\Policies\\Microsoft\\Windows\\System', '/v', 'DisableCMD']);
+        if (stdout && (stdout.includes('0x1') || stdout.includes('0x2'))) items.cmd.blocked = true;
       } catch {}
 
       const hostsPath = 'C:\\Windows\\System32\\drivers\\etc\\hosts';
@@ -86,39 +84,39 @@ remediationRouter.post('/policies/repair', requireAuth, async (req, res) => {
 
     if (isWin32) {
       try {
-        await execAsync('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableTaskMgr /f');
+        await safeExecFile('reg.exe', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableTaskMgr', '/f']);
         results.push('Taskmgr débloqué (HKCU)');
       } catch {}
       try {
-        await execAsync('reg delete "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableTaskMgr /f');
+        await safeExecFile('reg.exe', ['delete', 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableTaskMgr', '/f']);
         results.push('Taskmgr débloqué (HKLM)');
       } catch {}
 
       try {
-        await execAsync('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableRegistryTools /f');
+        await safeExecFile('reg.exe', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableRegistryTools', '/f']);
         results.push('Regedit débloqué (HKCU)');
       } catch {}
       try {
-        await execAsync('reg delete "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableRegistryTools /f');
+        await safeExecFile('reg.exe', ['delete', 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'DisableRegistryTools', '/f']);
         results.push('Regedit débloqué (HKLM)');
       } catch {}
 
       try {
-        await execAsync('reg delete "HKCU\\Software\\Policies\\Microsoft\\Windows\\System" /v DisableCMD /f');
+        await safeExecFile('reg.exe', ['delete', 'HKCU\\Software\\Policies\\Microsoft\\Windows\\System', '/v', 'DisableCMD', '/f']);
         results.push('CMD & PowerShell débloqués (HKCU)');
       } catch {}
       try {
-        await execAsync('reg delete "HKLM\\Software\\Policies\\Microsoft\\Windows\\System" /v DisableCMD /f');
+        await safeExecFile('reg.exe', ['delete', 'HKLM\\Software\\Policies\\Microsoft\\Windows\\System', '/v', 'DisableCMD', '/f']);
         results.push('CMD & PowerShell débloqués (HKLM)');
       } catch {}
 
       try {
-        await execAsync('reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer" /v NoRun /f');
+        await safeExecFile('reg.exe', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer', '/v', 'NoRun', '/f']);
         results.push('Boîte Exécuter débloquée (NoRun)');
       } catch {}
 
       try {
-        await execAsync('gpupdate /force');
+        await safeExecFile('gpupdate.exe', ['/force']);
         results.push('Stratégies de groupe (GPO) actualisées avec succès (gpupdate /force)');
       } catch {}
     } else {
@@ -161,8 +159,8 @@ remediationRouter.post('/hosts/restore', requireAuth, async (req, res) => {
         backupDone = true;
         fs.writeFileSync(hostsPath, cleanHostsContent, 'utf8');
       } catch {
-        await execAsync(
-          `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -Path '${hostsPath}' -Value @'${cleanHostsContent}'@ -Force"`
+        await safeExecPowerShell(
+          `Set-Content -LiteralPath ${psString(hostsPath)} -Value ${psString(cleanHostsContent)} -Force`
         );
       }
     }
@@ -170,8 +168,8 @@ remediationRouter.post('/hosts/restore', requireAuth, async (req, res) => {
     let dnsFlushed = false;
     if (isWin32) {
       try {
-        await execAsync('ipconfig /flushdns');
-        await execAsync('netsh winsock reset');
+        await safeExecFile('ipconfig.exe', ['/flushdns']);
+        await safeExecFile('netsh.exe', ['winsock', 'reset']);
         dnsFlushed = true;
       } catch {}
     } else {

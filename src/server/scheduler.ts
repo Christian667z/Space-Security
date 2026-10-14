@@ -2,13 +2,9 @@ import cron, { type ScheduledTask } from 'node-cron';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
-import { promisify } from 'util';
-import { exec } from 'child_process';
 import { dbManager } from './db.ts';
 import { logger } from './logger.ts';
 import { nativeEngine } from './native/nativeEngine.ts';
-
-const execAsync = promisify(exec);
 
 export type BroadcastFunction = (message: any) => void;
 

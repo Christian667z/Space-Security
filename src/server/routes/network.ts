@@ -1,12 +1,9 @@
 import { Router } from 'express';
 import os from 'os';
-import { promisify } from 'util';
-import { exec } from 'child_process';
-import { safeExecFile, sanitizeInterfaceName } from '../safeExec.ts';
+import { safeExecFile, safeExecPowerShell, psString, sanitizeInterfaceName } from '../safeExec.ts';
 import { requireAuth } from '../auth.ts';
 import { sharedState } from '../state.ts';
 
-const execAsync = promisify(exec);
 export const networkRouter = Router();
 
 export let killSwitchActive = false;
@@ -56,7 +53,7 @@ export async function getDetailedNetworkInterfaces() {
   // On Windows, enrich with netsh and WMI if available
   if (isWin32) {
     try {
-      const { stdout: netshOut } = await execAsync('netsh interface show interface');
+      const { stdout: netshOut } = await safeExecFile('netsh.exe', ['interface', 'show', 'interface']);
       const lines = netshOut.split('\n');
       for (const line of lines) {
         const match = line
@@ -120,15 +117,14 @@ export async function restoreNetworkInterfacesInternal(): Promise<string[]> {
   const toRestore = [...disabledInterfacesList];
 
   for (const ifaceName of toRestore) {
-    const netshCmd = `netsh interface set interface "${ifaceName}" admin=enabled`;
     if (isWin32) {
       try {
-        await execAsync(netshCmd);
+        const safeName = sanitizeInterfaceName(ifaceName);
+        await safeExecFile('netsh.exe', ['interface', 'set', 'interface', safeName, 'admin=enabled']);
       } catch {
         try {
-          await execAsync(
-            `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Enable-NetAdapter -Name '${ifaceName}' -Confirm:$false"`
-          );
+          const safeName = sanitizeInterfaceName(ifaceName);
+          await safeExecPowerShell(`Enable-NetAdapter -Name ${psString(safeName)} -Confirm:$false`);
         } catch {}
       }
     }
@@ -136,7 +132,7 @@ export async function restoreNetworkInterfacesInternal(): Promise<string[]> {
 
   if (isWin32) {
     try {
-      await execAsync('netsh advfirewall firewall delete rule name="SpaceSec-KillSwitch-Block"');
+      await safeExecFile('netsh.exe', ['advfirewall', 'firewall', 'delete', 'rule', 'name=SpaceSec-KillSwitch-Block']);
     } catch {}
   }
 
@@ -186,12 +182,12 @@ networkRouter.post('/kill-switch', requireAuth, async (req, res) => {
 
       if (isWin32) {
         try {
-          await execAsync(netshCmd);
+          const safeName = sanitizeInterfaceName(iface.name);
+          await safeExecFile('netsh.exe', ['interface', 'set', 'interface', safeName, 'admin=disabled']);
         } catch {
           try {
-            await execAsync(
-              `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Disable-NetAdapter -Name '${iface.name}' -Confirm:$false"`
-            );
+            const safeName = sanitizeInterfaceName(iface.name);
+            await safeExecPowerShell(`Disable-NetAdapter -Name ${psString(safeName)} -Confirm:$false`);
           } catch {}
         }
       }
@@ -202,7 +198,16 @@ networkRouter.post('/kill-switch', requireAuth, async (req, res) => {
       try {
         const fwRule =
           'netsh advfirewall firewall add rule name="SpaceSec-KillSwitch-Block" dir=out action=block remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255';
-        await execAsync(fwRule);
+        await safeExecFile('netsh.exe', [
+          'advfirewall',
+          'firewall',
+          'add',
+          'rule',
+          'name=SpaceSec-KillSwitch-Block',
+          'dir=out',
+          'action=block',
+          'remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255'
+        ]);
         executedCommands.push(fwRule);
       } catch {}
     }
@@ -271,7 +276,7 @@ networkRouter.post('/toggle-interface', requireAuth, async (req, res, next) => {
     const adminArg = enable ? 'admin=enabled' : 'admin=disabled';
 
     if (isWin32) {
-      await safeExecFile('netsh', ['interface', 'set', 'interface', safeName, adminArg]);
+      await safeExecFile('netsh.exe', ['interface', 'set', 'interface', safeName, adminArg]);
     }
 
     if (enable) {
