@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import os from 'os';
-import { safeExecFile, validateAndParsePid, sanitizePath } from '../safeExec.ts';
+import { safeExecFile, validateAndParsePid, sanitizePath, assertProcessNotProtected } from '../safeExec.ts';
 import { dbManager } from '../db.ts';
 import { logger } from '../logger.ts';
 import { requireAuth } from '../auth.ts';
@@ -41,6 +41,7 @@ sandboxRouter.post('/isolate-process', requireAuth, async (req, res, next) => {
   try {
     const { pid, name, path: procPath } = req.body;
     const safePid = validateAndParsePid(pid);
+    await assertProcessNotProtected(safePid, name);
     const safePath = sanitizePath(procPath || 'C:\\Windows\\System32\\cmd.exe');
     const safeName = name && typeof name === 'string' ? name.slice(0, 128) : `Process_${safePid}`;
 

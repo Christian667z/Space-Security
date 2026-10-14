@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import os from 'os';
-import { safeExecFile, validateAndParsePid } from '../safeExec.ts';
+import { safeExecFile, validateAndParsePid, assertProcessNotProtected } from '../safeExec.ts';
 import { dbManager } from '../db.ts';
 import { logger } from '../logger.ts';
 import { requireAuth } from '../auth.ts';
@@ -252,16 +252,13 @@ systemRouter.post('/specs/sync', async (req, res) => {
 systemRouter.post('/kill', requireAuth, validateBody(killProcessSchema), async (req, res, next) => {
   try {
     const safePid = validateAndParsePid(req.body.pid);
+    const procName = await assertProcessNotProtected(safePid, req.body.name);
 
-    if (safePid === 1 || safePid === process.pid) {
-      return res.status(403).json({ success: false, error: 'Impossible de terminer un processus système racine.' });
-    }
-
-    logger.warn({ pid: safePid, ip: req.ip }, '[SystemControl] Ordre sécurisé de fin de tâche (taskkill)');
+    logger.warn({ pid: safePid, procName, ip: req.ip }, '[SystemControl] Ordre sécurisé de fin de tâche (taskkill)');
 
     if (os.platform() === 'win32') {
       // PARAMETERIZED: No cmd.exe shell invocation, impossible to inject & calc.exe!
-      await safeExecFile('taskkill', ['/F', '/PID', String(safePid)]);
+      await safeExecFile('taskkill.exe', ['/F', '/PID', String(safePid)]);
     } else {
       process.kill(safePid, 'SIGTERM');
     }
@@ -271,12 +268,15 @@ systemRouter.post('/kill', requireAuth, validateBody(killProcessSchema), async (
       timestamp: new Date().toLocaleTimeString('fr-FR'),
       level: 'WARN',
       tag: 'TASKKILL',
-      text: `Processus ${safePid} neutralisé avec succès (paramétré taskkill /F /PID ${safePid}).`,
+      text: `Processus ${procName} (PID ${safePid}) neutralisé avec succès (paramétré taskkill /F /PID ${safePid}).`,
       operatorName: 'Analyste SOC',
     });
 
-    res.json({ success: true, message: `Processus ${safePid} terminé avec succès.` });
+    res.json({ success: true, message: `Processus ${procName} (PID ${safePid}) terminé avec succès.` });
   } catch (err: any) {
+    if (err.message && (err.message.includes('protégé') || err.message.includes('critique'))) {
+      return res.status(403).json({ success: false, error: err.message });
+    }
     next(err);
   }
 });

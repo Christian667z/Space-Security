@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import os from 'node:os';
 import {
   safeExecFile,
   safeExecPowerShell,
@@ -6,7 +7,10 @@ import {
   validateAndParsePid,
   sanitizeIpAddress,
   sanitizeInterfaceName,
-  sanitizePath
+  sanitizePath,
+  assertProcessNotProtected,
+  CRITICAL_PROTECTED_PROCESS_NAMES,
+  CRITICAL_PROTECTED_PIDS
 } from './src/server/safeExec.ts';
 
 async function runTests() {
@@ -35,11 +39,21 @@ async function runTests() {
   }
   console.log('✓ PID validation strictly allows only positive integers and blocks command injection');
 
-  console.log('\n--- TEST 2: IP Address Sanitization (Ping Probe Protection) ---');
+  console.log('\n--- TEST 2: IP Address Sanitization (net.isIP & IPv6 compression) ---');
   assert.strictEqual(sanitizeIpAddress('127.0.0.1'), '127.0.0.1');
   assert.strictEqual(sanitizeIpAddress('8.8.8.8'), '8.8.8.8');
   assert.strictEqual(sanitizeIpAddress('::1'), '::1');
   assert.strictEqual(sanitizeIpAddress('localhost'), 'localhost');
+  // Compressed IPv6 formats
+  assert.strictEqual(sanitizeIpAddress('fe80::1'), 'fe80::1');
+  assert.strictEqual(sanitizeIpAddress('2001:db8::2:1'), '2001:db8::2:1');
+
+  // Verify broken IPv4 regex edge case "1234" is now strictly rejected
+  assert.throws(
+    () => sanitizeIpAddress('1234'),
+    /Format d'adresse IP invalide/,
+    'Expected "1234" to be rejected as an invalid IP'
+  );
 
   const maliciousIps = [
     '127.0.0.1; whoami',
@@ -49,7 +63,8 @@ async function runTests() {
     '127.0.0.1 `calc`',
     '$(whoami)',
     '1.2.3.4.5',
-    '999.999.999.999'
+    '999.999.999.999',
+    '1234'
   ];
 
   for (const badIp of maliciousIps) {
@@ -59,7 +74,7 @@ async function runTests() {
       `Expected IP sanitization to reject: ${badIp}`
     );
   }
-  console.log('✓ IP sanitization strictly blocks command chaining and injection payloads');
+  console.log('✓ IP sanitization uses net.isIP() accepting compressed IPv6 and rejecting broken numbers like "1234"');
 
   console.log('\n--- TEST 3: Interface Name Sanitization ---');
   assert.strictEqual(sanitizeInterfaceName('Ethernet 2'), 'Ethernet 2');
@@ -83,31 +98,89 @@ async function runTests() {
   }
   console.log('✓ Interface name sanitization strictly prevents command delimiters (&, ;, |, newline, backtick)');
 
-  console.log('\n--- TEST 4: Path Sanitization ---');
-  assert.strictEqual(sanitizePath('C:\\Windows\\System32\\calc.exe'), 'C:\\Windows\\System32\\calc.exe');
+  console.log('\n--- TEST 4: Path Sanitization (UNC, Directory Traversal & Root Whitelist) ---');
+  if (os.platform() === 'win32') {
+    assert.strictEqual(sanitizePath('C:\\Windows\\System32\\calc.exe'), 'C:\\Windows\\System32\\calc.exe');
+    assert.strictEqual(sanitizePath('d:\\data\\report.pdf'), 'd:\\data\\report.pdf');
+  } else {
+    assert.strictEqual(sanitizePath('/usr/bin/python3'), '/usr/bin/python3');
+  }
 
-  const maliciousPaths = [
-    'C:\\Windows\\System32\\test\x00.exe',
-    'C:\\Windows\\System32\ncalc.exe',
-    'C:\\Windows\\System32\rcalc.exe',
-    'C:\\Windows\\System32\tcalc.exe',
+  // 1. Control character rejection
+  assert.throws(() => sanitizePath('C:\\Windows\\System32\\test\x00.exe'), /Caractères de contrôle interdits/);
+  assert.throws(() => sanitizePath('C:\\Windows\\System32\ncalc.exe'), /Caractères de contrôle interdits/);
+
+  // 2. UNC path rejection (blocks SMB NTLM credential leaks & remote execution)
+  assert.throws(() => sanitizePath('\\\\attacker.com\\share\\malware.exe'), /Chemins réseau UNC interdits/);
+  assert.throws(() => sanitizePath('//attacker.com/share/malware.exe'), /Chemins réseau UNC interdits/);
+  assert.throws(() => sanitizePath('\\\\?\\UNC\\server\\share\\malware.exe'), /Chemins réseau UNC interdits/);
+
+  // 3. Directory traversal rejection (..)
+  assert.throws(() => sanitizePath('C:\\Windows\\..\\evil.exe'), /Séquences de traversée de répertoire/);
+  assert.throws(() => sanitizePath('C:\\Windows\\System32\\..\\..\\malware.exe'), /Séquences de traversée de répertoire/);
+
+  // 4. Relative paths rejection
+  assert.throws(() => sanitizePath('relative\\path.exe'), /Le chemin doit être un chemin absolu/);
+  assert.throws(() => sanitizePath('calc.exe'), /Le chemin doit être un chemin absolu/);
+
+  // 5. Unwhitelisted root rejection
+  if (os.platform() === 'win32') {
+    assert.throws(() => sanitizePath('1:\\bad\\path.exe'), /Racine non autorisée|Le chemin doit être un chemin absolu/);
+  }
+  console.log('✓ Path sanitization strictly blocks UNC paths, directory traversal (..), relative paths, and unwhitelisted roots');
+
+  console.log('\n--- TEST 5: Protected System Processes (BSOD Prevention) ---');
+  // 1. System PIDs
+  await assert.rejects(
+    async () => await assertProcessNotProtected(0),
+    /Processus système critique protégé/,
+    'PID 0 (System Idle) must be protected'
+  );
+  await assert.rejects(
+    async () => await assertProcessNotProtected(4),
+    /Processus système critique protégé/,
+    'PID 4 (System) must be protected'
+  );
+  await assert.rejects(
+    async () => await assertProcessNotProtected(1),
+    /Processus système critique protégé/,
+    'PID 1 (Init) must be protected'
+  );
+  await assert.rejects(
+    async () => await assertProcessNotProtected(process.pid),
+    /Processus système critique protégé/,
+    'Current process PID must be protected'
+  );
+
+  // 2. Critical Windows Process Names (BSOD culprits)
+  const criticalNames = [
+    'csrss.exe',
+    'lsass.exe',
+    'wininit.exe',
+    'services.exe',
+    'smss.exe',
+    'winlogon.exe',
+    'dwm.exe',
+    'svchost.exe'
   ];
 
-  for (const badPath of maliciousPaths) {
-    assert.throws(
-      () => sanitizePath(badPath),
-      /Caractères de contrôle interdits/,
-      `Expected path sanitization to reject: ${badPath}`
+  for (const name of criticalNames) {
+    await assert.rejects(
+      async () => await assertProcessNotProtected(99999, name),
+      /action bloquée pour éviter un écran bleu \(BSOD\)/,
+      `Process "${name}" must be protected against taskkill`
     );
   }
-  console.log('✓ Path sanitization rejects null-bytes and newline control characters');
 
-  console.log('\n--- TEST 5: safeExecPowerShell Execution with Escaped / Malicious Strings ---');
-  // 1. Verify basic execution
+  // 3. Normal / Rogue userland process should be permitted
+  const allowed = await assertProcessNotProtected(99999, 'malicious_agent.exe');
+  assert.strictEqual(allowed, 'malicious_agent.exe');
+  console.log('✓ assertProcessNotProtected prevents killing csrss, lsass, wininit, services and other BSOD-causing processes');
+
+  console.log('\n--- TEST 6: safeExecPowerShell Execution with Escaped / Malicious Strings ---');
   const { stdout: normalOut } = await safeExecPowerShell('Write-Output "HELLO_SPACESEC"');
   assert.ok(normalOut.includes('HELLO_SPACESEC'), 'Normal PowerShell script should execute');
 
-  // 2. Verify payload with quotes, double quotes, backticks, dollar signs and semicolons inside string literal does NOT breakout
   const complexString = 'Test"Value\'; `calc`; $env:TEMP; Write-Output "INJECTED_BAD"; \'';
   const scriptWithVar = `
     $val = ${psString(complexString)};
@@ -119,7 +192,7 @@ async function runTests() {
   console.log('✓ safeExecPowerShell with psString safely embeds complex strings without shell breakout');
 
   console.log('\n========================================');
-  console.log('ALL COMMAND INJECTION SECURITY TESTS PASSED 100%!');
+  console.log('ALL COMMAND INJECTION & VALIDATION TESTS PASSED 100%!');
   console.log('========================================');
 }
 

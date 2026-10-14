@@ -60,7 +60,7 @@ import {
 setAuthDbManager(dbManager);
 import { checkHashReputation, checkIpReputation } from './src/server/threatIntel.ts';
 import { backgroundScheduler } from './src/server/scheduler.ts';
-import { safeExecFile, safeExecPowerShell, psString, validateAndParsePid, sanitizeInterfaceName, sanitizePath, sanitizeIpAddress } from './src/server/safeExec.ts';
+import { safeExecFile, safeExecPowerShell, psString, validateAndParsePid, sanitizeInterfaceName, sanitizePath, sanitizeIpAddress, assertProcessNotProtected } from './src/server/safeExec.ts';
 import { persistentPs } from './src/server/native/persistentPowerShell.ts';
 import { parseNetshWifiOutput } from './src/server/native/wifiParser.ts';
 import { nativeTelemetry } from './src/server/native/systemTelemetry.ts';
@@ -705,20 +705,19 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
 
   // API 2: Kill Process (Fin de tâche - Protégé par requireAuth, requireRole('admin'), rate limit, validation Zod & opérateur infalsifiable)
   app.post('/api/system/kill', requireAuth, requireRole('admin'), sensitiveActionLimiter, validateBody(killProcessSchema), async (req, res, next) => {
-    const { pid } = req.body;
+    const { pid, name } = req.body;
     const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
 
     try {
-      if (pid === 1 || pid === process.pid) {
-        return res.status(403).json({ success: false, error: 'Impossible de terminer un processus système racine.' });
-      }
+      const safePid = validateAndParsePid(pid);
+      const procName = await assertProcessNotProtected(safePid, name);
 
-      logger.warn({ pid, ip: req.ip, operator: authenticatedOp.name }, '[SystemControl] Ordre de terminaison du processus reçu');
+      logger.warn({ pid: safePid, procName, ip: req.ip, operator: authenticatedOp.name }, '[SystemControl] Ordre de terminaison du processus reçu');
 
       if (os.platform() === 'win32') {
-        await safeExecFile('taskkill', ['/F', '/PID', String(pid)]);
+        await safeExecFile('taskkill.exe', ['/F', '/PID', String(safePid)]);
       } else {
-        process.kill(Number(pid), 'SIGTERM');
+        process.kill(Number(safePid), 'SIGTERM');
       }
 
       dbManager.addAuditLog({
@@ -726,12 +725,15 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
         timestamp: new Date().toLocaleTimeString('fr-FR'),
         level: 'WARN',
         tag: 'TASKKILL',
-        text: `Processus hostile ${pid} neutralisé avec succès (taskkill /F /PID ${pid}) par ${authenticatedOp.name}.`,
+        text: `Processus ${procName} (PID ${safePid}) neutralisé avec succès (taskkill /F /PID ${safePid}) par ${authenticatedOp.name}.`,
         operatorName: authenticatedOp.name,
       });
 
-      res.json({ success: true, message: `Processus ${pid} terminé avec succès.` });
+      res.json({ success: true, message: `Processus ${procName} (PID ${safePid}) terminé avec succès.` });
     } catch (err: any) {
+      if (err.message && (err.message.includes('protégé') || err.message.includes('critique'))) {
+        return res.status(403).json({ success: false, error: err.message });
+      }
       next(err);
     }
   });
@@ -2906,6 +2908,7 @@ $sig = Get-AuthenticodeSignature -LiteralPath $p;
       const { pid, name, path: procPath } = req.body;
       // CRITICAL: Strictly validate PID as positive integer and sanitize executable path
       const safePid = validateAndParsePid(pid);
+      await assertProcessNotProtected(safePid, name);
       const safePath = sanitizePath(procPath || 'C:\\Windows\\System32\\cmd.exe');
       const safeName = (name && typeof name === 'string') ? name.slice(0, 128) : `Process_${safePid}`;
 
