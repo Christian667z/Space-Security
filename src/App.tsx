@@ -1247,7 +1247,7 @@ export default function App() {
       />
 
       {/* Main Container Viewport with Code-Splitting Suspense & Module Error Isolation */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-32 sm:pb-36 space-y-8">
         <ErrorBoundary
           key={activeTab}
           moduleName={activeTab}
