@@ -475,7 +475,7 @@ class SQLiteDatabaseManager {
     }, 500);
   }
 
-  private scalar(sql: string, params: SqlValue[] = []): any {
+  scalar(sql: string, params: SqlValue[] = []): any {
     if (!this.db) return 0;
     const res = this.db.exec(sql, params);
     if (res.length > 0 && res[0].values.length > 0) {
@@ -483,6 +483,11 @@ class SQLiteDatabaseManager {
     }
     return 0;
   }
+
+  getIntelCacheCount(): number {
+    return Number(this.scalar('SELECT COUNT(*) FROM threat_intel_cache')) || 0;
+  }
+
 
   // --- THREATS API ---
   getThreats(): ThreatRecord[] {

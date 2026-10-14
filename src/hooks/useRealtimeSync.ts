@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ThreatItem, ConsoleLogMessage, OperatorSession, ThreatNotification } from '../types/cyberdefense';
-import { apiFetch, getWsUrl } from '../utils/api';
+import { apiFetch, getWsUrl, initAuthToken } from '../utils/api';
 
 interface UseRealtimeSyncProps {
   onNotification?: (notification: Omit<ThreatNotification, 'id' | 'timestamp'>) => void;
@@ -58,7 +58,7 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
   }, []);
 
   // Connect WebSocket
-  const connectWebSocket = useCallback(() => {
+  const connectWebSocket = useCallback(async () => {
     if (!isMountedRef.current) return;
 
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
@@ -68,6 +68,7 @@ export function useRealtimeSync({ onNotification, onSystemLog }: UseRealtimeSync
     setConnectionStatus('connecting');
 
     try {
+      await initAuthToken();
       const wsUrl = getWsUrl();
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;

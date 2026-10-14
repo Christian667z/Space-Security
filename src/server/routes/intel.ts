@@ -39,6 +39,30 @@ intelRouter.post('/check-hash', intelLimiter, validateBody(threatIntelCheckSchem
   }
 });
 
+// GET /api/intel/status
+intelRouter.get('/status', (req, res) => {
+  const settings = dbManager.getAllSettings();
+  const vtConfigured = Boolean((process.env.VIRUSTOTAL_API_KEY && process.env.VIRUSTOTAL_API_KEY.trim().length > 10) || (settings.virusTotalApiKey && settings.virusTotalApiKey.trim().length > 10));
+  const abuseConfigured = Boolean((process.env.ABUSEIPDB_API_KEY && process.env.ABUSEIPDB_API_KEY.trim().length > 10) || (settings.abuseIpDbApiKey && settings.abuseIpDbApiKey.trim().length > 10));
+  
+  res.json({
+    success: true,
+    virusTotal: {
+      configured: vtConfigured,
+      source: process.env.VIRUSTOTAL_API_KEY ? 'ENVIRONMENT_VARIABLE' : (settings.virusTotalApiKey ? 'PERSISTENT_SETTINGS' : 'NONE'),
+      mode: vtConfigured ? 'LIVE_API_V3' : 'LOCAL_HEURISTICS_ENGINE',
+      provider: 'VirusTotal Intelligence API v3',
+    },
+    abuseIpDb: {
+      configured: abuseConfigured,
+      source: process.env.ABUSEIPDB_API_KEY ? 'ENVIRONMENT_VARIABLE' : (settings.abuseIpDbApiKey ? 'PERSISTENT_SETTINGS' : 'NONE'),
+      mode: abuseConfigured ? 'LIVE_API_V2' : 'LOCAL_HEURISTICS_ENGINE',
+      provider: 'AbuseIPDB Threat Intelligence API v2',
+    },
+    threatCacheCount: dbManager.scalar('SELECT COUNT(*) FROM threat_intel_cache'),
+  });
+});
+
 // GET /api/health
 intelRouter.get('/health', (req, res) => {
   res.json({

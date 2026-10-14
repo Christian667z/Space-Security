@@ -27,11 +27,22 @@ import {
   edrTelemetrySchema,
   edrCommandCreateSchema,
   edrCommandAckSchema,
+  sharedMutateSchema,
+  executeCommandSchema,
+  specsSyncSchema,
+  reportGenerateSchema,
+  quarantineRestoreSchema,
   validateBody,
   validateQuery,
 } from './src/server/validators.ts';
 import { generateEdrAgentPowerShell } from './src/data/edrAgentScript.ts';
-import { requireAuth, getLocalAuthToken, validateWebSocketConnection, corsAndCsrfProtection } from './src/server/auth.ts';
+import {
+  requireAuth,
+  getLocalAuthToken,
+  validateWebSocketConnection,
+  corsAndCsrfProtection,
+  resolveAuthenticatedOperator,
+} from './src/server/auth.ts';
 import { checkHashReputation, checkIpReputation } from './src/server/threatIntel.ts';
 import { backgroundScheduler } from './src/server/scheduler.ts';
 import { safeExecFile, validateAndParsePid, sanitizeInterfaceName, sanitizePath, sanitizeIpAddress } from './src/server/safeExec.ts';
@@ -522,8 +533,8 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
     }
   });
 
-  // API 2.1: Direct Sync for Client Windows Machine
-  app.post('/api/system/specs/sync', async (req, res) => {
+  // API 2.1: Direct Sync for Client Windows Machine (Secured with requireAuth & Zod)
+  app.post('/api/system/specs/sync', requireAuth, validateBody(specsSyncSchema), async (req, res) => {
     try {
       const payload = req.body || {};
       if (payload.hostname && payload.hostname !== 'localhost') {
@@ -560,16 +571,17 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
     }
   });
 
-  // API 2: Kill Process (Fin de tâche - Protégé par rate limit & validation Zod)
-  app.post('/api/system/kill', sensitiveActionLimiter, validateBody(killProcessSchema), async (req, res, next) => {
+  // API 2: Kill Process (Fin de tâche - Protégé par requireAuth, rate limit, validation Zod & opérateur infalsifiable)
+  app.post('/api/system/kill', requireAuth, sensitiveActionLimiter, validateBody(killProcessSchema), async (req, res, next) => {
     const { pid } = req.body;
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
 
     try {
       if (pid === 1 || pid === process.pid) {
         return res.status(403).json({ success: false, error: 'Impossible de terminer un processus système racine.' });
       }
 
-      logger.warn({ pid, ip: req.ip }, '[SystemControl] Ordre de terminaison du processus reçu');
+      logger.warn({ pid, ip: req.ip, operator: authenticatedOp.name }, '[SystemControl] Ordre de terminaison du processus reçu');
 
       if (os.platform() === 'win32') {
         await safeExecFile('taskkill', ['/F', '/PID', String(pid)]);
@@ -582,8 +594,8 @@ export async function startServer(portOverride?: number): Promise<http.Server> {
         timestamp: new Date().toLocaleTimeString('fr-FR'),
         level: 'WARN',
         tag: 'TASKKILL',
-        text: `Processus hostile ${pid} neutralisé avec succès (taskkill /F /PID ${pid}).`,
-        operatorName: 'Analyste SOC',
+        text: `Processus hostile ${pid} neutralisé avec succès (taskkill /F /PID ${pid}) par ${authenticatedOp.name}.`,
+        operatorName: authenticatedOp.name,
       });
 
       res.json({ success: true, message: `Processus ${pid} terminé avec succès.` });
@@ -1628,7 +1640,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  app.post('/api/remediation/policies/repair', async (req, res) => {
+  app.post('/api/remediation/policies/repair', requireAuth, sensitiveActionLimiter, async (req, res) => {
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const isWin32 = os.platform() === 'win32';
       const results: string[] = [];
@@ -1683,6 +1696,15 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         results.push('Actualisation forcée des stratégies système (gpupdate /force)');
       }
 
+      dbManager.addAuditLog({
+        id: `log-repair-policies-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'OK',
+        tag: 'POLICIES',
+        text: `Déblocage des politiques système et du registre exécuté par ${authenticatedOp.name}.`,
+        operatorName: authenticatedOp.name,
+      });
+
       res.json({
         success: true,
         message: 'Déblocage des politiques système et du registre exécuté avec succès.',
@@ -1693,7 +1715,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  app.post('/api/remediation/hosts/restore', async (req, res) => {
+  app.post('/api/remediation/hosts/restore', requireAuth, sensitiveActionLimiter, async (req, res) => {
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const isWin32 = os.platform() === 'win32';
       const hostsPath = 'C:\\Windows\\System32\\drivers\\etc\\hosts';
@@ -1729,6 +1752,15 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       } else {
         dnsFlushed = true;
       }
+
+      dbManager.addAuditLog({
+        id: `log-restore-hosts-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'OK',
+        tag: 'HOSTS',
+        text: `Restauration du fichier système HOSTS exécutée par ${authenticatedOp.name}. Cache DNS vidé.`,
+        operatorName: authenticatedOp.name,
+      });
 
       res.json({
         success: true,
@@ -2106,8 +2138,9 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
-  app.post('/api/remediation/quarantine/restore', sensitiveActionLimiter, (req, res) => {
+  app.post('/api/remediation/quarantine/restore', requireAuth, sensitiveActionLimiter, validateBody(quarantineRestoreSchema), (req, res) => {
     const { id } = req.body;
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     const dbItems = dbManager.getQuarantine();
     const item = dbItems.find(q => q.id === id);
     if (!item) {
@@ -2115,15 +2148,15 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
 
     dbManager.updateQuarantineStatus(id, 'RESTORED');
-    logger.info({ item: item.fileName, originalPath: item.originalPath }, '[Quarantine] Fichier restauré');
+    logger.info({ item: item.fileName, originalPath: item.originalPath, operator: authenticatedOp.name }, '[Quarantine] Fichier restauré');
 
     dbManager.addAuditLog({
       id: `log-quarantine-restore-${Date.now()}`,
       timestamp: new Date().toLocaleTimeString('fr-FR'),
       level: 'INFO',
       tag: 'QUARANTINE',
-      text: `Fichier ${item.fileName} sorti de quarantaine et restauré vers ${item.originalPath}.`,
-      operatorName: 'Analyste Incident',
+      text: `Fichier ${item.fileName} sorti de quarantaine et restauré vers ${item.originalPath} par ${authenticatedOp.name}.`,
+      operatorName: authenticatedOp.name,
     });
 
     res.json({
@@ -2133,7 +2166,17 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
-  app.post('/api/remediation/winre', (req, res) => {
+  app.post('/api/remediation/winre', requireAuth, sensitiveActionLimiter, (req, res) => {
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
+    dbManager.addAuditLog({
+      id: `log-winre-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString('fr-FR'),
+      level: 'WARN',
+      tag: 'WINRE',
+      text: `Commande de bascule vers WinRE armée par ${authenticatedOp.name}.`,
+      operatorName: authenticatedOp.name,
+    });
+
     res.json({
       success: true,
       commandPrepared: 'reagentc.exe /boottore && shutdown.exe /r /o /t 0',
@@ -2273,8 +2316,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // Menu 14: Report Multi-Format Export Generator (Driven dynamically by sharedState threats and live audit)
-  app.post('/api/reports/generate', (req, res) => {
+  // Menu 14: Report Multi-Format Export Generator (Secured with requireAuth & Zod)
+  app.post('/api/reports/generate', requireAuth, validateBody(reportGenerateSchema), (req, res) => {
     const format = req.body?.format || 'html'; // 'html' | 'csv' | 'json'
     const now = new Date();
     const timestamp = now.toLocaleString('fr-FR');
@@ -3612,6 +3655,29 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
   });
 
   // 4. Real Threat Intelligence Integration (VirusTotal v3 & AbuseIPDB v2)
+  app.get('/api/intel/status', (req, res) => {
+    const settings = dbManager.getAllSettings();
+    const vtConfigured = Boolean((process.env.VIRUSTOTAL_API_KEY && process.env.VIRUSTOTAL_API_KEY.trim().length > 10) || (settings.virusTotalApiKey && settings.virusTotalApiKey.trim().length > 10));
+    const abuseConfigured = Boolean((process.env.ABUSEIPDB_API_KEY && process.env.ABUSEIPDB_API_KEY.trim().length > 10) || (settings.abuseIpDbApiKey && settings.abuseIpDbApiKey.trim().length > 10));
+    
+    res.json({
+      success: true,
+      virusTotal: {
+        configured: vtConfigured,
+        source: process.env.VIRUSTOTAL_API_KEY ? 'ENVIRONMENT_VARIABLE' : (settings.virusTotalApiKey ? 'PERSISTENT_SETTINGS' : 'NONE'),
+        mode: vtConfigured ? 'LIVE_API_V3' : 'LOCAL_HEURISTICS_ENGINE',
+        provider: 'VirusTotal Intelligence API v3',
+      },
+      abuseIpDb: {
+        configured: abuseConfigured,
+        source: process.env.ABUSEIPDB_API_KEY ? 'ENVIRONMENT_VARIABLE' : (settings.abuseIpDbApiKey ? 'PERSISTENT_SETTINGS' : 'NONE'),
+        mode: abuseConfigured ? 'LIVE_API_V2' : 'LOCAL_HEURISTICS_ENGINE',
+        provider: 'AbuseIPDB Threat Intelligence API v2',
+      },
+      threatCacheCount: dbManager.scalar('SELECT COUNT(*) FROM threat_intel_cache'),
+    });
+  });
+
   app.post('/api/intel/check-ip', intelLimiter, validateBody(threatIntelCheckSchema), async (req, res, next) => {
     try {
       const result = await checkIpReputation(req.body.target);

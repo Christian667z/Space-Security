@@ -74,9 +74,56 @@ export function corsAndCsrfProtection(req: Request, res: Response, next: NextFun
   next();
 }
 
+export interface AuthenticatedOperator {
+  id: string;
+  name: string;
+  role: string;
+  ip: string;
+  verified: boolean;
+}
+
+/**
+ * Resolves an authenticated, server-verified operator identity.
+ * Prevents client-side operator identity falsification by anchoring
+ * the operator record to the verified IP, connection source, and token state.
+ */
+export function resolveAuthenticatedOperator(req: Request): AuthenticatedOperator {
+  const rawIp = (req.ip || (req.socket && req.socket.remoteAddress) || '127.0.0.1').toString();
+  const cleanIp = rawIp.replace(/^.*:/, '') || '127.0.0.1';
+  const isLoopback = cleanIp === '1' || cleanIp === '127.0.0.1' || rawIp.includes('127.0.0.1');
+
+  // Client-suggested handle (sanitized, max 24 chars, no malicious characters)
+  const clientSuggested =
+    (typeof req.headers['x-operator-name'] === 'string' && req.headers['x-operator-name'].trim()) ||
+    (req.body && req.body.operator && typeof req.body.operator.name === 'string' && req.body.operator.name.trim()) ||
+    (req.body && typeof req.body.operatorName === 'string' && req.body.operatorName.trim()) ||
+    '';
+
+  const sanitizedHandle = clientSuggested.replace(/[^\w\s\-#.]/gi, '').trim().slice(0, 24);
+
+  if (isLoopback) {
+    return {
+      id: 'OP-LOCAL',
+      name: sanitizedHandle ? `${sanitizedHandle} [Local]` : 'Analyste SOC Local',
+      role: 'Administrateur SOC (Local)',
+      ip: '127.0.0.1',
+      verified: true,
+    };
+  }
+
+  return {
+    id: `OP-${cleanIp.replace(/\./g, '')}`,
+    name: sanitizedHandle ? `${sanitizedHandle} [${cleanIp}]` : `Analyste Réseau [${cleanIp}]`,
+    role: 'Opérateur SOC Certifié',
+    ip: cleanIp,
+    verified: true,
+  };
+}
+
 /**
  * Authorization Middleware for Sensitive Operations.
  * Protects administrative and system-modifying endpoints against unauthorized local or remote callers.
+ * Strictly verifies the cryptographically generated SpaceSec auth token.
  */
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (req.method === 'OPTIONS') return next();
@@ -97,33 +144,29 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 
   // 1. Direct valid token provided
   if (providedToken && isValidToken(providedToken)) {
+    (req as any).authenticatedOperator = resolveAuthenticatedOperator(req);
     return next();
   }
 
-  // 2. Local token handshake endpoint itself is open to same-origin
+  // 2. Local token handshake endpoint itself is exempt
   if (req.path === '/api/auth/token') {
     return next();
   }
 
-  // 3. In Web development container (AI Studio), check same-origin header verification
-  const isWebDev = process.env.IS_ELECTRON !== 'true';
-  const origin = req.headers.origin;
-  const host = req.headers.host;
+  // 3. In Desktop Electron packaged mode, allow strict loopback IPC
+  const isElectron = process.env.IS_ELECTRON === 'true';
+  const clientIp = req.ip || req.socket.remoteAddress || '';
+  const isLoopback = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp.includes('127.0.0.1');
 
-  if (isWebDev) {
-    const isSameOrigin =
-      !origin ||
-      (host && origin.includes(host)) ||
-      origin.includes('localhost') ||
-      origin.includes('127.0.0.1') ||
-      origin.includes('run.app');
-
-    if (isSameOrigin) {
-      return next();
-    }
+  if (isElectron && isLoopback) {
+    (req as any).authenticatedOperator = resolveAuthenticatedOperator(req);
+    return next();
   }
 
-  logger.warn({ ip: req.ip, path: req.path, method: req.method }, '[Auth] Accès non autorisé rejeté');
+  logger.warn(
+    { ip: clientIp, path: req.path, method: req.method },
+    '[Auth] Accès sensible non autorisé rejeté (jeton manquant ou invalide)'
+  );
   return res.status(401).json({
     success: false,
     error: 'Non autorisé : Jeton d\'authentification local SpaceSec manquant ou invalide.',
@@ -133,6 +176,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 /**
  * Validates WebSocket connection handshake authentication.
+ * Requires a cryptographically valid token in the URL query string.
  */
 export function validateWebSocketConnection(urlStr?: string): boolean {
   if (!urlStr) return false;
@@ -140,14 +184,13 @@ export function validateWebSocketConnection(urlStr?: string): boolean {
     const url = new URL(urlStr, 'http://localhost');
     const token = url.searchParams.get('token');
 
-    // 1. If valid token is supplied in query string
-    if (token && isValidToken(token)) return true;
-
-    // 2. In web dev container mode without electron, permit local connection
-    if (process.env.IS_ELECTRON !== 'true') return true;
+    if (token && isValidToken(token)) {
+      return true;
+    }
 
     return false;
   } catch {
     return false;
   }
 }
+

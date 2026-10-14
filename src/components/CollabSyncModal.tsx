@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users,
   Radio,
@@ -12,8 +12,13 @@ import {
   Activity,
   ArrowRight,
   ExternalLink,
+  Database,
+  Cloud,
+  Globe,
+  Lock,
 } from 'lucide-react';
 import { OperatorSession } from '../types/cyberdefense';
+import { apiFetch } from '../utils/api';
 
 interface CollabSyncModalProps {
   isOpen: boolean;
@@ -38,6 +43,40 @@ export const CollabSyncModal: React.FC<CollabSyncModalProps> = ({
   onResetThreats,
   onTestBroadcast,
 }) => {
+  const [haStatus, setHaStatus] = useState<{
+    connected?: boolean;
+    projectId?: string;
+    databaseId?: string;
+    lastSyncTime?: string;
+    storageEngine?: string;
+  } | null>(null);
+
+  const [intelStatus, setIntelStatus] = useState<{
+    virusTotal?: { configured: boolean; mode: string; provider: string };
+    abuseIpDb?: { configured: boolean; mode: string; provider: string };
+    threatCacheCount?: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    // Fetch Firestore HA status
+    apiFetch('/api/system/ha-status')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.success) setHaStatus(data);
+      })
+      .catch(() => {});
+
+    // Fetch Threat Intelligence status
+    apiFetch('/api/intel/status')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.success) setIntelStatus(data);
+      })
+      .catch(() => {});
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
@@ -210,6 +249,102 @@ export const CollabSyncModal: React.FC<CollabSyncModalProps> = ({
               <p className="text-[11px] text-slate-400">
                 Les commandes tapées et les alertes de détection sont propagées dans les journaux console partagés.
               </p>
+            </div>
+          </div>
+
+          {/* Haute Disponibilité & Cloud Firestore Resilience */}
+          <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-mono text-cyan-400 uppercase tracking-wider">
+                <Cloud className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Persistance Haute Disponibilité (Cloud Firestore)</span>
+              </div>
+              <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                haStatus?.connected
+                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800'
+                  : 'bg-amber-950/80 text-amber-300 border-amber-800'
+              }`}>
+                {haStatus?.connected ? 'HA CLOUD ACTIF' : 'SQLITE LOCAL (RÉSILIENCE)'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg space-y-1">
+                <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                  <Database className="w-3 h-3 text-cyan-400" />
+                  <span>Moteur de Stockage</span>
+                </div>
+                <div className="font-mono text-slate-100 font-semibold truncate">
+                  {haStatus?.storageEngine === 'CLOUD_FIRESTORE_HA' ? 'Firestore Enterprise HA' : 'SQLite WebAssembly'}
+                </div>
+                <div className="text-[10px] text-slate-500 font-mono truncate">
+                  DB: {haStatus?.databaseId || 'spacesec.sqlite'}
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg space-y-1">
+                <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                  <Activity className="w-3 h-3 text-emerald-400" />
+                  <span>Dernière Sauvegarde HA</span>
+                </div>
+                <div className="font-mono text-emerald-400 font-semibold truncate">
+                  {haStatus?.lastSyncTime ? new Date(haStatus.lastSyncTime).toLocaleTimeString() : 'Automatique'}
+                </div>
+                <div className="text-[10px] text-slate-500">
+                  Zéro perte en cas de redémarrage conteneur
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Threat Intelligence Integrations Status */}
+          <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-mono text-violet-400 uppercase tracking-wider">
+                <Globe className="w-3.5 h-3.5 text-violet-400" />
+                <span>Moteurs Threat Intelligence (VT v3 & AbuseIPDB)</span>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-violet-950/80 text-violet-300 border border-violet-800">
+                GLOBAL INTEL
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-200">VirusTotal v3</span>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
+                    intelStatus?.virusTotal?.configured
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                      : 'bg-slate-800 text-slate-300 border border-slate-700'
+                  }`}>
+                    {intelStatus?.virusTotal?.configured ? 'API V3 LIVE' : 'HEURISTIQUES DÉFENSE'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {intelStatus?.virusTotal?.configured
+                    ? 'Réputation mondiale de hashs et domaines en temps réel.'
+                    : 'Inspection heuristique locale autonome (signatures actives).'}
+                </p>
+              </div>
+
+              <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-200">AbuseIPDB v2</span>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
+                    intelStatus?.abuseIpDb?.configured
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                      : 'bg-slate-800 text-slate-300 border border-slate-700'
+                  }`}>
+                    {intelStatus?.abuseIpDb?.configured ? 'API V2 LIVE' : 'ANALYSE ASN / BGP'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {intelStatus?.abuseIpDb?.configured
+                    ? 'Score de confiance des signalements IP C2 mondiaux.'
+                    : 'Détection géolocalisée et filtrage des réseaux privés.'}
+                </p>
+              </div>
             </div>
           </div>
 

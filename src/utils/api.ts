@@ -14,18 +14,30 @@ export function getAuthToken(): string {
   return cachedAuthToken;
 }
 
+let initPromise: Promise<string> | null = null;
+
 export async function initAuthToken(): Promise<string> {
   if (cachedAuthToken) return cachedAuthToken;
-  try {
-    const res = await fetch(`${getApiBaseUrl()}/api/auth/token`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.token) {
-        cachedAuthToken = data.token;
+  if (initPromise) return initPromise;
+
+  initPromise = (async () => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/auth/token`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.token) {
+          cachedAuthToken = data.token;
+        }
       }
-    }
-  } catch {}
-  return cachedAuthToken;
+    } catch {}
+    return cachedAuthToken;
+  })();
+
+  try {
+    return await initPromise;
+  } finally {
+    initPromise = null;
+  }
 }
 
 // Auto-initialize token on client load (via IPC if Electron, or HTTP handshake if Web)
@@ -61,6 +73,10 @@ export function getWsUrl(): string {
 }
 
 export async function apiFetch(path: string, options?: RequestInit): Promise<Response> {
+  if (!cachedAuthToken && path !== '/api/auth/token') {
+    await initAuthToken();
+  }
+
   const baseUrl = getApiBaseUrl();
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const fullUrl = `${baseUrl}${cleanPath}`;
@@ -68,6 +84,9 @@ export async function apiFetch(path: string, options?: RequestInit): Promise<Res
   const headers = new Headers(options?.headers || {});
   if (cachedAuthToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${cachedAuthToken}`);
+  }
+  if (cachedAuthToken && !headers.has('X-SpaceSec-Token')) {
+    headers.set('X-SpaceSec-Token', cachedAuthToken);
   }
   
   return fetch(fullUrl, {
