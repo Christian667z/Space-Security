@@ -2612,10 +2612,11 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // POST: Execute Emergency Network Kill-Switch
+  // POST: Execute Emergency Network Kill-Switch (SECURED: requireAuth + sensitiveActionLimiter)
   // Logic: Lists active Wi-Fi, Ethernet, and external interfaces, and instantly disables them.
   // Preserves 127.0.0.1 / localhost loopback so the web interface and Node server stay 100% operational.
-  app.post('/api/network/kill-switch', async (req, res) => {
+  app.post('/api/network/kill-switch', requireAuth, sensitiveActionLimiter, async (req, res) => {
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const isWin32 = os.platform() === 'win32';
       const ifaces = await getDetailedNetworkInterfaces();
@@ -2653,14 +2654,17 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       killSwitchEngagedAt = new Date().toISOString();
       disabledInterfacesList = Array.from(new Set([...disabledInterfacesList, ...newlyDisabled]));
 
-      // Log into shared state
-      sharedState.logs.unshift({
+      // Log into shared state with authenticated operator
+      const logEntry = {
         id: `killswitch-${Date.now()}`,
         timestamp: new Date().toLocaleTimeString('fr-FR'),
-        level: 'KERNEL',
+        level: 'KERNEL' as const,
         tag: 'KILL-SWITCH',
-        text: `ISOLATION D'URGENCE RÉSEAU ACTIVÉE : ${newlyDisabled.length} interface(s) coupée(s) (Wi-Fi/Ethernet). Boucle locale 127.0.0.1 (localhost:3000) préservée et active.`,
-      });
+        text: `ISOLATION D'URGENCE RÉSEAU ACTIVÉE par ${authenticatedOp.name} : ${newlyDisabled.length} interface(s) coupée(s) (Wi-Fi/Ethernet). Boucle locale 127.0.0.1 (localhost:3000) préservée et active.`,
+        operatorName: authenticatedOp.name,
+      };
+      sharedState.logs.unshift(logEntry);
+      dbManager.addAuditLog(logEntry);
 
       res.json({
         success: true,
@@ -2707,18 +2711,22 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     return toRestore;
   }
 
-  // POST: Restore Network Interfaces
-  app.post('/api/network/restore', async (req, res) => {
+  // POST: Restore Network Interfaces (SECURED: requireAuth + sensitiveActionLimiter)
+  app.post('/api/network/restore', requireAuth, sensitiveActionLimiter, async (req, res) => {
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const toRestore = await restoreNetworkInterfacesInternal();
 
-      sharedState.logs.unshift({
+      const logEntry = {
         id: `restore-${Date.now()}`,
         timestamp: new Date().toLocaleTimeString('fr-FR'),
-        level: 'OK',
+        level: 'OK' as const,
         tag: 'KILL-SWITCH',
-        text: `Rétablissement du réseau effectué : ${toRestore.length} interface(s) réactivée(s) avec succès. Connectivité normale rétablie.`,
-      });
+        text: `Rétablissement du réseau effectué par ${authenticatedOp.name} : ${toRestore.length} interface(s) réactivée(s) avec succès. Connectivité normale rétablie.`,
+        operatorName: authenticatedOp.name,
+      };
+      sharedState.logs.unshift(logEntry);
+      dbManager.addAuditLog(logEntry);
 
       res.json({
         success: true,
@@ -2922,26 +2930,35 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
 
   // Centralized State Mutation Handler (Synchronizes Memory, SQLite & WebSockets)
   function applyStateMutation(action: string, payload: any, operator: any, originWs?: WebSocket) {
+    const verifiedOpName = operator?.name || 'Analyste SOC Local';
+    const verifiedOpIp = operator?.ip || '127.0.0.1';
+
     if (action === 'UPDATE_THREAT_STATUS') {
       const { threatId, status, targetPath } = payload;
       sharedState.threats = sharedState.threats.map(t =>
         t.id === threatId || (targetPath && t.targetPath === targetPath) ? { ...t, status } : t
       );
       dbManager.updateThreatStatus(threatId, status, targetPath);
-      logger.info({ action, threatId, status, operator: operator?.name }, '[StateMutation] Menace mise à jour');
+      logger.info({ action, threatId, status, operator: verifiedOpName }, '[StateMutation] Menace mise à jour');
     } else if (action === 'ADD_LOG') {
-      sharedState.logs = [...sharedState.logs.slice(-200), payload];
-      dbManager.addAuditLog(payload);
+      // Prevent operator falsification: anchor authoritatively to verified operator
+      const securedLog = {
+        ...payload,
+        operatorName: verifiedOpName,
+        operatorIp: verifiedOpIp,
+      };
+      sharedState.logs = [...sharedState.logs.slice(-199), securedLog];
+      dbManager.addAuditLog(securedLog);
     } else if (action === 'BLOCK_IP') {
       if (!sharedState.blockedIps.includes(payload.ip)) {
         sharedState.blockedIps.push(payload.ip);
         dbManager.addBlockedEntity('IP', payload.ip, payload.reason);
-        logger.info({ ip: payload.ip, operator: operator?.name }, '[StateMutation] IP hostile bloquée');
+        logger.info({ ip: payload.ip, operator: verifiedOpName }, '[StateMutation] IP hostile bloquée');
       }
     } else if (action === 'UNBLOCK_IP') {
       sharedState.blockedIps = sharedState.blockedIps.filter(ip => ip !== payload.ip);
       dbManager.removeBlockedEntity('IP', payload.ip);
-      logger.info({ ip: payload.ip, operator: operator?.name }, '[StateMutation] IP débloquée');
+      logger.info({ ip: payload.ip, operator: verifiedOpName }, '[StateMutation] IP débloquée');
     } else if (action === 'BLOCK_WIFI_BSSID') {
       if (!sharedState.blockedWifiBssids.includes(payload.bssid)) {
         sharedState.blockedWifiBssids.push(payload.bssid);
@@ -2958,12 +2975,12 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         const logEntry = {
           id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
           timestamp: new Date().toLocaleTimeString('fr-FR'),
-          level: 'OK',
-          text: `[COMMANDE-PARTAGÉE] Exécution groupée (${idSet.size} cibles) par ${operator?.name || 'Opérateur'} : "${command}" -> Statut: ${status}`,
+          level: 'OK' as const,
+          text: `[COMMANDE-PARTAGÉE] Exécution groupée (${idSet.size} cibles) par ${verifiedOpName} : "${command}" -> Statut: ${status}`,
           tag: 'BULK-OP',
-          operatorName: operator?.name,
+          operatorName: verifiedOpName,
         };
-        sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+        sharedState.logs = [...sharedState.logs.slice(-199), logEntry];
         dbManager.addAuditLog(logEntry);
       }
     } else if (action === 'DISMISS_THREATS') {
@@ -2976,12 +2993,12 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       const logEntry = {
         id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
         timestamp: new Date().toLocaleTimeString('fr-FR'),
-        level: 'WARN',
-        text: `[REJET-MASSE] ${idSet.size} menace(s) ignorée(s)/rejetée(s) par ${operator?.name || 'Opérateur'}.`,
+        level: 'WARN' as const,
+        text: `[REJET-MASSE] ${idSet.size} menace(s) ignorée(s)/rejetée(s) par ${verifiedOpName}.`,
         tag: 'DISMISS',
-        operatorName: operator?.name,
+        operatorName: verifiedOpName,
       };
-      sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+      sharedState.logs = [...sharedState.logs.slice(-199), logEntry];
       dbManager.addAuditLog(logEntry);
     } else if (action === 'RESTORE_THREATS') {
       const { threatIds } = payload;
@@ -2993,12 +3010,12 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       const logEntry = {
         id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
         timestamp: new Date().toLocaleTimeString('fr-FR'),
-        level: 'INFO',
-        text: `[RESTAURATION] ${idSet.size} menace(s) réactivée(s) par ${operator?.name || 'Opérateur'}.`,
+        level: 'INFO' as const,
+        text: `[RESTAURATION] ${idSet.size} menace(s) réactivée(s) par ${verifiedOpName}.`,
         tag: 'RESTORE',
-        operatorName: operator?.name,
+        operatorName: verifiedOpName,
       };
-      sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+      sharedState.logs = [...sharedState.logs.slice(-199), logEntry];
       dbManager.addAuditLog(logEntry);
     } else if (action === 'RECORD_SCANNED_THREATS') {
       const incoming: any[] = Array.isArray(payload.threats) ? payload.threats : [];
@@ -3013,21 +3030,44 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         }
       }
       if (addedCount > 0) {
-        logger.info({ addedCount, operator: operator?.name }, '[StateMutation] Nouvelles menaces de scan enregistrées');
+        logger.info({ addedCount, operator: verifiedOpName }, '[StateMutation] Nouvelles menaces de scan enregistrées');
       }
     } else if (action === 'ADD_THREAT') {
       const t = payload;
       if (t && t.id && !sharedState.threats.some(existing => existing.id === t.id)) {
         sharedState.threats.push(t);
         dbManager.saveThreat(t);
-        logger.info({ threatId: t.id, operator: operator?.name }, '[StateMutation] Menace ajoutée');
+        logger.info({ threatId: t.id, operator: verifiedOpName }, '[StateMutation] Menace ajoutée');
       }
     } else if (action === 'RESET_THREATS') {
-      sharedState.threats = sharedState.threats.map(t => ({ ...t, status: 'ACTIVE' }));
+      // Traceable threat reset with indelible audit log
+      sharedState.threats = sharedState.threats.map(t => ({ ...t, status: 'ACTIVE' as const }));
       dbManager.resetThreats();
+      const resetAuditLog = {
+        id: `log-reset-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'WARN' as const,
+        tag: 'RESET-THREATS',
+        text: `[RÉINITIALISATION-CONTRÔLÉE] Réinitialisation de toutes les menaces au statut ACTIVE ordonnée par l'opérateur vérifié ${verifiedOpName} (${verifiedOpIp}).`,
+        operatorName: verifiedOpName,
+      };
+      sharedState.logs = [...sharedState.logs.slice(-199), resetAuditLog];
+      dbManager.addAuditLog(resetAuditLog);
+      logger.warn({ operator: verifiedOpName, ip: verifiedOpIp }, '[StateMutation] Réinitialisation des menaces consignée dans l\'audit');
     } else if (action === 'CLEAR_LOGS') {
-      sharedState.logs = [];
+      // Forensic integrity protection: never wipe logs silently. Record indelible audit purge event.
+      const auditPurgeLog = {
+        id: `log-audit-purge-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'CRITICAL' as const,
+        tag: 'AUDIT-PURGE',
+        text: `[PURGE FORENSIQUE CONTRÔLÉE] Effacement des journaux d'audit ordonné par l'opérateur vérifié ${verifiedOpName} (${verifiedOpIp}). Chaîne de traçabilité certifiée.`,
+        operatorName: verifiedOpName,
+      };
       dbManager.clearAuditLogs();
+      dbManager.addAuditLog(auditPurgeLog);
+      sharedState.logs = [auditPurgeLog];
+      logger.warn({ operator: verifiedOpName, ip: verifiedOpIp }, '[StateMutation] Effacement des journaux d\'audit consigné de manière indélébile');
     }
 
     sharedState.lastModified = new Date().toISOString();
@@ -3056,85 +3096,93 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
-  // REST API: Mutate shared state (fallback if WS unavailable)
-  app.post('/api/shared/mutate', (req, res) => {
-    const { action, payload, operator } = req.body;
-    if (!action) {
-      return res.status(400).json({ success: false, error: 'Action required' });
+  // REST API: Mutate shared state (SECURED: requireAuth + sensitiveActionLimiter + validateBody(sharedMutateSchema))
+  app.post(
+    '/api/shared/mutate',
+    requireAuth,
+    sensitiveActionLimiter,
+    validateBody(sharedMutateSchema),
+    (req, res) => {
+      const { action, payload } = req.body;
+      const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
+      applyStateMutation(action, payload, authenticatedOp);
+      res.json({ success: true, state: sharedState });
     }
-    applyStateMutation(action, payload, operator);
-    res.json({ success: true, state: sharedState });
-  });
+  );
 
-  // REST API: Unified Backend Command Execution & Auditing Engine
-  app.post('/api/console/execute', async (req, res) => {
-    try {
-      const { command, operatorName } = req.body;
-      if (!command || typeof command !== 'string') {
-        return res.status(400).json({ success: false, error: 'Commande requise.' });
-      }
-      const trimmed = command.trim();
-      const op = operatorName || 'Analyste SOC';
-      const results: { level: string; text: string; tag: string }[] = [];
+  // REST API: Unified Backend Command Execution & Auditing Engine (SECURED: requireAuth + sensitiveActionLimiter + validateBody(executeCommandSchema))
+  app.post(
+    '/api/console/execute',
+    requireAuth,
+    sensitiveActionLimiter,
+    validateBody(executeCommandSchema),
+    async (req, res) => {
+      try {
+        const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
+        const { command } = req.body;
+        const trimmed = command.trim();
+        const op = authenticatedOp.name;
+        const results: { level: string; text: string; tag: string }[] = [];
 
-      const parts = trimmed.split(/\s+/);
-      const action = parts[0].toLowerCase();
+        const parts = trimmed.split(/\s+/);
+        const action = parts[0].toLowerCase();
 
-      if (action === 'scan') {
-        const isDeep = trimmed.includes('--deep');
-        results.push({ level: 'KERNEL', tag: 'SCAN', text: `Scan ${isDeep ? 'Profond (Ring0 Kernel & Persistence)' : 'Rapide'} initié par ${op}...` });
-        const scanRes = await nativeEngine.getProcesses();
-        results.push({ level: 'OK', tag: 'SCAN', text: `Scan achevé : ${scanRes.length} processus vérifiés, intégrité confirmée.` });
-      } else if (action === 'bits' || action === 'bitsadmin') {
-        const bits = await nativeEngine.getBitsJobs();
-        results.push({ level: 'INFO', tag: 'BITS', text: `Audit BITS : ${bits.length} tâche(s) répertoriée(s) dans la file d'attente système.` });
-      } else if (action === 'defendersync' || action === 'defender-repair') {
-        results.push({ level: 'KERNEL', tag: 'DEFENDER', text: `Vérification du statut et des exclusions Windows Defender...` });
-        const { status } = await nativeEngine.getDefenderTelemetry();
-        results.push({ level: status.active ? 'OK' : 'WARN', tag: 'DEFENDER', text: `Protection en temps réel : ${status.active ? 'ACTIVE' : 'DÉSACTIVÉE'}. Signatures à jour.` });
-      } else if (action === 'vulnscan') {
-        results.push({ level: 'INFO', tag: 'VULN', text: `Audit des vulnérabilités KB et patchs Windows en cours...` });
-      } else if (action === 'ports') {
-        const ports = await nativeEngine.getListeningPorts();
-        results.push({ level: 'OK', tag: 'PORTS', text: `Ports d'écoute audités : ${ports.length} sockets locales actives.` });
-      } else if (action === 'sockets') {
-        const sockets = await nativeEngine.getSockets();
-        results.push({ level: 'OK', tag: 'NETWORK', text: `Audit réseau : ${sockets.length} connexions TCP/UDP actives répertoriées.` });
-      } else if (action === 'unlock') {
-        const targetPath = parts.slice(1).join(' ').replace(/^["']|["']$/g, '');
-        results.push({ level: 'KERNEL', tag: 'UNLOCK', text: `Appropriation de propriété (takeown/icacls) et purge de verrou pour : ${targetPath}` });
-        const matched = sharedState.threats.find(t => t.targetPath.toLowerCase() === targetPath.toLowerCase());
-        if (matched) {
-          applyStateMutation('UPDATE_THREAT_STATUS', { threatId: matched.id, status: 'SCHEDULED_BOOT_DELETE', targetPath: matched.targetPath }, { name: op });
+        if (action === 'scan') {
+          const isDeep = trimmed.includes('--deep');
+          results.push({ level: 'KERNEL', tag: 'SCAN', text: `Scan ${isDeep ? 'Profond (Ring0 Kernel & Persistence)' : 'Rapide'} initié par ${op}...` });
+          const scanRes = await nativeEngine.getProcesses();
+          results.push({ level: 'OK', tag: 'SCAN', text: `Scan achevé : ${scanRes.length} processus vérifiés, intégrité confirmée.` });
+        } else if (action === 'bits' || action === 'bitsadmin') {
+          const bits = await nativeEngine.getBitsJobs();
+          results.push({ level: 'INFO', tag: 'BITS', text: `Audit BITS : ${bits.length} tâche(s) répertoriée(s) dans la file d'attente système.` });
+        } else if (action === 'defendersync' || action === 'defender-repair') {
+          results.push({ level: 'KERNEL', tag: 'DEFENDER', text: `Vérification du statut et des exclusions Windows Defender...` });
+          const { status } = await nativeEngine.getDefenderTelemetry();
+          results.push({ level: status.active ? 'OK' : 'WARN', tag: 'DEFENDER', text: `Protection en temps réel : ${status.active ? 'ACTIVE' : 'DÉSACTIVÉE'}. Signatures à jour.` });
+        } else if (action === 'vulnscan') {
+          results.push({ level: 'INFO', tag: 'VULN', text: `Audit des vulnérabilités KB et patchs Windows en cours...` });
+        } else if (action === 'ports') {
+          const ports = await nativeEngine.getListeningPorts();
+          results.push({ level: 'OK', tag: 'PORTS', text: `Ports d'écoute audités : ${ports.length} sockets locales actives.` });
+        } else if (action === 'sockets') {
+          const sockets = await nativeEngine.getSockets();
+          results.push({ level: 'OK', tag: 'NETWORK', text: `Audit réseau : ${sockets.length} connexions TCP/UDP actives répertoriées.` });
+        } else if (action === 'unlock') {
+          const targetPath = parts.slice(1).join(' ').replace(/^["']|["']$/g, '');
+          results.push({ level: 'KERNEL', tag: 'UNLOCK', text: `Appropriation de propriété (takeown/icacls) et purge de verrou pour : ${targetPath}` });
+          const matched = sharedState.threats.find(t => t.targetPath.toLowerCase() === targetPath.toLowerCase());
+          if (matched) {
+            applyStateMutation('UPDATE_THREAT_STATUS', { threatId: matched.id, status: 'SCHEDULED_BOOT_DELETE', targetPath: matched.targetPath }, authenticatedOp);
+          }
+          results.push({ level: 'OK', tag: 'UNLOCK', text: `Verrou levé : suppression programmée dans PendingFileRenameOperations.` });
+        } else if (action === 'ifeo') {
+          results.push({ level: 'KERNEL', tag: 'IFEO', text: `Audit des clés Image File Execution Options (Debugger Hijacks)...` });
+          results.push({ level: 'OK', tag: 'IFEO', text: `Aucun détournement de binaire système (sethc.exe, utilman.exe) détecté.` });
+        } else if (action === 'drivers') {
+          const kernelDriver = await nativeEngine.getKernelDriverStatus();
+          results.push({ level: 'KERNEL', tag: 'DRIVERS', text: `Pilote Minifilter Ring0 : ${kernelDriver.driverName} - Statut: ${kernelDriver.installed ? 'CHARGÉ' : 'NON_INSTALLÉ'}` });
+        } else {
+          results.push({ level: 'INFO', tag: 'CONSOLE', text: `Commande "${trimmed}" traitée par le moteur de sécurité Space Security.` });
         }
-        results.push({ level: 'OK', tag: 'UNLOCK', text: `Verrou levé : suppression programmée dans PendingFileRenameOperations.` });
-      } else if (action === 'ifeo') {
-        results.push({ level: 'KERNEL', tag: 'IFEO', text: `Audit des clés Image File Execution Options (Debugger Hijacks)...` });
-        results.push({ level: 'OK', tag: 'IFEO', text: `Aucun détournement de binaire système (sethc.exe, utilman.exe) détecté.` });
-      } else if (action === 'drivers') {
-        const kernelDriver = await nativeEngine.getKernelDriverStatus();
-        results.push({ level: 'KERNEL', tag: 'DRIVERS', text: `Pilote Minifilter Ring0 : ${kernelDriver.driverName} - Statut: ${kernelDriver.installed ? 'CHARGÉ' : 'NON_INSTALLÉ'}` });
-      } else {
-        results.push({ level: 'INFO', tag: 'CONSOLE', text: `Commande "${trimmed}" traitée par le moteur de sécurité Space Security.` });
-      }
 
-      for (const resItem of results) {
-        const logEntry = {
-          id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-          timestamp: new Date().toLocaleTimeString('fr-FR'),
-          level: resItem.level,
-          tag: resItem.tag,
-          text: resItem.text,
-          operatorName: op,
-        };
-        applyStateMutation('ADD_LOG', logEntry, { name: op });
-      }
+        for (const resItem of results) {
+          const logEntry = {
+            id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+            timestamp: new Date().toLocaleTimeString('fr-FR'),
+            level: resItem.level,
+            tag: resItem.tag,
+            text: resItem.text,
+            operatorName: op,
+          };
+          applyStateMutation('ADD_LOG', logEntry, authenticatedOp);
+        }
 
-      res.json({ success: true, command: trimmed, results, state: sharedState });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+        res.json({ success: true, command: trimmed, results, state: sharedState });
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+      }
     }
-  });
+  );
 
   // API 8-A: Themes Folder Malware Scanner (Rogue Explorer & ICSYS)
   app.get('/api/malware/themes-scan', async (req, res) => {
@@ -3324,8 +3372,9 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // API 8-B: Themes Folder Malware Cleaner (Excision pas-à-pas Claude Protocol)
-  app.post('/api/malware/themes-clean', async (req, res) => {
+  // API 8-B: Themes Folder Malware Cleaner (SECURED: requireAuth + sensitiveActionLimiter)
+  app.post('/api/malware/themes-clean', requireAuth, sensitiveActionLimiter, async (req, res) => {
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const isWin = os.platform() === 'win32';
       const stepsLog: Array<{ step: number; name: string; status: 'SUCCESS' | 'WARNING' | 'INFO'; message: string }> = [];
@@ -3482,15 +3531,17 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         return t;
       });
 
-      // Add log to shared state
+      // Add log to shared state with verified operator
       const logEntry = {
         id: `log-${Date.now()}`,
         timestamp: new Date().toLocaleTimeString('fr-FR'),
         level: 'OK' as const,
         tag: 'THEMES-EXTIRPATION',
-        text: 'Protocole d\'éradication Claude / SpaceSec terminé : Faux explorer.exe & icsys.icn.exe éradiqués avec succès de C:\\Windows\\Resources\\Themes.',
+        text: `Protocole d'éradication exécuté par ${authenticatedOp.name} : Faux explorer.exe & icsys.icn.exe éradiqués avec succès de C:\\Windows\\Resources\\Themes.`,
+        operatorName: authenticatedOp.name,
       };
-      sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+      sharedState.logs = [...sharedState.logs.slice(-199), logEntry];
+      dbManager.addAuditLog(logEntry);
       sharedState.lastModified = new Date().toISOString();
 
       broadcastToAll({
@@ -3630,7 +3681,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
-  app.post('/api/settings', validateBody(settingsUpdateSchema), (req, res) => {
+  app.post('/api/settings', requireAuth, sensitiveActionLimiter, validateBody(settingsUpdateSchema), (req, res) => {
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     const updated = dbManager.updateSettings(req.body);
     for (const [k, v] of Object.entries(req.body)) {
       firestoreSync.syncSetting(k, v);
@@ -3638,7 +3690,17 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     if (req.body.autoScanInterval) {
       backgroundScheduler.configureInterval(req.body.autoScanInterval);
     }
-    logger.info({ settings: req.body }, '[Settings] Préférences utilisateur enregistrées dans SQLite et Cloud Firestore');
+
+    dbManager.addAuditLog({
+      id: `log-settings-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString('fr-FR'),
+      level: 'INFO',
+      tag: 'SETTINGS',
+      text: `Configuration de sécurité mise à jour par ${authenticatedOp.name}.`,
+      operatorName: authenticatedOp.name,
+    });
+
+    logger.info({ settings: req.body, operator: authenticatedOp.name }, '[Settings] Préférences utilisateur enregistrées dans SQLite et Cloud Firestore');
     res.json({
       success: true,
       message: 'Préférences utilisateur enregistrées avec succès.',
@@ -3933,8 +3995,9 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 6. Create Remote Remediation Command
-  app.post('/api/edr/commands', validateBody(edrCommandCreateSchema), (req, res) => {
+  // 6. Create Remote Remediation Command (SECURED: requireAuth + sensitiveActionLimiter)
+  app.post('/api/edr/commands', requireAuth, sensitiveActionLimiter, validateBody(edrCommandCreateSchema), (req, res) => {
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const { endpointId, type, payload } = req.body;
       const endpoint = dbManager.getEndpoint(endpointId);
@@ -3954,8 +4017,8 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         timestamp: new Date().toLocaleTimeString('fr-FR'),
         level: 'WARN',
         tag: 'EDR-COMMAND',
-        text: `Ordre de remédiation EDR [${type}] envoyé à distance vers ${endpoint.hostname} (ID: ${cmd.id}).`,
-        operatorName: 'Analyste SOC',
+        text: `Ordre de remédiation EDR [${type}] envoyé à distance vers ${endpoint.hostname} (ID: ${cmd.id}) par ${authenticatedOp.name}.`,
+        operatorName: authenticatedOp.name,
       });
 
       broadcastToAll({
@@ -4001,8 +4064,9 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 8. Toggle Host Network Isolation
-  app.post('/api/edr/endpoints/:id/isolate', (req, res) => {
+  // 8. Toggle Host Network Isolation (SECURED: requireAuth + sensitiveActionLimiter)
+  app.post('/api/edr/endpoints/:id/isolate', requireAuth, sensitiveActionLimiter, (req, res) => {
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
       const endpoint = dbManager.getEndpoint(req.params.id);
       if (!endpoint) {
@@ -4016,7 +4080,7 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         endpointId: endpoint.id,
         hostname: endpoint.hostname,
         type: cmdType,
-        payload: { reason: shouldIsolate ? 'Confinement d\'urgence déclenché par le SOC' : 'Levée de l\'isolation réseau' },
+        payload: { reason: shouldIsolate ? `Confinement d'urgence déclenché par ${authenticatedOp.name}` : `Levée de l'isolation réseau par ${authenticatedOp.name}` },
       });
 
       const updated = dbManager.saveEndpoint({
@@ -4024,6 +4088,17 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
         networkIsolated: shouldIsolate,
       });
       firestoreSync.syncEdrEndpoint(updated);
+
+      dbManager.addAuditLog({
+        id: `log-edr-isolate-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'WARN',
+        tag: 'EDR-ISOLATION',
+        text: shouldIsolate
+          ? `Isolement réseau de ${endpoint.hostname} ordonné par ${authenticatedOp.name}.`
+          : `Rétablissement réseau de ${endpoint.hostname} ordonné par ${authenticatedOp.name}.`,
+        operatorName: authenticatedOp.name,
+      });
 
       res.json({
         success: true,
@@ -4036,11 +4111,24 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     }
   });
 
-  // 9. Decommission Endpoint
-  app.delete('/api/edr/endpoints/:id', (req, res) => {
+  // 9. Decommission Endpoint (SECURED: requireAuth + sensitiveActionLimiter)
+  app.delete('/api/edr/endpoints/:id', requireAuth, sensitiveActionLimiter, (req, res) => {
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
     try {
+      const endpoint = dbManager.getEndpoint(req.params.id);
+      const host = endpoint ? endpoint.hostname : req.params.id;
       dbManager.deleteEndpoint(req.params.id);
       firestoreSync.deleteEdrEndpoint(req.params.id);
+
+      dbManager.addAuditLog({
+        id: `log-edr-del-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'WARN',
+        tag: 'EDR-FLEET',
+        text: `Endpoint ${host} décommissionné de la flotte EDR par ${authenticatedOp.name}.`,
+        operatorName: authenticatedOp.name,
+      });
+
       broadcastToAll({
         type: 'EDR_ENDPOINT_DELETED',
         endpointId: req.params.id,
@@ -4083,8 +4171,10 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
     });
   });
 
-  // 6. Structured Forensic Log File Export
-  app.get('/api/logs/download', (req, res) => {
+  // 6. Structured Forensic Log File Export (SECURED: requireAuth + sensitiveActionLimiter)
+  app.get('/api/logs/download', requireAuth, sensitiveActionLimiter, (req, res) => {
+    const authenticatedOp = (req as any).authenticatedOperator || resolveAuthenticatedOperator(req);
+    logger.info({ operator: authenticatedOp.name, ip: req.ip }, '[ForensicAudit] Téléchargement du journal forensique autorisé');
     const logFile = getLogFilePath();
     if (fs.existsSync(logFile)) {
       res.download(logFile, 'spacesec-forensic-audit.log');
@@ -4187,18 +4277,26 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       try {
         const msg = JSON.parse(data.toString());
         if (msg.type === 'MUTATE') {
-          const { action, payload } = msg;
-          const allowed = [
-            'UPDATE_THREAT_STATUS', 'ADD_LOG', 'BLOCK_IP', 'UNBLOCK_IP',
-            'BLOCK_WIFI_BSSID', 'BULK_UPDATE_THREAT_STATUS', 'DISMISS_THREATS',
-            'RESTORE_THREATS', 'CLEAR_LOGS', 'RESET_THREATS',
-            'RECORD_SCANNED_THREATS', 'ADD_THREAT',
-          ];
-          if (!allowed.includes(action)) {
-            logger.warn({ action }, '[WebSocket] Action MUTATE non autorisée ignorée');
+          // Strict Zod validation of action whitelist, payload schema, and status enums
+          const validationResult = sharedMutateSchema.safeParse({
+            action: msg.action,
+            payload: msg.payload,
+          });
+
+          if (!validationResult.success) {
+            logger.warn(
+              { action: msg.action, issues: validationResult.error.issues, operator: opSession.name },
+              '[WebSocket] Message MUTATE rejeté par la validation Zod'
+            );
+            ws.send(JSON.stringify({
+              type: 'VALIDATION_ERROR',
+              error: 'Payload ou action MUTATE non conforme au schéma de sécurité Zod.',
+              issues: validationResult.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })),
+            }));
             return;
           }
-          applyStateMutation(action, payload, opSession, ws);
+
+          applyStateMutation(validationResult.data.action, validationResult.data.payload, opSession, ws);
         } else if (msg.type === 'PING') {
           ws.send(JSON.stringify({ type: 'PONG', timestamp: Date.now() }));
         }

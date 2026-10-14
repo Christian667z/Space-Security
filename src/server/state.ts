@@ -117,26 +117,35 @@ export function recordThreatsBatch(incomingThreats: any[]): number {
 }
 
 export function applyStateMutation(action: string, payload: any, operator: any, originWs?: WebSocket): void {
+  const verifiedOpName = operator?.name || 'Analyste SOC Local';
+  const verifiedOpIp = operator?.ip || '127.0.0.1';
+
   if (action === 'UPDATE_THREAT_STATUS') {
     const { threatId, status, targetPath } = payload;
     sharedState.threats = sharedState.threats.map((t) =>
       t.id === threatId || (targetPath && t.targetPath === targetPath) ? { ...t, status } : t
     );
     dbManager.updateThreatStatus(threatId, status, targetPath);
-    logger.info({ action, threatId, status, operator: operator?.name }, '[StateMutation] Menace mise à jour');
+    logger.info({ action, threatId, status, operator: verifiedOpName }, '[StateMutation] Menace mise à jour');
   } else if (action === 'ADD_LOG') {
-    sharedState.logs = [...sharedState.logs.slice(-200), payload];
-    dbManager.addAuditLog(payload);
+    // Prevent operator falsification: anchor authoritatively to verified operator
+    const securedLog = {
+      ...payload,
+      operatorName: verifiedOpName,
+      operatorIp: verifiedOpIp,
+    };
+    sharedState.logs = [...sharedState.logs.slice(-199), securedLog];
+    dbManager.addAuditLog(securedLog);
   } else if (action === 'BLOCK_IP') {
     if (!sharedState.blockedIps.includes(payload.ip)) {
       sharedState.blockedIps.push(payload.ip);
       dbManager.addBlockedEntity('IP', payload.ip, payload.reason);
-      logger.info({ ip: payload.ip, operator: operator?.name }, '[StateMutation] IP hostile bloquée');
+      logger.info({ ip: payload.ip, operator: verifiedOpName }, '[StateMutation] IP hostile bloquée');
     }
   } else if (action === 'UNBLOCK_IP') {
     sharedState.blockedIps = sharedState.blockedIps.filter((ip) => ip !== payload.ip);
     dbManager.removeBlockedEntity('IP', payload.ip);
-    logger.info({ ip: payload.ip, operator: operator?.name }, '[StateMutation] IP débloquée');
+    logger.info({ ip: payload.ip, operator: verifiedOpName }, '[StateMutation] IP débloquée');
   } else if (action === 'BLOCK_WIFI_BSSID') {
     if (!sharedState.blockedWifiBssids.includes(payload.bssid)) {
       sharedState.blockedWifiBssids.push(payload.bssid);
@@ -153,12 +162,12 @@ export function applyStateMutation(action: string, payload: any, operator: any, 
       const logEntry = {
         id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
         timestamp: new Date().toLocaleTimeString('fr-FR'),
-        level: 'OK',
-        text: `[COMMANDE-PARTAGÉE] Exécution groupée (${idSet.size} cibles) par ${operator?.name || 'Opérateur'} : "${command}" -> Statut: ${status}`,
+        level: 'OK' as const,
+        text: `[COMMANDE-PARTAGÉE] Exécution groupée (${idSet.size} cibles) par ${verifiedOpName} : "${command}" -> Statut: ${status}`,
         tag: 'BULK-OP',
-        operatorName: operator?.name,
+        operatorName: verifiedOpName,
       };
-      sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+      sharedState.logs = [...sharedState.logs.slice(-199), logEntry];
       dbManager.addAuditLog(logEntry);
     }
   } else if (action === 'DISMISS_THREATS') {
@@ -171,12 +180,12 @@ export function applyStateMutation(action: string, payload: any, operator: any, 
     const logEntry = {
       id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       timestamp: new Date().toLocaleTimeString('fr-FR'),
-      level: 'WARN',
-      text: `[REJET-MASSE] ${idSet.size} menace(s) ignorée(s)/rejetée(s) par ${operator?.name || 'Opérateur'}.`,
+      level: 'WARN' as const,
+      text: `[REJET-MASSE] ${idSet.size} menace(s) ignorée(s)/rejetée(s) par ${verifiedOpName}.`,
       tag: 'DISMISS',
-      operatorName: operator?.name,
+      operatorName: verifiedOpName,
     };
-    sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+    sharedState.logs = [...sharedState.logs.slice(-199), logEntry];
     dbManager.addAuditLog(logEntry);
   } else if (action === 'RESTORE_THREATS') {
     const { threatIds } = payload;
@@ -188,12 +197,12 @@ export function applyStateMutation(action: string, payload: any, operator: any, 
     const logEntry = {
       id: `log-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       timestamp: new Date().toLocaleTimeString('fr-FR'),
-      level: 'INFO',
-      text: `[RESTAURATION] ${idSet.size} menace(s) réactivée(s) par ${operator?.name || 'Opérateur'}.`,
+      level: 'INFO' as const,
+      text: `[RESTAURATION] ${idSet.size} menace(s) réactivée(s) par ${verifiedOpName}.`,
       tag: 'RESTORE',
-      operatorName: operator?.name,
+      operatorName: verifiedOpName,
     };
-    sharedState.logs = [...sharedState.logs.slice(-200), logEntry];
+    sharedState.logs = [...sharedState.logs.slice(-199), logEntry];
     dbManager.addAuditLog(logEntry);
   } else if (action === 'RECORD_SCANNED_THREATS') {
     const incoming: any[] = Array.isArray(payload.threats) ? payload.threats : [];
@@ -208,21 +217,42 @@ export function applyStateMutation(action: string, payload: any, operator: any, 
       }
     }
     if (addedCount > 0) {
-      logger.info({ addedCount, operator: operator?.name }, '[StateMutation] Nouvelles menaces de scan enregistrées');
+      logger.info({ addedCount, operator: verifiedOpName }, '[StateMutation] Nouvelles menaces de scan enregistrées');
     }
   } else if (action === 'ADD_THREAT') {
     const t = payload;
     if (t && t.id && !sharedState.threats.some((existing) => existing.id === t.id)) {
       sharedState.threats.push(t);
       dbManager.saveThreat(t);
-      logger.info({ threatId: t.id, operator: operator?.name }, '[StateMutation] Menace ajoutée');
+      logger.info({ threatId: t.id, operator: verifiedOpName }, '[StateMutation] Menace ajoutée');
     }
   } else if (action === 'RESET_THREATS') {
-    sharedState.threats = sharedState.threats.map((t) => ({ ...t, status: 'ACTIVE' }));
+    sharedState.threats = sharedState.threats.map((t) => ({ ...t, status: 'ACTIVE' as const }));
     dbManager.resetThreats();
+    const resetAuditLog = {
+      id: `log-reset-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString('fr-FR'),
+      level: 'WARN' as const,
+      tag: 'RESET-THREATS',
+      text: `[RÉINITIALISATION-CONTRÔLÉE] Réinitialisation de toutes les menaces au statut ACTIVE ordonnée par l'opérateur vérifié ${verifiedOpName} (${verifiedOpIp}).`,
+      operatorName: verifiedOpName,
+    };
+    sharedState.logs = [...sharedState.logs.slice(-199), resetAuditLog];
+    dbManager.addAuditLog(resetAuditLog);
+    logger.warn({ operator: verifiedOpName, ip: verifiedOpIp }, '[StateMutation] Réinitialisation des menaces consignée dans l\'audit');
   } else if (action === 'CLEAR_LOGS') {
-    sharedState.logs = [];
+    const auditPurgeLog = {
+      id: `log-audit-purge-${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString('fr-FR'),
+      level: 'CRITICAL' as const,
+      tag: 'AUDIT-PURGE',
+      text: `[PURGE FORENSIQUE CONTRÔLÉE] Effacement des journaux d'audit ordonné par l'opérateur vérifié ${verifiedOpName} (${verifiedOpIp}). Chaîne de traçabilité certifiée.`,
+      operatorName: verifiedOpName,
+    };
     dbManager.clearAuditLogs();
+    dbManager.addAuditLog(auditPurgeLog);
+    sharedState.logs = [auditPurgeLog];
+    logger.warn({ operator: verifiedOpName, ip: verifiedOpIp }, '[StateMutation] Effacement des journaux d\'audit consigné de manière indélébile');
   }
 
   sharedState.lastModified = new Date().toISOString();

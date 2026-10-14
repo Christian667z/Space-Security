@@ -170,7 +170,7 @@ networkRouter.get('/interfaces', async (req, res) => {
 });
 
 // POST /api/network/kill-switch - Execute Emergency Network Kill-Switch
-networkRouter.post('/kill-switch', async (req, res) => {
+networkRouter.post('/kill-switch', requireAuth, async (req, res) => {
   try {
     const isWin32 = os.platform() === 'win32';
     const ifaces = await getDetailedNetworkInterfaces();
@@ -238,7 +238,7 @@ networkRouter.post('/kill-switch', async (req, res) => {
 });
 
 // POST /api/network/restore - Restore Network Interfaces
-networkRouter.post('/restore', async (req, res) => {
+networkRouter.post('/restore', requireAuth, async (req, res) => {
   try {
     const toRestore = await restoreNetworkInterfacesInternal();
 

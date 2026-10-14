@@ -82,24 +82,36 @@ export interface AuthenticatedOperator {
   verified: boolean;
 }
 
-/**
- * Resolves an authenticated, server-verified operator identity.
- * Prevents client-side operator identity falsification by anchoring
- * the operator record to the verified IP, connection source, and token state.
- */
+const RESERVED_OPERATOR_NAMES = [
+  'system kernel',
+  'trustedinstaller',
+  'nt authority',
+  'system',
+  'system-monitor',
+  'soc-core',
+  'root',
+  'administrator',
+  'administrateur',
+];
+
 export function resolveAuthenticatedOperator(req: Request): AuthenticatedOperator {
   const rawIp = (req.ip || (req.socket && req.socket.remoteAddress) || '127.0.0.1').toString();
   const cleanIp = rawIp.replace(/^.*:/, '') || '127.0.0.1';
   const isLoopback = cleanIp === '1' || cleanIp === '127.0.0.1' || rawIp.includes('127.0.0.1');
 
-  // Client-suggested handle (sanitized, max 24 chars, no malicious characters)
+  // Client-suggested handle (sanitized, max 24 chars, no malicious characters or reserved system names)
   const clientSuggested =
     (typeof req.headers['x-operator-name'] === 'string' && req.headers['x-operator-name'].trim()) ||
     (req.body && req.body.operator && typeof req.body.operator.name === 'string' && req.body.operator.name.trim()) ||
     (req.body && typeof req.body.operatorName === 'string' && req.body.operatorName.trim()) ||
     '';
 
-  const sanitizedHandle = clientSuggested.replace(/[^\w\s\-#.]/gi, '').trim().slice(0, 24);
+  let sanitizedHandle = clientSuggested.replace(/[^\w\s\-#.]/gi, '').trim().slice(0, 24);
+
+  // Reject falsification of reserved system identities
+  if (sanitizedHandle && RESERVED_OPERATOR_NAMES.some((r) => sanitizedHandle.toLowerCase().includes(r))) {
+    sanitizedHandle = '';
+  }
 
   if (isLoopback) {
     return {

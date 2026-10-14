@@ -79,7 +79,7 @@ remediationRouter.get('/status', async (req, res) => {
 });
 
 // POST /api/remediation/policies/repair
-remediationRouter.post('/policies/repair', async (req, res) => {
+remediationRouter.post('/policies/repair', requireAuth, async (req, res) => {
   try {
     const isWin32 = os.platform() === 'win32';
     const results: string[] = [];
@@ -140,7 +140,7 @@ remediationRouter.post('/policies/repair', async (req, res) => {
 });
 
 // POST /api/remediation/hosts/restore
-remediationRouter.post('/hosts/restore', async (req, res) => {
+remediationRouter.post('/hosts/restore', requireAuth, async (req, res) => {
   try {
     const isWin32 = os.platform() === 'win32';
     const hostsPath = 'C:\\Windows\\System32\\drivers\\etc\\hosts';
@@ -246,7 +246,7 @@ remediationRouter.post('/quarantine/restore', requireAuth, (req, res) => {
 });
 
 // POST /api/remediation/winre
-remediationRouter.post('/winre', (req, res) => {
+remediationRouter.post('/winre', requireAuth, (req, res) => {
   res.json({
     success: true,
     commandPrepared: 'reagentc.exe /boottore && shutdown.exe /r /o /t 0',

@@ -121,7 +121,7 @@ export const sharedMutateActionEnum = z.enum(ALLOWED_MUTATE_ACTIONS, {
  */
 export const sharedMutateSchema = z.object({
   action: sharedMutateActionEnum,
-  payload: z.any({ required_error: 'Le payload est requis' }),
+  payload: z.any(),
   operator: z.object({
     id: z.string().optional(),
     name: z.string().optional(),
