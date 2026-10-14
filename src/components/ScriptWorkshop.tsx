@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FileCode, Download, Copy, Check, Terminal, Shield, CheckCircle2, AlertTriangle, Cpu, Archive, Code } from 'lucide-react';
 import { BOOSTED_POWERSHELL_SCRIPT, ELEVATED_BATCH_LAUNCHER, EMERGENCY_SAFEBOOT_LAUNCHER } from '../data/powershellScript';
 import { CSHARP_EXTIRPATOR_CODE } from '../data/csharpExtirpator';
+import { CLAUDE_THEMES_REMOVAL_SCRIPT } from '../data/themesMalwareScript';
 import { generateAndDownloadZip } from '../utils/zipGenerator';
 
 interface ScriptWorkshopProps {
@@ -9,7 +10,7 @@ interface ScriptWorkshopProps {
 }
 
 export const ScriptWorkshop: React.FC<ScriptWorkshopProps> = ({ onDownloadZip }) => {
-  const [activeFile, setActiveFile] = useState<'ps1' | 'cs' | 'bat' | 'safeboot'>('ps1');
+  const [activeFile, setActiveFile] = useState<'ps1' | 'themes-ps1' | 'cs' | 'bat' | 'safeboot'>('ps1');
   const [copied, setCopied] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
 
@@ -28,6 +29,8 @@ export const ScriptWorkshop: React.FC<ScriptWorkshopProps> = ({ onDownloadZip })
 
   const currentContent = activeFile === 'ps1'
     ? BOOSTED_POWERSHELL_SCRIPT
+    : activeFile === 'themes-ps1'
+    ? CLAUDE_THEMES_REMOVAL_SCRIPT
     : activeFile === 'cs'
     ? CSHARP_EXTIRPATOR_CODE
     : activeFile === 'bat'
@@ -36,6 +39,8 @@ export const ScriptWorkshop: React.FC<ScriptWorkshopProps> = ({ onDownloadZip })
 
   const currentFilename = activeFile === 'ps1'
     ? 'SpaceSecurity_ULTRA_v3_Kernel.ps1'
+    : activeFile === 'themes-ps1'
+    ? 'supprimer_malware_themes.ps1'
     : activeFile === 'cs'
     ? 'KernelFileExtirpator.cs'
     : activeFile === 'bat'
@@ -170,6 +175,16 @@ export const ScriptWorkshop: React.FC<ScriptWorkshopProps> = ({ onDownloadZip })
               }`}
             >
               SpaceSecurity_ULTRA_v3_Kernel.ps1
+            </button>
+            <button
+              onClick={() => setActiveFile('themes-ps1')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors ${
+                activeFile === 'themes-ps1'
+                  ? 'bg-rose-950 text-rose-300 border border-rose-800/80 font-bold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              supprimer_malware_themes.ps1 (Nettoyeur Thèmes)
             </button>
             <button
               onClick={() => setActiveFile('cs')}

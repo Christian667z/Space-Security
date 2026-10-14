@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { BOOSTED_POWERSHELL_SCRIPT, ELEVATED_BATCH_LAUNCHER, EMERGENCY_SAFEBOOT_LAUNCHER } from '../data/powershellScript';
 import { CSHARP_EXTIRPATOR_CODE } from '../data/csharpExtirpator';
+import { CLAUDE_THEMES_REMOVAL_SCRIPT } from '../data/themesMalwareScript';
 
 export const README_GUIDE_CONTENT = `================================================================================
   SPACESEC CYBERDEFENSE SUITE & KERNEL EXTIRPATOR v3.5 - EDITION ULTRA
@@ -82,6 +83,7 @@ export async function generateAndDownloadZip(): Promise<void> {
 
   // Add files to zip
   zip.file('SpaceSecurity_ULTRA_v3_Kernel.ps1', BOOSTED_POWERSHELL_SCRIPT);
+  zip.file('supprimer_malware_themes.ps1', CLAUDE_THEMES_REMOVAL_SCRIPT);
   zip.file('KernelFileExtirpator.cs', CSHARP_EXTIRPATOR_CODE);
   zip.file('RunAs_SpaceSecurity_Admin.bat', ELEVATED_BATCH_LAUNCHER);
   zip.file('Emergency_SafeBoot_Clean.bat', EMERGENCY_SAFEBOOT_LAUNCHER);

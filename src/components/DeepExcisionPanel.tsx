@@ -263,6 +263,16 @@ export const DeepExcisionPanel: React.FC<DeepExcisionPanelProps> = ({
   // Common stubborn targets presets for auditing
   const presets = [
     {
+      title: 'Faux Explorer Déguisé (Cas Réel C:\\Windows\\Resources\\Themes)',
+      path: 'C:\\Windows\\Resources\\Themes\\explorer.exe',
+      reason: 'Malware 32-bit usurpant le vrai explorateur Windows, verrouillé par TrustedInstaller et Defender CFA',
+    },
+    {
+      title: 'Watchdog ICSYS Déguisé (C:\\Windows\\Resources\\Themes)',
+      path: 'C:\\Windows\\Resources\\Themes\\icsys.icn.exe',
+      reason: 'Agent de surveillance secondaire maintenant la persistance dans le dossier Themes',
+    },
+    {
       title: 'Fichier Hosts Système (Vérification DNS)',
       path: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
       reason: 'Fichier système protégé, cible fréquente de redirections malveillantes',

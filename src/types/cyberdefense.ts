@@ -7,6 +7,7 @@ export type TabId =
   | 'console'
   | 'deep-excision'
   | 'deep-detection'
+  | 'themes-hunter'
   | 'sandbox-isolation'
   | 'forensics'
   | 'network'

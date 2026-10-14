@@ -29,6 +29,7 @@ import {
   WifiOff,
   Wrench,
   ShieldAlert,
+  Flame,
 } from 'lucide-react';
 import { TabId } from '../types/cyberdefense';
 
@@ -206,6 +207,15 @@ export const TopNav: React.FC<TopNavProps> = ({
           shortDesc: 'Déchargement de drivers rootkits, purge IFEO, TrustedInstaller & ADS cachés.',
           icon: Zap,
           tag: 'RING 0',
+          tagClass: 'text-rose-400 bg-rose-950/70 border-rose-800/50',
+        },
+        {
+          id: 'themes-hunter',
+          title: 'Chasseur Thèmes (Rogue Explorer)',
+          category: 'Cas Forensique Réel',
+          shortDesc: 'Nettoyage des faux explorer.exe & icsys dans Resources\\Themes, bypass TrustedInstaller & Defender CFA.',
+          icon: Flame,
+          tag: 'CAS RÉEL',
           tagClass: 'text-rose-400 bg-rose-950/70 border-rose-800/50',
         },
         {

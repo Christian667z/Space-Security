@@ -1382,14 +1382,121 @@ function Enter-CyberDefenseConsole {
             }
             'restore'          { Restore-QuarantineItem }
             'clear'            { Clear-Host }
+            'themes-clean'     { Invoke-ThemesMalwareExtirpation }
             'exit'             { break }
             default            { Write-Host "  Commande inconnue. Tapez 'help'." -ForegroundColor Red }
         }
     } while ($action -ne 'exit')
 }
 
+function Invoke-ThemesMalwareExtirpation {
+    Write-Logging "=== [MENU 16] ERADICATION DES MALWARES DANS C:\Windows\Resources\Themes ===" "KERNEL"
+    $targetFolder = "C:\Windows\Resources\Themes"
+    $suspectNames = @("explorer.exe", "icsys.icn.exe")
+
+    Write-Host ""
+    Write-Host "  [1/5] Analyse des executables anormaux dans $targetFolder..." -ForegroundColor Cyan
+    $foundFiles = @()
+    foreach ($name in $suspectNames) {
+        $path = Join-Path $targetFolder $name
+        if (Test-Path $path) {
+            $item = Get-Item $path -Force
+            $hashObj = Get-FileHash -Path $path -Algorithm SHA256
+            $hash = $hashObj.Hash
+            $sig = Get-AuthenticodeSignature -FilePath $path
+
+            Write-Host "  -> Fichier suspect trouve : $path" -ForegroundColor Red
+            Write-Host "     Taille : $($item.Length) octets | SHA256 : $hash" -ForegroundColor Yellow
+            Write-Host "     Signature Authenticode : $($sig.Status)" -ForegroundColor Yellow
+            Write-Host "     Lien VirusTotal : https://www.virustotal.com/gui/search/$hash" -ForegroundColor Green
+            $foundFiles += $path
+        }
+    }
+
+    if ($foundFiles.Count -eq 0) {
+        Write-Logging "Aucun executable suspect dans C:\Windows\Resources\Themes. Dossier propre !" "OK"
+        Write-Logging "Le dossier legitime aero et le vrai C:\Windows\explorer.exe sont intacts." "OK"
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  [2/5] Verification des processus actifs lances depuis ce dossier..." -ForegroundColor Cyan
+    $procs = Get-CimInstance Win32_Process | Where-Object {
+        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($targetFolder, [System.StringComparison]::OrdinalIgnoreCase)
+    }
+
+    if ($procs) {
+        foreach ($p in $procs) {
+            Write-Host "  -> Processus verrouillant : PID $($p.ProcessId) - $($p.ExecutablePath) [explorer.exe 32 bits]" -ForegroundColor Red
+        }
+    }
+
+    $confirm = Read-Host "  Voulez-vous arreter ces processus, debloquer les permissions et supprimer ces malwares ? (O/N)"
+    if ($confirm -notin @("o", "O", "oui", "Oui", "y", "Y")) {
+        Write-Host "  Operation annulee par l'utilisateur." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  [3/5] Arret des processus suspects..." -ForegroundColor Cyan
+    foreach ($p in $procs) {
+        try {
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
+            Write-Host "  [OK] Processus arrete : PID $($p.ProcessId)" -ForegroundColor Green
+        } catch {
+            Write-Host "  [!] Impossible d'arreter PID $($p.ProcessId) : $_" -ForegroundColor Red
+        }
+    }
+    Start-Sleep -Seconds 1
+
+    Write-Host ""
+    Write-Host "  [4/5] Prise de possession TrustedInstaller, ACL Administrateurs & Gestion CFA..." -ForegroundColor Cyan
+    $cfaOriginal = $null
+    try {
+        $pref = Get-MpPreference -ErrorAction SilentlyContinue
+        if ($pref -and $pref.EnableControlledFolderAccess -eq 1) {
+            $cfaOriginal = 1
+            Write-Host "  [!] Controlled Folder Access actif. Suspension temporaire..." -ForegroundColor Yellow
+            Set-MpPreference -EnableControlledFolderAccess Disabled -ErrorAction SilentlyContinue
+        }
+    } catch {}
+
+    foreach ($path in $foundFiles) {
+        try {
+            takeown /f "$path" /a | Out-Null
+            icacls "$path" /grant "*S-1-5-32-544:F" | Out-Null
+            Remove-Item -Path $path -Force -ErrorAction Stop
+            Write-Logging "Supprime avec succes : $path" "OK"
+        } catch {
+            Write-Logging "Echec suppression $path : $_" "ERROR"
+            Write-Host "  -> Si le fichier persiste, redemarrez en Mode sans echec (F8 / msconfig) pour l'eliminer." -ForegroundColor Yellow
+        }
+    }
+
+    if ($cfaOriginal -eq 1) {
+        Set-MpPreference -EnableControlledFolderAccess Enabled -ErrorAction SilentlyContinue
+        Write-Host "  [OK] Controlled Folder Access reactive nominalement." -ForegroundColor Green
+    }
+
+    Write-Host ""
+    Write-Host "  [5/5] Audit des points de persistance (Run, Taches, Services)..." -ForegroundColor Cyan
+    $runKeys = @("HKLM:\Software\Microsoft\Windows\CurrentVersion\Run", "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run")
+    foreach ($key in $runKeys) {
+        if (Test-Path $key) {
+            $props = Get-ItemProperty -Path $key
+            foreach ($prop in $props.PSObject.Properties) {
+                if ($prop.Value -is [string] -and ($prop.Value -like "*explorer.exe*" -or $prop.Value -like "*icsys*" -or $prop.Value -like "*Resources\Themes*")) {
+                    Write-Host "  [PERSISTANCE DETECTEE] $key : $($prop.Name) = $($prop.Value)" -ForegroundColor Yellow
+                }
+            }
+        }
+    }
+
+    Write-Logging "Nettoyage termine ! Verifiez que le dossier aero et le vrai explorer.exe sont toujours la." "OK"
+}
+
 # ==============================================================================
-#   BOUCLE PRINCIPALE AVEC MENUS 10 A 15 INTEGRES
+#   BOUCLE PRINCIPALE AVEC MENUS 10 A 16 INTEGRES
 # ==============================================================================
 do {
     Show-Banner
@@ -1408,13 +1515,14 @@ do {
     Write-Host "   [13] FORENSIQUE EVENEMENTS    - Force brute 4625, Logs effaces 1102, Nouveaux admins" -ForegroundColor Yellow
     Write-Host "   [14] RAPPORTS & EXPORTS       - Synthese session, Export HTML sombre, CSV, JSON" -ForegroundColor Green
     Write-Host "   [15] ISOLATEUR & BAC A SABLE  - Kill-Switch Reseau d'Urgence, Loopback 127.0.0.1" -ForegroundColor Red
+    Write-Host "   [16] CHASSEUR THEMES MALWARE  - Eradication Rogue explorer.exe & icsys dans Themes" -ForegroundColor Rose
     Write-Host "  --------------------------------------------------------------------" -ForegroundColor DarkGray
     Write-Host "   [99] NETTOYAGE MANUEL TEMP    - Nettoyage manuel (preserve les preuves d'audit)" -ForegroundColor DarkGray
     Write-Host "   [0]  QUITTER" -ForegroundColor DarkGray
     Write-Host "  ====================================================================" -ForegroundColor DarkGray
     Write-Host "  Rapport actuel : $reportPath" -ForegroundColor DarkGray
     Write-Host ""
-    $m = Read-Host "  Selectionnez une option (ex: 10, 11, 12, 13, 14, 15)"
+    $m = Read-Host "  Selectionnez une option (ex: 10, 11, 12, 13, 14, 15, 16)"
     switch ($m) {
         '1'  { Show-KernelMenu }
         '2'  { Run-AntivirusScan; Repair-WindowsDefender; Pause-Menu }
@@ -1429,6 +1537,7 @@ do {
         '13' { Invoke-ForensicInvestigation }
         '14' { Invoke-ReportGeneration }
         '15' { Show-SandboxMenu }
+        '16' { Invoke-ThemesMalwareExtirpation; Pause-Menu }
         '99' { Invoke-ManualArtifactCleanup; Pause-Menu }
         '0'  { Write-Logging "Fermeture de la suite SpaceSec. Restez vigilant !" "OK"; exit }
 

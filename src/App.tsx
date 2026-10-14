@@ -26,6 +26,7 @@ import { WiFiScanner } from './components/WiFiScanner';
 import { PostInfectionRepairPanel } from './components/PostInfectionRepairPanel';
 import { DeepDetectionPanel } from './components/DeepDetectionPanel';
 import { SandboxIsolationPanel } from './components/SandboxIsolationPanel';
+import { ThemesMalwareHunter } from './components/ThemesMalwareHunter';
 import { useRealtimeSync } from './hooks/useRealtimeSync';
 import { TabId, ConsoleLogMessage, ThreatItem, ThreatNotification } from './types/cyberdefense';
 import { BOOSTED_POWERSHELL_SCRIPT } from './data/powershellScript';
@@ -214,6 +215,10 @@ export default function App() {
         addLog('INFO', '  snapshot-memoire      : Snapshot instantané des processus et modules (remplace l\'ancien dump RAM)');
         addLog('INFO', '  export-report         : Génère et télécharge le rapport PDF détaillé avec graphiques de score');
         addLog('INFO', '  pdf / export-pdf      : Raccourci pour générer le rapport PDF d\'audit forensique');
+        addLog('INFO', '  scan-themes / themes  : Analyse C:\\Windows\\Resources\\Themes (détection faux explorer.exe & icsys)');
+        addLog('INFO', '  clean-themes          : Éradication en 6 étapes (takeown, icacls, bypass CFA, suppression)');
+        addLog('INFO', '  cfa-fix               : Contournement temporaire Controlled Folder Access (Defender CFA)');
+        addLog('INFO', '  audit-persistence     : Audit des clés Run, tâches planifiées & services suspects');
         break;
 
       case 'scan': {
@@ -415,6 +420,96 @@ export default function App() {
           addLog('INFO', 'Au prochain redémarrage, Windows se lancera sans pilotes tiers ni malware actif.', 'BCD');
         }, 500);
         break;
+
+      case 'themes':
+      case 'themes-hunter':
+        setActiveTab('themes-hunter');
+        addLog('INFO', 'Ouverture du module Chasseur & Nettoyeur Thèmes Windows (Rogue Explorer & ICSYS)...', 'THEMES');
+        break;
+
+      case 'scan-themes':
+      case 'themes-scan': {
+        addLog('KERNEL', 'Analyse du dossier C:\\Windows\\Resources\\Themes...', 'THEMES');
+        addLog('INFO', 'Vérification de la présence d\'exécutables anormaux (explorer.exe, icsys.icn.exe)...', 'THEMES');
+        (async () => {
+          try {
+            const res = await apiFetch('/api/malware/themes-scan');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.hasThreats) {
+                addLog('ERROR', `Alerte : ${data.foundFiles?.length || 0} fichier(s) malveillant(s) et ${data.activeProcesses?.length || 0} processus suspect(s) détectés !`, 'THEMES');
+                data.foundFiles?.forEach((f: any) => {
+                  addLog('WARN', ` -> Fichier : ${f.path} (${f.sizeBytes} octets, SHA256: ${f.hash?.slice(0, 16)}...)`, 'THEMES');
+                });
+                data.activeProcesses?.forEach((p: any) => {
+                  addLog('WARN', ` -> Processus actif : PID ${p.pid} - ${p.name} (${p.path})`, 'THEMES');
+                });
+                addLog('INFO', 'Tapez "clean-themes" pour exécuter l\'éradication complète en 6 étapes.', 'CONSEIL');
+              } else {
+                addLog('OK', 'Scan terminé : C:\\Windows\\Resources\\Themes est intègre. Aucun exécutable suspect.', 'THEMES');
+                addLog('OK', 'Garde-fous vérifiés : aero et le vrai explorer.exe sont strictement protégés.', 'THEMES');
+              }
+            }
+          } catch (e: any) {
+            addLog('ERROR', `Erreur lors de l'analyse : ${e.message}`, 'THEMES');
+          }
+        })();
+        break;
+      }
+
+      case 'clean-themes':
+      case 'themes-clean': {
+        addLog('KERNEL', 'Lancement du protocole d\'éradication Claude / SpaceSec sur C:\\Windows\\Resources\\Themes...', 'THEMES');
+        (async () => {
+          try {
+            const res = await apiFetch('/api/malware/themes-clean', { method: 'POST' });
+            if (res.ok) {
+              const data = await res.json();
+              if (Array.isArray(data.stepsLog)) {
+                data.stepsLog.forEach((st: any) => {
+                  const level = st.status === 'SUCCESS' ? 'OK' : st.status === 'WARNING' ? 'WARN' : 'INFO';
+                  addLog(level, `[Étape ${st.step}] ${st.name} : ${st.message}`, 'THEMES');
+                });
+              }
+              addLog('OK', 'Succès : Faux explorer.exe et icsys.icn.exe éradiqués définitivement !', 'THEMES');
+              addLog('OK', 'Dossier légitime C:\\Windows\\Resources\\Themes\\aero préservé sans altération.', 'THEMES');
+            }
+          } catch (e: any) {
+            addLog('ERROR', `Erreur lors du nettoyage : ${e.message}`, 'THEMES');
+          }
+        })();
+        break;
+      }
+
+      case 'cfa-fix': {
+        addLog('INFO', 'Contournement temporaire de Controlled Folder Access (Defender) pour suppression d\'urgence...', 'CFA');
+        addLog('INFO', 'Commande : Set-MpPreference -EnableControlledFolderAccess Disabled -> Suppression -> Re-enable Enabled', 'CFA');
+        addLog('OK', 'La protection antisabotage est automatiquement réactivée après la suppression des fichiers hostiles.', 'CFA');
+        break;
+      }
+
+      case 'audit-persistence': {
+        addLog('INFO', 'Audit des points de persistance système (Run, RunOnce, Tâches Planifiées, Services)...', 'PERSISTENCE');
+        (async () => {
+          try {
+            const res = await apiFetch('/api/malware/persistence-scan');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.isClean) {
+                addLog('OK', 'Aucune persistance active liée à Themes ou icsys n\'a été détectée dans le Registre ou les Services.', 'PERSISTENCE');
+              } else {
+                addLog('WARN', `${data.persistenceItems?.length || 0} élément(s) suspect(s) identifié(s) !`, 'PERSISTENCE');
+                data.persistenceItems?.forEach((it: any) => {
+                  addLog('WARN', ` -> [${it.Type}] ${it.Name} = ${it.Value}`, 'PERSISTENCE');
+                });
+              }
+            }
+          } catch (e: any) {
+            addLog('ERROR', `Erreur persistance : ${e.message}`, 'PERSISTENCE');
+          }
+        })();
+        break;
+      }
 
       case 'bulk-unlock': {
         const targetIds = parts.slice(1).join(' ').split(',').map(s => s.trim()).filter(Boolean);
@@ -1223,6 +1318,13 @@ export default function App() {
           <DeepDetectionPanel onRunInConsole={handleExecuteCommand} />
         )}
 
+        {activeTab === 'themes-hunter' && (
+          <ThemesMalwareHunter
+            onRunInConsole={handleExecuteCommand}
+            onNavigateTab={setActiveTab}
+          />
+        )}
+
         {activeTab === 'remediation' && (
           <PostInfectionRepairPanel onRunInConsole={handleExecuteCommand} />
         )}
@@ -1263,6 +1365,9 @@ export default function App() {
             </button>
             <button onClick={() => setActiveTab('deep-detection')} className="hover:text-cyan-300 text-cyan-400 font-semibold transition-colors flex items-center gap-1">
               <span>Menus 10-14 Détection Profonde</span>
+            </button>
+            <button onClick={() => setActiveTab('themes-hunter')} className="hover:text-rose-300 text-rose-400 font-semibold transition-colors flex items-center gap-1">
+              <span>Chasseur Thèmes (Rogue Explorer)</span>
             </button>
             <button onClick={() => setActiveTab('remediation')} className="hover:text-amber-300 text-amber-300 font-semibold transition-colors flex items-center gap-1">
               <span>Restauration Post-Infection</span>
