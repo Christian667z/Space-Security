@@ -66,6 +66,52 @@ export const threatIntelCheckSchema = z.object({
   type: z.enum(['ip', 'hash', 'domain']).optional(),
 });
 
+export const edrRegisterSchema = z.object({
+  id: z.string().max(128).optional(),
+  hostname: z.string().min(1, 'Nom d\'hôte requis').max(256),
+  ipAddress: z.string().min(1, 'Adresse IP requise').max(64),
+  publicIp: z.string().max(64).optional(),
+  macAddress: z.string().max(64).optional(),
+  osVersion: z.string().max(256).optional(),
+  agentVersion: z.string().max(64).optional(),
+  healthScore: z.number().min(0).max(100).optional(),
+});
+
+export const edrHeartbeatSchema = z.object({
+  endpointId: z.string().min(1, 'ID endpoint requis').max(128),
+  cpuUsagePercent: z.number().min(0).max(100).optional(),
+  ramUsagePercent: z.number().min(0).max(100).optional(),
+  activeThreatsCount: z.number().min(0).optional(),
+  networkIsolated: z.boolean().optional(),
+});
+
+export const edrTelemetrySchema = z.object({
+  endpointId: z.string().min(1, 'ID endpoint requis').max(128),
+  hostname: z.string().min(1, 'Nom d\'hôte requis').max(256),
+  events: z.array(z.object({
+    category: z.enum(['PROCESS', 'REGISTRY', 'NETWORK', 'SERVICE', 'BITS', 'DEFENDER', 'ANOMALY']),
+    severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']),
+    summary: z.string().min(1).max(512),
+    details: z.any().optional(),
+    mitreTechnique: z.string().max(128).optional(),
+  })).min(1).max(100),
+});
+
+export const edrCommandCreateSchema = z.object({
+  endpointId: z.string().min(1, 'ID endpoint requis').max(128),
+  type: z.enum(['KILL_PROCESS', 'ISOLATE_NETWORK', 'UNISOLATE_NETWORK', 'SCAN_DEEP', 'REPAIR_THEMES', 'RESTORE_DEFENDER', 'CUSTOM_PS']),
+  payload: z.object({
+    pid: z.number().optional(),
+    command: z.string().max(2000).optional(),
+    reason: z.string().max(500).optional(),
+  }).optional(),
+});
+
+export const edrCommandAckSchema = z.object({
+  status: z.enum(['EXECUTED', 'FAILED']),
+  result: z.string().max(4096).optional(),
+});
+
 // Middleware generators
 export function validateBody(schema: z.ZodSchema) {
   return (req: Request, res: Response, next: NextFunction) => {

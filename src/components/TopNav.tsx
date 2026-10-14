@@ -6,6 +6,7 @@ import {
   Cpu,
   Activity,
   Network,
+  Server,
   Lock,
   FileCode,
   Archive,
@@ -141,6 +142,15 @@ export const TopNav: React.FC<TopNavProps> = ({
           icon: Activity,
           tag: 'TEMPS RÉEL',
           tagClass: 'text-cyan-400 bg-cyan-950/70 border-cyan-800/50',
+        },
+        {
+          id: 'edr-fleet',
+          title: 'Flotte EDR & Agents',
+          category: 'Supervision Multi-Postes',
+          shortDesc: 'Gestion centralisée du parc de machines distantes, ingestion télémétrie & ordres EDR.',
+          icon: Server,
+          tag: 'SOC ENTERPRISE',
+          tagClass: 'text-indigo-400 bg-indigo-950/70 border-indigo-800/50',
         },
         {
           id: 'task-manager',
@@ -320,7 +330,7 @@ export const TopNav: React.FC<TopNavProps> = ({
     setSearchFilter('');
   };
 
-  // Center Zone: 4 primary navigation tabs
+  // Center Zone: 5 primary navigation tabs
   const centerTabs: Array<{
     id: TabId;
     title: string;
@@ -328,6 +338,7 @@ export const TopNav: React.FC<TopNavProps> = ({
     accentColor: string;
   }> = [
     { id: 'overview', title: 'Vue Centrale', icon: Activity, accentColor: 'text-cyan-400' },
+    { id: 'edr-fleet', title: 'Flotte EDR', icon: Server, accentColor: 'text-indigo-400' },
     { id: 'task-manager', title: 'Gestionnaire', icon: Cpu, accentColor: 'text-blue-400' },
     { id: 'console', title: 'Console', icon: Terminal, accentColor: 'text-emerald-400' },
     { id: 'ip-locator', title: 'Traceur IP', icon: Globe, accentColor: 'text-sky-400' },

@@ -39,6 +39,7 @@ const ScriptWorkshop = React.lazy(() => import('./components/ScriptWorkshop').th
 const IpLocatorPanel = React.lazy(() => import('./components/IpLocatorPanel').then(m => ({ default: m.IpLocatorPanel })));
 const PdfReportModal = React.lazy(() => import('./components/PdfReportModal').then(m => ({ default: m.PdfReportModal })));
 const CollabSyncModal = React.lazy(() => import('./components/CollabSyncModal').then(m => ({ default: m.CollabSyncModal })));
+const EdrFleetManager = React.lazy(() => import('./components/EdrFleetManager').then(m => ({ default: m.EdrFleetManager })));
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
@@ -1285,6 +1286,13 @@ export default function App() {
                 onBulkMutateThreatStatus={mutateBulkThreatStatus}
                 onMassDismissThreats={massDismissThreats}
                 onRestoreThreats={restoreThreats}
+              />
+            )}
+
+            {activeTab === 'edr-fleet' && (
+              <EdrFleetManager
+                onRunInConsole={handleExecuteCommand}
+                onAddLog={addLog}
               />
             )}
 

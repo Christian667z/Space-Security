@@ -1,5 +1,6 @@
 export type TabId = 
   | 'overview'
+  | 'edr-fleet'
   | 'task-manager'
   | 'bits'
   | 'timeline'
@@ -324,4 +325,52 @@ export interface KillSwitchStatus {
   sandboxedProcesses: SandboxProcessItem[];
   appliedCommands: string[];
 }
+
+export interface EdrEndpoint {
+  id: string;
+  hostname: string;
+  ipAddress: string;
+  publicIp?: string;
+  macAddress: string;
+  osVersion: string;
+  agentVersion: string;
+  status: 'ONLINE' | 'OFFLINE' | 'WARNING' | 'CRITICAL';
+  lastSeen: string;
+  registeredAt: string;
+  healthScore: number;
+  activeThreatsCount: number;
+  networkIsolated: boolean;
+  cpuUsagePercent: number;
+  ramUsagePercent: number;
+  pendingCommandsCount?: number;
+}
+
+export interface EdrTelemetryEvent {
+  id: string;
+  endpointId: string;
+  hostname: string;
+  timestamp: string;
+  category: 'PROCESS' | 'REGISTRY' | 'NETWORK' | 'SERVICE' | 'BITS' | 'DEFENDER' | 'ANOMALY';
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+  summary: string;
+  details?: any;
+  mitreTechnique?: string;
+}
+
+export interface EdrCommand {
+  id: string;
+  endpointId: string;
+  hostname: string;
+  type: 'KILL_PROCESS' | 'ISOLATE_NETWORK' | 'UNISOLATE_NETWORK' | 'SCAN_DEEP' | 'REPAIR_THEMES' | 'RESTORE_DEFENDER' | 'CUSTOM_PS';
+  payload?: {
+    pid?: number;
+    command?: string;
+    reason?: string;
+  };
+  status: 'PENDING' | 'EXECUTED' | 'FAILED';
+  createdAt: string;
+  executedAt?: string;
+  result?: string;
+}
+
 

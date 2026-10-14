@@ -21,9 +21,15 @@ import {
   dismissThreatsSchema,
   settingsUpdateSchema,
   threatIntelCheckSchema,
+  edrRegisterSchema,
+  edrHeartbeatSchema,
+  edrTelemetrySchema,
+  edrCommandCreateSchema,
+  edrCommandAckSchema,
   validateBody,
   validateQuery,
 } from './src/server/validators.ts';
+import { generateEdrAgentPowerShell } from './src/data/edrAgentScript.ts';
 import { requireAuth, getLocalAuthToken, validateWebSocketConnection, corsAndCsrfProtection } from './src/server/auth.ts';
 import { checkHashReputation, checkIpReputation } from './src/server/threatIntel.ts';
 import { backgroundScheduler } from './src/server/scheduler.ts';
@@ -3641,6 +3647,350 @@ Indique clairement que la géolocalisation IP est au niveau de la ville/POP et n
       updateAvailable: false,
       releaseNotes: 'Version actuelle à jour. Aucune mise à jour critique en attente.',
       downloadUrl: 'https://github.com/Christian667z/Space-Security/releases',
+    });
+  });
+
+  // =========================================================================
+  // EDR CLIENT/SERVER & REMOTE AGENT INGESTION ROUTES
+  // =========================================================================
+
+  // 1. Endpoints List & Fleet Status
+  app.get('/api/edr/endpoints', (req, res) => {
+    try {
+      const endpoints = dbManager.getEndpoints();
+      const stats = dbManager.getStats();
+      res.json({
+        success: true,
+        endpoints,
+        stats,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 2. Single Endpoint Detail, Telemetry History & Commands
+  app.get('/api/edr/endpoints/:id', (req, res) => {
+    try {
+      const endpoint = dbManager.getEndpoint(req.params.id);
+      if (!endpoint) {
+        return res.status(404).json({ success: false, error: 'Endpoint EDR non trouvé.' });
+      }
+      const events = dbManager.getEdrEvents(req.params.id, 100);
+      const commands = dbManager.getEdrCommands(req.params.id, 50);
+      res.json({
+        success: true,
+        endpoint,
+        events,
+        commands,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 3. EDR Agent Registration Handshake
+  app.post('/api/edr/register', validateBody(edrRegisterSchema), (req, res) => {
+    try {
+      const forwarded = req.headers['x-forwarded-for'];
+      const callerIp = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress || '';
+      const data = req.body;
+      const endpointId = data.id || `ep-${data.hostname.toLowerCase().replace(/[^a-z0-9]/g, '')}-${Math.abs(data.hostname.split('').reduce((a: number, b: string) => ((a << 5) - a) + b.charCodeAt(0), 0))}`;
+
+      const savedEndpoint = dbManager.saveEndpoint({
+        id: endpointId,
+        hostname: data.hostname,
+        ipAddress: data.ipAddress,
+        publicIp: callerIp && callerIp !== '127.0.0.1' && callerIp !== '::1' ? callerIp : data.publicIp,
+        macAddress: data.macAddress || '00:00:00:00:00:00',
+        osVersion: data.osVersion || 'Windows',
+        agentVersion: data.agentVersion || 'v3.0.0-EDR-LIGHT',
+        status: 'ONLINE',
+        lastSeen: new Date().toISOString(),
+      });
+
+      dbManager.addAuditLog({
+        id: `log-edr-reg-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'INFO',
+        tag: 'EDR-FLEET',
+        text: `Nouvel agent EDR enregistré : ${savedEndpoint.hostname} (${savedEndpoint.ipAddress}) sous ${savedEndpoint.osVersion}.`,
+        operatorName: 'EDR Ingestion Gateway',
+      });
+
+      broadcastToAll({
+        type: 'EDR_ENDPOINT_REGISTERED',
+        endpoint: savedEndpoint,
+        timestamp: new Date().toISOString(),
+      });
+
+      logger.info({ endpointId, hostname: data.hostname }, '[EDR Gateway] Agent Windows enregistré avec succès');
+      res.json({
+        success: true,
+        message: 'Endpoint enregistré avec succès.',
+        endpoint: savedEndpoint,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 4. EDR Agent Heartbeat (Keepalive + Command Pulling)
+  app.post('/api/edr/heartbeat', validateBody(edrHeartbeatSchema), (req, res) => {
+    try {
+      const { endpointId, cpuUsagePercent, ramUsagePercent, activeThreatsCount, networkIsolated } = req.body;
+      const existing = dbManager.getEndpoint(endpointId);
+      if (existing) {
+        dbManager.saveEndpoint({
+          ...existing,
+          lastSeen: new Date().toISOString(),
+          status: (activeThreatsCount && activeThreatsCount > 0) ? (existing.healthScore < 50 ? 'CRITICAL' : 'WARNING') : 'ONLINE',
+          cpuUsagePercent: cpuUsagePercent !== undefined ? cpuUsagePercent : existing.cpuUsagePercent,
+          ramUsagePercent: ramUsagePercent !== undefined ? ramUsagePercent : existing.ramUsagePercent,
+          activeThreatsCount: activeThreatsCount !== undefined ? activeThreatsCount : existing.activeThreatsCount,
+          networkIsolated: networkIsolated !== undefined ? networkIsolated : existing.networkIsolated,
+        });
+      }
+
+      // Check for pending remediation commands
+      const pendingCommands = dbManager.getPendingCommands(endpointId);
+
+      res.json({
+        success: true,
+        timestamp: new Date().toISOString(),
+        pendingCommands,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 5. Ingestion of Real-time EDR Telemetry Events
+  app.post('/api/edr/telemetry', validateBody(edrTelemetrySchema), (req, res) => {
+    try {
+      const { endpointId, hostname, events } = req.body;
+      const savedEvents = [];
+
+      for (const evt of events) {
+        const saved = dbManager.addEdrEvent({
+          endpointId,
+          hostname,
+          category: evt.category,
+          severity: evt.severity,
+          summary: evt.summary,
+          details: evt.details,
+          mitreTechnique: evt.mitreTechnique,
+        });
+        savedEvents.push(saved);
+
+        // If high or critical severity, escalate to SOC shared threats pool
+        if (evt.severity === 'CRITICAL' || evt.severity === 'HIGH') {
+          const threatId = `threat-edr-${endpointId}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const threatItem = {
+            id: threatId,
+            name: `[EDR ${hostname}] ${evt.summary.slice(0, 100)}`,
+            category: evt.category === 'NETWORK' ? 'C2' : evt.category === 'REGISTRY' ? 'Persistence' : 'Trojan',
+            severity: evt.severity,
+            targetPath: `${hostname} -> ${evt.details?.path || evt.details?.target || evt.summary}`,
+            mitreTechnique: evt.mitreTechnique || 'T1059 - Command and Scripting Interpreter',
+            lockedBySystem: false,
+            trustedInstallerLocked: false,
+            description: `Alerte EDR distante reçue de ${hostname} (${endpointId}) : ${evt.summary}`,
+            status: 'ACTIVE' as const,
+            detectedAt: new Date().toISOString(),
+          };
+
+          recordThreatInternal(threatItem);
+
+          dbManager.addAuditLog({
+            id: `log-edr-alert-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString('fr-FR'),
+            level: evt.severity === 'CRITICAL' ? 'CRITICAL' : 'WARN',
+            tag: `EDR-${evt.category}`,
+            text: `[${hostname}] ALERTE TÉLÉMÉTRIE : ${evt.summary}`,
+            operatorName: `Agent ${hostname}`,
+          });
+        }
+      }
+
+      // Update endpoint health and status
+      const ep = dbManager.getEndpoint(endpointId);
+      if (ep) {
+        const hasCritical = events.some((e: any) => e.severity === 'CRITICAL');
+        const hasHigh = events.some((e: any) => e.severity === 'HIGH');
+        const newScore = Math.max(10, ep.healthScore - (hasCritical ? 25 : hasHigh ? 15 : 0));
+        dbManager.saveEndpoint({
+          ...ep,
+          status: hasCritical ? 'CRITICAL' : hasHigh ? 'WARNING' : ep.status,
+          healthScore: newScore,
+          activeThreatsCount: ep.activeThreatsCount + (hasCritical || hasHigh ? 1 : 0),
+          lastSeen: new Date().toISOString(),
+        });
+      }
+
+      broadcastToAll({
+        type: 'EDR_TELEMETRY_INGESTED',
+        endpointId,
+        hostname,
+        events: savedEvents,
+      });
+
+      res.json({
+        success: true,
+        ingestedCount: savedEvents.length,
+        message: 'Télémétrie EDR ingérée et traitée avec succès.',
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 6. Create Remote Remediation Command
+  app.post('/api/edr/commands', validateBody(edrCommandCreateSchema), (req, res) => {
+    try {
+      const { endpointId, type, payload } = req.body;
+      const endpoint = dbManager.getEndpoint(endpointId);
+      if (!endpoint) {
+        return res.status(404).json({ success: false, error: 'Endpoint cible introuvable.' });
+      }
+
+      const cmd = dbManager.createEdrCommand({
+        endpointId,
+        hostname: endpoint.hostname,
+        type,
+        payload,
+      });
+
+      dbManager.addAuditLog({
+        id: `log-cmd-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: 'WARN',
+        tag: 'EDR-COMMAND',
+        text: `Ordre de remédiation EDR [${type}] envoyé à distance vers ${endpoint.hostname} (ID: ${cmd.id}).`,
+        operatorName: 'Analyste SOC',
+      });
+
+      broadcastToAll({
+        type: 'EDR_COMMAND_CREATED',
+        command: cmd,
+      });
+
+      res.json({
+        success: true,
+        message: 'Ordre de remédiation enregistré avec succès. Il sera exécuté au prochain heartbeat de l\'agent.',
+        command: cmd,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 7. Acknowledge Command Execution by Agent
+  app.post('/api/edr/commands/:id/ack', validateBody(edrCommandAckSchema), (req, res) => {
+    try {
+      const { status, result } = req.body;
+      dbManager.updateEdrCommand(req.params.id, status, result);
+
+      dbManager.addAuditLog({
+        id: `log-ack-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('fr-FR'),
+        level: status === 'EXECUTED' ? 'OK' : 'ERROR',
+        tag: 'EDR-ACK',
+        text: `Acquittement reçu pour la commande EDR ${req.params.id} : ${status}. Résultat : ${result || 'Terminé sans retour spécifique.'}`,
+        operatorName: 'Agent EDR Distant',
+      });
+
+      broadcastToAll({
+        type: 'EDR_COMMAND_ACK',
+        commandId: req.params.id,
+        status,
+        result,
+      });
+
+      res.json({ success: true, message: 'Acquittement enregistré avec succès.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 8. Toggle Host Network Isolation
+  app.post('/api/edr/endpoints/:id/isolate', (req, res) => {
+    try {
+      const endpoint = dbManager.getEndpoint(req.params.id);
+      if (!endpoint) {
+        return res.status(404).json({ success: false, error: 'Endpoint introuvable.' });
+      }
+
+      const shouldIsolate = !endpoint.networkIsolated;
+      const cmdType = shouldIsolate ? 'ISOLATE_NETWORK' : 'UNISOLATE_NETWORK';
+
+      const cmd = dbManager.createEdrCommand({
+        endpointId: endpoint.id,
+        hostname: endpoint.hostname,
+        type: cmdType,
+        payload: { reason: shouldIsolate ? 'Confinement d\'urgence déclenché par le SOC' : 'Levée de l\'isolation réseau' },
+      });
+
+      dbManager.saveEndpoint({
+        ...endpoint,
+        networkIsolated: shouldIsolate,
+      });
+
+      res.json({
+        success: true,
+        message: shouldIsolate ? `Ordre d'isolation réseau envoyé à ${endpoint.hostname}.` : `Ordre de rétablissement réseau envoyé à ${endpoint.hostname}.`,
+        command: cmd,
+        isolated: shouldIsolate,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 9. Decommission Endpoint
+  app.delete('/api/edr/endpoints/:id', (req, res) => {
+    try {
+      dbManager.deleteEndpoint(req.params.id);
+      broadcastToAll({
+        type: 'EDR_ENDPOINT_DELETED',
+        endpointId: req.params.id,
+      });
+      res.json({ success: true, message: 'Endpoint décommissionné de la flotte EDR.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 10. Generate / Download EDR Agent PowerShell Script
+  app.get('/api/edr/agent-script', (req, res) => {
+    const host = req.headers.host || `localhost:${PORT}`;
+    const protocol = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+    const fullServerUrl = `${protocol}://${host}`;
+    const token = getLocalAuthToken();
+    const script = generateEdrAgentPowerShell(fullServerUrl, token);
+
+    if (req.query.download === 'true') {
+      res.setHeader('Content-Disposition', 'attachment; filename="SpaceSec-Agent.ps1"');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.send(script);
+    }
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(script);
+  });
+
+  // 11. Quick Deployment One-Liner Command
+  app.get('/api/edr/oneliner', (req, res) => {
+    const host = req.headers.host || `localhost:${PORT}`;
+    const protocol = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+    const fullServerUrl = `${protocol}://${host}`;
+    const oneLiner = `powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "irm ${fullServerUrl}/api/edr/agent-script | iex"`;
+    res.json({
+      success: true,
+      serverUrl: fullServerUrl,
+      oneLiner,
+      instructions: "Exécutez cette commande dans une fenêtre PowerShell Administrateur sur le poste Windows cible pour connecter immédiatement la machine au SOC Space Security.",
     });
   });
 
